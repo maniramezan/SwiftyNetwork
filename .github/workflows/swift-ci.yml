@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Run tests with code coverage
+        run: swift test --enable-code-coverage -v
+
+      - name: Generate lcov coverage report
+        run: |
+          set -e
+          PACKAGE_TESTS_XCTEST=".build/debug/SwiftyNetworkPackageTests.xctest"
+          if [ -d "$PACKAGE_TESTS_XCTEST" ]; then
+            xcrun llvm-cov export -format="lcov" "$PACKAGE_TESTS_XCTEST/Contents/MacOS/SwiftyNetworkPackageTests" -instr-profile .build/debug/codecov/default.profdata > coverage.lcov || true
+            echo "Generated coverage.lcov"
+            ls -l coverage.lcov || true
+          else
+            echo "Error: XCTest bundle not found at $PACKAGE_TESTS_XCTEST"
+            ls -la .build/debug || true
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.lcov
+          flags: unittests
+          verbose: true
+          use_oidc: true
+        env:
+          # For private repos you can still provide CODECOV_TOKEN as a secret.
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -1,0 +1,34 @@
+name: "Build and publish DocC documentation"
+
+on:
+  push:
+    branches: [ 'main', 'master' ]
+    paths:
+      - 'Sources/**'
+      - 'Package.swift'
+      - 'README.md'
+
+jobs:
+  docc:
+    name: Build DocC and publish
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Swift and Xcode
+        run: |
+          swift --version || true
+          xcodebuild -version || true
+
+      - name: Generate DocC documentation
+        run: |
+          # Generate static documentation in `docs/` using Swift Package DocC support
+          swift package --allow-writing-to-directory docs generate-documentation --target SwiftyNetwork --transform-for-static-hosting
+
+      - name: Publish to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./docs
