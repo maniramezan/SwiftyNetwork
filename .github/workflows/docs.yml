@@ -1,0 +1,55 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  docs-build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Generate DocC documentation
+        run: |
+          # Build documentation using xcodebuild and docc
+          xcodebuild docbuild -scheme SwiftyNetwork \
+            -derivedDataPath /tmp/docbuild \
+            -destination 'generic/platform=macOS'
+
+          # Process DocC archive for static hosting
+          $(xcrun --find docc) process-archive \
+            transform-for-static-hosting /tmp/docbuild/Build/Products/Debug/SwiftyNetwork.doccarchive \
+            --output-path /tmp/docc-site \
+            --hosting-base-path SwiftyNetwork
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/docc-site
+
+  docs-deploy:
+    needs: docs-build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
