@@ -1,5 +1,11 @@
 # SwiftyNetwork
 
+[![CI](https://github.com/maniramezan/SwiftyNetwork/workflows/CI/badge.svg)](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/swift-ci.yml)
+[![codecov](https://codecov.io/gh/maniramezan/SwiftyNetwork/branch/main/graph/badge.svg)](https://codecov.io/gh/maniramezan/SwiftyNetwork)
+[![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/platform-iOS%2015.0%2B%20%7C%20macOS%2015.0%2B-lightgrey.svg)](https://developer.apple.com)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A modern, Swift-native networking library built with Swift 6 concurrency, providing a clean and type-safe API for network operations with built-in caching, authentication, and error handling.
 
 ## Features
@@ -27,8 +33,8 @@ This project uses [swift-format](https://github.com/swiftlang/swift-format) (App
 Format code manually:
 
 ```bash
-swift format format -i -r -p Sources Tests  # Format in-place
-swift format lint -r -p Sources Tests       # Check for violations
+swift format format --in-place --recursive --parallel Sources Tests  # Format in-place
+swift format lint --recursive --parallel Sources Tests                # Check for violations
 ```
 
 Using SPM command plugins:

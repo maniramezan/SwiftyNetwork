@@ -40,6 +40,7 @@ public protocol LocalDataSource {
 /// This provides a bridge between the repository pattern and the caching system,
 /// allowing any cache implementation to be used as a local data source.
 public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
+    /// The entity type managed by this data source.
     public typealias Entity = E
 
     private let cache: AnyCache<E>
@@ -145,6 +146,14 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
         self.localTimestamp = { key in await localDataSource.timestamp(for: key) }
     }
 
+    /// Fetches an entity using the specified endpoint and caching strategy.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The network endpoint to fetch from.
+    ///   - cacheKey: The key to use for caching the entity.
+    ///   - policy: The cache policy determining fetch behavior.
+    /// - Returns: The fetched entity.
+    /// - Throws: `NetworkError` if the fetch fails.
     public func fetch(
         using endpoint: any NetworkEndpoint,
         cacheKey: CacheKey,

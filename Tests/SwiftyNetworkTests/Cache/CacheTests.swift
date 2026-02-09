@@ -15,6 +15,30 @@ func testCacheKeyEndpointSorting() {
     #expect(key.rawValue == "/users?a=1&b=2")
 }
 
+@Test("CacheKey endpoint without parameters")
+func testCacheKeyEndpointWithoutParams() {
+    let key = CacheKey.endpoint("/users", parameters: [:])
+    #expect(key.rawValue == "/users")
+}
+
+@Test("CacheKey conforms to Hashable")
+func testCacheKeyHashable() {
+    let key1 = CacheKey("test")
+    let key2 = CacheKey("test")
+    let key3 = CacheKey("different")
+
+    #expect(key1 == key2)
+    #expect(key1 != key3)
+
+    var set = Set<CacheKey>()
+    set.insert(key1)
+    set.insert(key2)
+    #expect(set.count == 1)
+
+    set.insert(key3)
+    #expect(set.count == 2)
+}
+
 @Test("CachePolicy decision logic")
 func testCachePolicyDecisionLogic() {
     #expect(CachePolicy.returnCacheElseLoad.shouldUseCachedData(cacheAge: 999))
@@ -173,4 +197,75 @@ private actor RecordingCache<Value: Sendable>: TimestampedCache {
         callCounts.timestamp += 1
         return storage[key]?.1
     }
+}
+
+// MARK: - Additional InMemoryCache Tests
+
+@Test("InMemoryCache removes expired entries")
+func inMemoryCacheRemovesExpired() async {
+    let cache = InMemoryCache<String>()
+    let key1 = CacheKey("old")
+    let key2 = CacheKey("new")
+
+    await cache.setValue("old-value", forKey: key1)
+    try? await Task.sleep(for: .milliseconds(100))
+    await cache.setValue("new-value", forKey: key2)
+
+    await cache.removeExpiredEntries(maxAge: 0.05)
+
+    let oldValue = await cache.value(forKey: key1)
+    let newValue = await cache.value(forKey: key2)
+
+    #expect(oldValue == nil)
+    #expect(newValue == "new-value")
+}
+
+@Test("InMemoryCache removes entries older than specified age")
+func inMemoryCacheRemovesOlderThan() async {
+    let cache = InMemoryCache<String>()
+    let key = CacheKey("test")
+
+    await cache.setValue("value", forKey: key)
+    try? await Task.sleep(for: .milliseconds(100))
+
+    await cache.removeEntries(olderThan: 0.05)
+
+    let value = await cache.value(forKey: key)
+    #expect(value == nil)
+}
+
+@Test("InMemoryCache reports count")
+func inMemoryCacheReportsCount() async {
+    let cache = InMemoryCache<String>()
+
+    #expect(await cache.count() == 0)
+
+    await cache.setValue("value1", forKey: CacheKey("key1"))
+    await cache.setValue("value2", forKey: CacheKey("key2"))
+
+    #expect(await cache.count() == 2)
+
+    await cache.removeValue(forKey: CacheKey("key1"))
+
+    #expect(await cache.count() == 1)
+}
+
+@Test("InMemoryCache with maxSize evicts LRU entries")
+func inMemoryCacheEvictsLRU() async {
+    let cache = InMemoryCache<String>(maxSize: 2)
+    let key1 = CacheKey("key1")
+    let key2 = CacheKey("key2")
+    let key3 = CacheKey("key3")
+
+    await cache.setValue("value1", forKey: key1)
+    await cache.setValue("value2", forKey: key2)
+    await cache.setValue("value3", forKey: key3)
+
+    let value1 = await cache.value(forKey: key1)
+    let value2 = await cache.value(forKey: key2)
+    let value3 = await cache.value(forKey: key3)
+
+    #expect(value1 == nil)
+    #expect(value2 == "value2")
+    #expect(value3 == "value3")
 }

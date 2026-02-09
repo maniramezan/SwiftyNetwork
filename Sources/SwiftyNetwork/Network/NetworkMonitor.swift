@@ -3,6 +3,7 @@ import Network
 
 /// An actor that monitors network path changes to provide reachability status.
 public actor NetworkMonitor {
+    /// Shared singleton instance for global network monitoring.
     public static let shared = NetworkMonitor()
 
     private let monitor: NWPathMonitor
