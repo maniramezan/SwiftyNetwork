@@ -15,37 +15,43 @@ struct TestEndpoint: NetworkEndpoint {
 }
 
 final class TestURLProtocolState: @unchecked Sendable {
-    private var _responsesById = [String: [TestURLProtocol.Response]]()
-    private var _lastRequestHeadersById = [String: [String: String]?]()
-    private let lock = DispatchQueue(label: "TestURLProtocol.state.lock")
+    private let lock = NSLock()
+    private var responsesById = [String: [TestURLProtocol.Response]]()
+    private var lastRequestHeadersById = [String: [String: String]?]()
 
     func setResponses(_ r: [TestURLProtocol.Response], for id: String) {
-        lock.sync { _responsesById[id] = r }
+        lock.lock()
+        defer { lock.unlock() }
+        responsesById[id] = r
     }
 
     func dequeueResponse(for id: String?) -> TestURLProtocol.Response? {
-        return lock.sync {
-            let key = id ?? "__default"
-            guard var arr = _responsesById[key], !arr.isEmpty else { return nil }
-            let resp = arr.removeFirst()
-            _responsesById[key] = arr
-            return resp
-        }
+        lock.lock()
+        defer { lock.unlock() }
+        let key = id ?? "__default"
+        guard var arr = responsesById[key], !arr.isEmpty else { return nil }
+        let resp = arr.removeFirst()
+        responsesById[key] = arr
+        return resp
     }
 
     func setLastRequestHeaders(_ h: [String: String]?, for id: String?) {
-        lock.sync { _lastRequestHeadersById[id ?? "__default"] = h }
+        lock.lock()
+        defer { lock.unlock() }
+        lastRequestHeadersById[id ?? "__default"] = h
     }
 
     func getLastRequestHeaders(for id: String?) -> [String: String]? {
-        return lock.sync { _lastRequestHeadersById[id ?? "__default"] ?? nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return lastRequestHeadersById[id ?? "__default"] ?? nil
     }
 
     func reset() {
-        lock.sync {
-            _responsesById.removeAll()
-            _lastRequestHeadersById.removeAll()
-        }
+        lock.lock()
+        defer { lock.unlock() }
+        responsesById.removeAll()
+        lastRequestHeadersById.removeAll()
     }
 }
 
