@@ -18,6 +18,31 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - Swift 6.0+
 - iOS 15.0+ / macOS 15.0+
 
+## Code Quality
+
+This project uses [swift-format](https://github.com/swiftlang/swift-format) (Apple's official Swift formatter) for code formatting and linting.
+
+### Local Development
+
+Format code manually:
+
+```bash
+swift format format -i -r -p Sources Tests  # Format in-place
+swift format lint -r -p Sources Tests       # Check for violations
+```
+
+Using SPM command plugins:
+
+```bash
+swift package plugin --allow-writing-to-package-directory swift-format
+swift package plugin swift-format-lint
+```
+
+### CI
+
+swift-format runs in strict mode on all PRs (warnings treated as errors).
+Configuration: `.swift-format`
+
 ## Installation
 
 ### Swift Package Manager
@@ -115,6 +140,64 @@ func createUserRepository() -> GenericRepository<User> {
     // Create and return repository
     return GenericRepository(
         networkDataSource: networkClient,
+        localDataSource: localDataSource
+    )
+}
+```
+
+### Unified APIClient Interface
+
+`NetworkClient` conforms to `APIClient`, so you can accept any implementation in higher-level code:
+
+```swift
+func fetchUser(client: APIClient, baseURL: String, userId: String) async throws -> User {
+    let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
+    return try await client.request(endpoint, responseType: User.self)
+}
+```
+
+### Layered Caching with a Custom Persistent Cache
+
+Implement `PersistentCache` in your app to define on-disk behavior, then combine it with
+the built-in in-memory cache using `LayeredCache`.
+
+```swift
+public actor UserDiskCache: PersistentCache {
+    public typealias Value = User
+    // Replace this storage with file-backed I/O in your app.
+    private var storage: [CacheKey: (User, Date)] = [:]
+
+    public init() {}
+
+    public func value(forKey key: CacheKey) async -> User? {
+        storage[key]?.0
+    }
+
+    public func setValue(_ value: User, forKey key: CacheKey) async {
+        storage[key] = (value, Date())
+    }
+
+    public func removeValue(forKey key: CacheKey) async {
+        storage.removeValue(forKey: key)
+    }
+
+    public func removeAll() async {
+        storage.removeAll()
+    }
+
+    public func timestamp(forKey key: CacheKey) async -> Date? {
+        storage[key]?.1
+    }
+}
+
+func createLayeredRepository() -> GenericRepository<User> {
+    let memoryCache = InMemoryCache<User>()
+    let diskCache = UserDiskCache()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: diskCache)
+    let localDataSource = CacheBasedLocalDataSource(cache: AnyCache(layeredCache))
+
+    return GenericRepository(
+        networkDataSource: NetworkClient.shared,
         localDataSource: localDataSource
     )
 }

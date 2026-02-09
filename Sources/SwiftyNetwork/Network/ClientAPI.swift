@@ -6,38 +6,38 @@ import Foundation
 public protocol NetworkEndpoint: Sendable {
     /// The base URL for the API (e.g., "https://api.example.com").
     var baseURL: String { get }
-    
+
     /// The specific path for this endpoint (e.g., "/users/123").
     var path: String { get }
-    
+
     /// The HTTP method to use for this request.
     var method: HTTPMethod { get }
-    
+
     /// Query parameters to append to the URL.
     var queryItems: [URLQueryItem]? { get }
-    
+
     /// Additional HTTP headers to include in the request.
     var headers: [String: String]? { get }
-    
+
     /// The authorization type for this endpoint.
     var authorization: AuthorizationType { get }
-    
+
     /// The request body data, if applicable.
     var body: Data? { get }
 }
 
 /// Default implementations for common endpoint patterns.
-public extension NetworkEndpoint {
-    var queryItems: [URLQueryItem]? { nil }
-    var headers: [String: String]? { nil }
-    var authorization: AuthorizationType { .none }
-    var body: Data? { nil }
+extension NetworkEndpoint {
+    public var queryItems: [URLQueryItem]? { nil }
+    public var headers: [String: String]? { nil }
+    public var authorization: AuthorizationType { .none }
+    public var body: Data? { nil }
 }
 
-// MARK: - Remote Data Source Protocol
+// MARK: - API Client Protocol
 
-/// Provides an abstraction for making remote network requests.
-public protocol NetworkDataSource: Sendable {
+/// Provides a unified interface for making API requests.
+public protocol APIClient: Sendable {
     /// Performs a network request to the specified endpoint and returns the decoded response.
     ///
     /// - Parameters:
@@ -46,10 +46,15 @@ public protocol NetworkDataSource: Sendable {
     /// - Returns: The decoded response of the specified type.
     /// - Throws: `NetworkError` if the request fails or response cannot be decoded.
     func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint, 
+        _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T
 }
+
+// MARK: - Remote Data Source Protocol
+
+/// Provides an abstraction for making remote network requests.
+public protocol NetworkDataSource: APIClient {}
 
 // MARK: - Network Client Configuration
 
@@ -57,22 +62,22 @@ public protocol NetworkDataSource: Sendable {
 public struct NetworkClientConfiguration: Sendable {
     /// The URL session to use for network requests.
     public var session: URLSession
-    
+
     /// The JSON decoder for parsing responses.
     public var decoder: JSONDecoder
-    
+
     /// The JSON encoder for creating request bodies.
     public var encoder: JSONEncoder
-    
+
     /// The authorization provider for handling authentication.
     public var authorizationProvider: AuthorizationProvider?
-    
+
     /// The maximum number of retry attempts for failed requests.
     public var maxRetryAttempts: Int
-    
+
     /// The timeout interval for requests.
     public var timeoutInterval: TimeInterval
-    
+
     /// The delay between retry attempts.
     public var retryDelay: TimeInterval
 
@@ -109,7 +114,7 @@ public struct NetworkClientConfiguration: Sendable {
 
 /// A thread-safe network client that handles HTTP requests with automatic retry and authorization refresh.
 public actor NetworkClient: NetworkDataSource {
-    
+
     private var configuration: NetworkClientConfiguration
     private var requestCount = 0
 
@@ -132,7 +137,7 @@ public actor NetworkClient: NetworkDataSource {
     public func updateConfiguration(_ newConfiguration: NetworkClientConfiguration) {
         self.configuration = newConfiguration
     }
-    
+
     /// Returns the current number of requests made by this client.
     public func getRequestCount() async -> Int {
         requestCount
@@ -152,27 +157,28 @@ public actor NetworkClient: NetworkDataSource {
     /// - Returns: A decoded instance of `responseType` representing the response payload.
     /// - Throws: `NetworkError` if the request fails, the response is invalid, or decoding fails.
     public func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint, 
+        _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T {
         try await performRequest(endpoint, responseType: responseType, retryCount: 0)
     }
-    
+
     // MARK: - Private Implementation
-    
+
     private func performRequest<T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type,
         retryCount: Int
     ) async throws -> T {
         requestCount += 1
+        Logger.debug("Starting request to \(endpoint.baseURL)\(endpoint.path) (attempt \(retryCount + 1))")
 
         // Build URL
         let url = try buildURL(from: endpoint)
-        
+
         // Create request
         var request = try buildURLRequest(from: endpoint, url: url)
-        
+
         // Apply authorization
         try await applyAuthorization(to: &request, from: endpoint)
 
@@ -182,14 +188,16 @@ public actor NetworkClient: NetworkDataSource {
         do {
             (data, response) = try await configuration.session.data(for: request)
         } catch let error as URLError {
+            Logger.error("URL error during request", error: error)
             throw mapURLError(error)
         } catch {
+            Logger.error("Unexpected error during request", error: error)
             throw error
         }
-        
+
         // Validate response
         let httpResponse = try validateResponse(response)
-        
+
         // Handle specific status codes
         if httpResponse.statusCode == 401 {
             return try await handleUnauthorizedResponse(
@@ -200,94 +208,102 @@ public actor NetworkClient: NetworkDataSource {
                 url: url
             )
         }
-        
+
         try validateStatusCode(httpResponse.statusCode, data: data)
-        
+
         // Decode response
         return try decodeResponse(data: data, responseType: responseType)
     }
-    
+
     private func buildURL(from endpoint: any NetworkEndpoint) throws -> URL {
         guard var urlComponents = URLComponents(string: endpoint.baseURL + endpoint.path) else {
             throw NetworkError.invalidURL(url: endpoint.baseURL + endpoint.path)
         }
-        
+
         if let queryItems = endpoint.queryItems {
             urlComponents.queryItems = queryItems
         }
-        
+
         guard let url = urlComponents.url else {
             throw NetworkError.invalidURL(url: endpoint.baseURL + endpoint.path)
         }
-        
+
         return url
     }
-    
+
     private func buildURLRequest(from endpoint: any NetworkEndpoint, url: URL) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
         request.timeoutInterval = configuration.timeoutInterval
-        
+
         // Apply headers
         endpoint.headers?.forEach { key, value in
             request.setValue(value, forHTTPHeaderField: key)
         }
-        
+
         // Apply body
         request.httpBody = endpoint.body
-        
+
         return request
     }
-    
+
     private func applyAuthorization(
-        to request: inout URLRequest, 
+        to request: inout URLRequest,
         from endpoint: any NetworkEndpoint
     ) async throws {
         var authType = endpoint.authorization
-        
+
         // Use provider's authorization if endpoint doesn't specify one
         if case .none = authType, let provider = configuration.authorizationProvider {
             authType = await provider.currentAuthorization()
         }
-        
+
         authType.apply(to: &request)
     }
-    
+
     private func validateResponse(_ response: URLResponse) throws -> HTTPURLResponse {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
         return httpResponse
     }
-    
+
     private func validateStatusCode(_ statusCode: Int, data: Data) throws {
         switch statusCode {
         case 200..<300:
-            break // Success
+            Logger.debug("Request successful with status \(statusCode)")
         case 401:
+            Logger.warning("Unauthorized request (401)")
             throw NetworkError.unauthorized
         case 403:
+            Logger.warning("Forbidden request (403)")
             throw NetworkError.forbidden
         case 404:
+            Logger.warning("Resource not found (404)")
             throw NetworkError.notFound
         case 408:
+            Logger.warning("Request timeout (408)")
             throw NetworkError.timeout
         default:
+            Logger.error("Server error with status \(statusCode)")
             throw NetworkError.serverError(statusCode: statusCode, data: data)
         }
     }
-    
+
     private func decodeResponse<T: Decodable & Sendable>(
-        data: Data, 
+        data: Data,
         responseType: T.Type
     ) throws -> T {
         do {
-            return try configuration.decoder.decode(T.self, from: data)
+            let decoded = try configuration.decoder.decode(T.self, from: data)
+            Logger.debug("Successfully decoded response as \(T.self)")
+            return decoded
         } catch {
+            Logger.error("Failed to decode response", error: error)
             throw NetworkError.decodingFailed(underlying: error)
         }
     }
-    
+
     private func handleUnauthorizedResponse<T: Decodable & Sendable>(
         endpoint: any NetworkEndpoint,
         responseType: T.Type,
@@ -296,20 +312,25 @@ public actor NetworkClient: NetworkDataSource {
         url: URL
     ) async throws -> T {
         guard let provider = configuration.authorizationProvider,
-              retryCount < configuration.maxRetryAttempts else {
+            retryCount < configuration.maxRetryAttempts
+        else {
+            Logger.warning("Cannot refresh authorization - no provider or max retries reached")
             throw NetworkError.unauthorized
         }
-        
+
         // Attempt to refresh authorization
+        Logger.info("Attempting to refresh authorization")
         let refreshSucceeded = await provider.refreshAuthorizationIfNeeded()
         guard refreshSucceeded else {
+            Logger.error("Authorization refresh failed")
             throw NetworkError.authorizationRefreshFailed
         }
-        
+
+        Logger.info("Authorization refreshed successfully, retrying request")
         // Retry the request with new authorization
         return try await performRequest(endpoint, responseType: responseType, retryCount: retryCount + 1)
     }
-    
+
     private func mapURLError(_ error: URLError) -> NetworkError {
         switch error.code {
         case .notConnectedToInternet:
@@ -321,4 +342,3 @@ public actor NetworkClient: NetworkDataSource {
         }
     }
 }
-

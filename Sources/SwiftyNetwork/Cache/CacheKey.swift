@@ -16,14 +16,14 @@ public struct CacheKey: Hashable, Sendable {
     public init(_ rawValue: String) {
         self.rawValue = rawValue
     }
-    
+
     /// Creates a cache key from a URL, using its absolute string representation.
     ///
     /// - Parameter url: The URL to create a cache key from.
     public init(url: URL) {
         self.rawValue = url.absoluteString
     }
-    
+
     /// Creates a cache key by combining multiple components with a separator.
     ///
     /// - Parameters:
@@ -36,24 +36,24 @@ public struct CacheKey: Hashable, Sendable {
 
 // MARK: - Convenience Extensions
 
-public extension CacheKey {
+extension CacheKey {
     /// Creates a cache key for user-specific data.
     ///
     /// - Parameters:
     ///   - userId: The user identifier.
     ///   - resource: The resource identifier.
     /// - Returns: A cache key formatted as "user:{userId}:{resource}".
-    static func user(_ userId: String, resource: String) -> CacheKey {
+    public static func user(_ userId: String, resource: String) -> CacheKey {
         CacheKey(components: ["user", userId, resource])
     }
-    
+
     /// Creates a cache key for API endpoint data.
     ///
     /// - Parameters:
     ///   - endpoint: The endpoint path.
     ///   - parameters: Additional parameters to include in the key.
     /// - Returns: A cache key for the API endpoint.
-    static func endpoint(_ endpoint: String, parameters: [String: String] = [:]) -> CacheKey {
+    public static func endpoint(_ endpoint: String, parameters: [String: String] = [:]) -> CacheKey {
         let sortedParams = parameters.sorted { $0.key < $1.key }
         let paramString = sortedParams.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
         let fullKey = paramString.isEmpty ? endpoint : "\(endpoint)?\(paramString)"

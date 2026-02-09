@@ -1,4 +1,6 @@
+import Foundation
 import Testing
+
 @testable import SwiftyNetwork
 
 @Test("Endpoint builds URLRequest - basic")
@@ -8,7 +10,7 @@ func testEndpointBasic() throws {
         var path: String { "/v1/items" }
         var method: HTTPMethod { .get }
         var queryItems: [URLQueryItem]? { nil }
-        var headers: [String : String]? { nil }
+        var headers: [String: String]? { nil }
         var authorization: AuthorizationType { .none }
         var body: Data? { nil }
     }
@@ -18,15 +20,16 @@ func testEndpointBasic() throws {
     #expect(req.httpMethod == "GET")
 }
 
-
 @Test("Endpoint includes query items")
 func testEndpointQueryItems() throws {
     struct E: Endpoint {
         let baseURL = "https://api.test.com"
         var path: String { "/search" }
         var method: HTTPMethod { .get }
-        var queryItems: [URLQueryItem]? { [URLQueryItem(name: "q", value: "swift"), URLQueryItem(name: "lang", value: "en")] }
-        var headers: [String : String]? { nil }
+        var queryItems: [URLQueryItem]? {
+            [URLQueryItem(name: "q", value: "swift"), URLQueryItem(name: "lang", value: "en")]
+        }
+        var headers: [String: String]? { nil }
         var authorization: AuthorizationType { .none }
         var body: Data? { nil }
     }
@@ -38,7 +41,6 @@ func testEndpointQueryItems() throws {
     #expect(items.contains(where: { $0.name == "lang" && $0.value == "en" }))
 }
 
-
 @Test("Endpoint sets headers, body and authorization")
 func testEndpointHeadersBodyAuth() throws {
     struct E: Endpoint {
@@ -46,7 +48,7 @@ func testEndpointHeadersBodyAuth() throws {
         var path: String { "/upload" }
         var method: HTTPMethod { .post }
         var queryItems: [URLQueryItem]? { nil }
-        var headers: [String : String]? { ["X-Test": "value"] }
+        var headers: [String: String]? { ["X-Test": "value"] }
         var authorization: AuthorizationType { .bearer(token: "abc123") }
         var body: Data? { "hello".data(using: .utf8) }
     }
@@ -58,7 +60,6 @@ func testEndpointHeadersBodyAuth() throws {
     #expect(req.httpMethod == "POST")
 }
 
-
 @Test("Endpoint appends base path and endpoint path correctly")
 func testEndpointPathAppending() throws {
     struct E: Endpoint {
@@ -67,7 +68,7 @@ func testEndpointPathAppending() throws {
         var path: String { "/sub" }
         var method: HTTPMethod { .get }
         var queryItems: [URLQueryItem]? { nil }
-        var headers: [String : String]? { nil }
+        var headers: [String: String]? { nil }
         var authorization: AuthorizationType { .none }
         var body: Data? { nil }
     }
@@ -76,7 +77,6 @@ func testEndpointPathAppending() throws {
     #expect(req.url?.absoluteString == "https://api.test.com/base/sub")
 }
 
-
 @Test("Endpoint throws on invalid base URL")
 func testEndpointInvalidBaseURL() throws {
     struct E: Endpoint {
@@ -84,15 +84,15 @@ func testEndpointInvalidBaseURL() throws {
         var path: String { "/x" }
         var method: HTTPMethod { .get }
         var queryItems: [URLQueryItem]? { nil }
-        var headers: [String : String]? { nil }
+        var headers: [String: String]? { nil }
         var authorization: AuthorizationType { .none }
         var body: Data? { nil }
     }
 
     do {
         _ = try E().makeURLRequest()
-        #expect(false)
+        Issue.record("Expected URLError to be thrown")
     } catch is URLError {
-        #expect(true)
+        // Expected behavior
     }
 }

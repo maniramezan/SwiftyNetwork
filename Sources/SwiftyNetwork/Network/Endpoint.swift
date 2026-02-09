@@ -1,5 +1,4 @@
 import Foundation
-import SwiftyNetwork
 
 /// Describes a network endpoint with all components needed to build a URLRequest.
 public protocol Endpoint {
@@ -19,10 +18,17 @@ public protocol Endpoint {
     var body: Data? { get }
 }
 
-public extension Endpoint {
+extension Endpoint {
     /// Builds a URLRequest from the endpoint components.
-    func makeURLRequest() throws -> URLRequest {
+    public func makeURLRequest() throws -> URLRequest {
         guard var components = URLComponents(string: baseURL) else {
+            throw URLError(.badURL)
+        }
+        guard let scheme = components.scheme,
+            ["http", "https"].contains(scheme),
+            let host = components.host,
+            !host.isEmpty
+        else {
             throw URLError(.badURL)
         }
         components.path = components.path.appending(path)
