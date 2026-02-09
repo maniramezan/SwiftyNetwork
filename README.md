@@ -1,7 +1,6 @@
 # SwiftyNetwork
 
-[![CI](https://github.com/maniramezan/SwiftyNetwork/workflows/CI/badge.svg)](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/swift-ci.yml)
-[![codecov](https://codecov.io/gh/maniramezan/SwiftyNetwork/branch/main/graph/badge.svg)](https://codecov.io/gh/maniramezan/SwiftyNetwork)
+[![CI](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/build.yml/badge.svg)](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/build.yml)
 [![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/platform-iOS%2015.0%2B%20%7C%20macOS%2015.0%2B-lightgrey.svg)](https://developer.apple.com)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
