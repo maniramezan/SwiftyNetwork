@@ -412,28 +412,31 @@ let repository = GenericRepository(
 
 ## Contributing
 
-We welcome contributions! Please read our contributing guidelines and submit pull requests to our GitHub repository.
+We welcome contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) guidelines and submit pull requests to our GitHub repository.
+
+### Running Tests
+
+```bash
+# Run all tests
+swift test
+
+# Run tests with coverage
+swift test --enable-code-coverage
+
+# Generate coverage report
+xcrun llvm-cov report .build/debug/SwiftyNetworkPackageTests.xctest/Contents/MacOS/SwiftyNetworkPackageTests \
+  -instr-profile .build/debug/codecov/default.profdata
+```
+
+**Current Test Coverage**: 91% line coverage, 84% region coverage across 45 tests.
 
 ## License
 
-SwiftyNetwork is available under the MIT license. See the LICENSE file for more info.
+SwiftyNetwork is available under the MIT license. See the [LICENSE](LICENSE) file for more info.
 
 ## Support
 
-- Documentation: Full API documentation is published via GitHub Pages (CI updates the site on pushes to main).
-
-- Live docs: [https://yourorg.github.io/SwiftyNetwork](https://yourorg.github.io/SwiftyNetwork)
-
-- To regenerate docs locally (requires a recent Xcode / Swift toolchain with DocC support):
-
-    1. Open the package in Xcode and use Product → Build Documentation, or
-    2. Use the Swift package command on a supporting toolchain:
-
-    ```bash
-    swift package generate-documentation --target SwiftyNetwork --transform-for-static-hosting --output-path docs
-    ```
-
-    The generated static site will be emitted into the `docs/` directory and the repository's GitHub Actions workflow will publish it to the `gh-pages` branch.
-
-- Issues: [GitHub Issues](https://github.com/yourorg/SwiftyNetwork/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourorg/SwiftyNetwork/discussions)
+- **Documentation**: Full API documentation is published via GitHub Pages
+- **Live docs**: [https://maniramezan.github.io/SwiftyNetwork](https://maniramezan.github.io/SwiftyNetwork)
+- **Issues**: [GitHub Issues](https://github.com/maniramezan/SwiftyNetwork/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/maniramezan/SwiftyNetwork/discussions)

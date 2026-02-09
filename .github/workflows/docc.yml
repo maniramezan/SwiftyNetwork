@@ -23,8 +23,16 @@ jobs:
 
       - name: Generate DocC documentation
         run: |
-          # Generate static documentation in `docs/` using Swift Package DocC support
-          swift package --allow-writing-to-directory docs generate-documentation --target SwiftyNetwork --transform-for-static-hosting
+          # Build documentation using xcodebuild and docc
+          xcodebuild docbuild -scheme SwiftyNetwork \
+            -derivedDataPath /tmp/docbuild \
+            -destination 'generic/platform=macOS'
+          
+          # Process DocC archive for static hosting
+          $(xcrun --find docc) process-archive \
+            transform-for-static-hosting /tmp/docbuild/Build/Products/Debug/SwiftyNetwork.doccarchive \
+            --output-path docs \
+            --hosting-base-path SwiftyNetwork
 
       - name: Publish to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
