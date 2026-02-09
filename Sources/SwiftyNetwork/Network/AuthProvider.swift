@@ -8,7 +8,7 @@ public protocol AuthorizationProvider: Sendable {
     ///
     /// - Returns: The authorization type containing the current authentication credentials.
     func currentAuthorization() async -> AuthorizationType
-    
+
     /// Attempts to refresh authorization credentials if needed.
     ///
     /// This method should be called when a request receives an unauthorized response.
@@ -36,7 +36,7 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
     ///   - refreshTokenHandler: A closure that attempts to refresh the token when needed.
     ///     Should return the new access token on success, or `nil` on failure.
     public init(
-        initialAccessToken: String, 
+        initialAccessToken: String,
         refreshTokenHandler: @escaping @Sendable () async -> String?
     ) {
         self.accessToken = initialAccessToken
@@ -61,7 +61,7 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
         guard let newToken = await refreshTokenHandler() else {
             return false
         }
-        
+
         self.accessToken = newToken
         return true
     }

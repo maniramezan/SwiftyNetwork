@@ -6,28 +6,28 @@ import Foundation
 public protocol LocalDataSource {
     /// The type of entity stored by this data source.
     associatedtype Entity: Sendable
-    
+
     /// Retrieves an entity from local storage.
     ///
     /// - Parameter key: The cache key for the entity.
     /// - Returns: The entity if it exists, otherwise `nil`.
     func read(for key: CacheKey) async -> Entity?
-    
+
     /// Stores an entity in local storage.
     ///
     /// - Parameters:
     ///   - entity: The entity to store.
     ///   - key: The cache key to associate with the entity.
     func write(_ entity: Entity, for key: CacheKey) async
-    
+
     /// Removes an entity from local storage.
     ///
     /// - Parameter key: The cache key for the entity to remove.
     func remove(for key: CacheKey) async
-    
+
     /// Removes all entities from local storage.
     func removeAll() async
-    
+
     /// Returns the timestamp when the entity was last stored.
     ///
     /// - Parameter key: The cache key for the entity.
@@ -41,7 +41,7 @@ public protocol LocalDataSource {
 /// allowing any cache implementation to be used as a local data source.
 public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
     public typealias Entity = E
-    
+
     private let cache: AnyCache<E>
 
     /// Creates a cache-based local data source.
@@ -79,7 +79,7 @@ public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
     public func removeAll() async {
         await cache.removeAll()
     }
-    
+
     /// Returns the timestamp when the entity was last stored in the local cache.
     ///
     /// - Parameter key: The cache key for the entity.
@@ -98,7 +98,7 @@ public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
 public protocol Repository {
     /// The type of entity managed by this repository.
     associatedtype Entity: Sendable
-    
+
     /// Fetches an entity using the specified endpoint and caching strategy.
     ///
     /// - Parameters:
@@ -153,57 +153,57 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
         switch policy {
         case .returnCacheElseLoad:
             return try await fetchWithCacheFallback(endpoint: endpoint, cacheKey: cacheKey)
-            
+
         case .reloadIgnoringCache:
             return try await fetchFromNetworkAndCache(endpoint: endpoint, cacheKey: cacheKey)
-            
+
         case .returnCacheIfNotExpired(let maxAge):
             return try await fetchWithExpirationCheck(
-                endpoint: endpoint, 
-                cacheKey: cacheKey, 
+                endpoint: endpoint,
+                cacheKey: cacheKey,
                 maxAge: maxAge
             )
         }
     }
-    
+
     // MARK: - Private Fetch Methods
-    
+
     private func fetchWithCacheFallback(
-        endpoint: any NetworkEndpoint, 
+        endpoint: any NetworkEndpoint,
         cacheKey: CacheKey
     ) async throws -> Entity {
         if let cachedEntity = await localRead(cacheKey) {
             return cachedEntity
         }
-        
+
         return try await fetchFromNetworkAndCache(endpoint: endpoint, cacheKey: cacheKey)
     }
-    
+
     private func fetchFromNetworkAndCache(
-        endpoint: any NetworkEndpoint, 
+        endpoint: any NetworkEndpoint,
         cacheKey: CacheKey
     ) async throws -> Entity {
         let freshEntity = try await networkDataSource.request(endpoint, responseType: Entity.self)
         await localWrite(freshEntity, cacheKey)
         return freshEntity
     }
-    
+
     private func fetchWithExpirationCheck(
-        endpoint: any NetworkEndpoint, 
-        cacheKey: CacheKey, 
+        endpoint: any NetworkEndpoint,
+        cacheKey: CacheKey,
         maxAge: TimeInterval
     ) async throws -> Entity {
         if let cachedEntity = await localRead(cacheKey),
-           let timestamp = await localTimestamp(cacheKey) {
-            
+            let timestamp = await localTimestamp(cacheKey)
+        {
+
             let cacheAge = Date().timeIntervalSince(timestamp)
             let cachePolicy = CachePolicy.returnCacheIfNotExpired(maxAge: maxAge)
             if cachePolicy.shouldUseCachedData(cacheAge: cacheAge) {
                 return cachedEntity
             }
         }
-        
+
         return try await fetchFromNetworkAndCache(endpoint: endpoint, cacheKey: cacheKey)
     }
 }
-

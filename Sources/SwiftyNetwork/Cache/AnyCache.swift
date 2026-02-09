@@ -28,31 +28,31 @@ public final class AnyCache<T: Sendable>: @unchecked Sendable {
     ///
     /// - Parameter key: The cache key to lookup.
     /// - Returns: The cached value if it exists, otherwise `nil`.
-    public func value(forKey key: CacheKey) async -> T? { 
-        await _getValue(key) 
+    public func value(forKey key: CacheKey) async -> T? {
+        await _getValue(key)
     }
-    
+
     /// Stores a value in the cache for the given key.
     ///
     /// - Parameters:
     ///   - value: The value to store in the cache.
     ///   - key: The cache key to associate with the value.
-    public func setValue(_ value: T, forKey key: CacheKey) async { 
-        await _setValue(value, key) 
+    public func setValue(_ value: T, forKey key: CacheKey) async {
+        await _setValue(value, key)
     }
-    
+
     /// Removes a value from the cache for the given key.
     ///
     /// - Parameter key: The cache key to remove.
-    public func removeValue(forKey key: CacheKey) async { 
-        await _removeValue(key) 
+    public func removeValue(forKey key: CacheKey) async {
+        await _removeValue(key)
     }
-    
+
     /// Removes all values from the cache.
-    public func removeAll() async { 
-        await _removeAll() 
+    public func removeAll() async {
+        await _removeAll()
     }
-    
+
     /// Returns the timestamp when the value was last stored for the given key.
     ///
     /// - Parameter key: The cache key to inspect.
