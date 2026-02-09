@@ -17,10 +17,23 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run swift-format lint
-        run: swift format lint -r -p --strict Sources Tests
+        run: swift format lint --recursive --parallel --strict Sources Tests
+
+  build:
+    needs: format
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build package
+        run: swift build -c release
 
   test:
-    needs: format
+    needs: build
     runs-on: macos-latest
     permissions:
       contents: read

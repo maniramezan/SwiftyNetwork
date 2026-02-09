@@ -28,9 +28,16 @@ public protocol NetworkEndpoint: Sendable {
 
 /// Default implementations for common endpoint patterns.
 extension NetworkEndpoint {
+    /// Default query items (none).
     public var queryItems: [URLQueryItem]? { nil }
+
+    /// Default headers (none).
     public var headers: [String: String]? { nil }
+
+    /// Default authorization type (none).
     public var authorization: AuthorizationType { .none }
+
+    /// Default body data (none).
     public var body: Data? { nil }
 }
 
