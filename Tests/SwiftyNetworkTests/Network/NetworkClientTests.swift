@@ -3,23 +3,16 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Test("NetworkClient maps status codes to NetworkError")
-func testNetworkClientStatusCodeMapping() async throws {
-    // Minimal smoke check here; detailed tests live elsewhere.
-    // Status code mapping is tested in other specific test cases
-}
-
 @Test("NetworkClient conforms to APIClient")
 func testNetworkClientConformsToAPIClient() {
     let client: APIClient = NetworkClient.shared
     #expect(client is NetworkClient)
 }
 
-@Suite("NetworkClient Integration Tests", .serialized)
+@Suite("NetworkClient Integration Tests")
 struct NetworkClientIntegrationTests {
     @Test("NetworkClient decodes response and counts requests")
     func testNetworkClientDecodesResponseAndCountsRequests() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
@@ -41,7 +34,6 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient applies authorization provider when endpoint has none")
     func testNetworkClientAppliesAuthorizationProvider() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "token-123"),
@@ -65,7 +57,6 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient uses endpoint authorization over provider")
     func testNetworkClientUsesEndpointAuthorization() async throws {
-        TestURLProtocol.reset()
         struct AuthEndpoint: NetworkEndpoint {
             let baseURL = "https://api.test.com"
             let authorization: AuthorizationType = .basic(token: "basic-456")
@@ -94,7 +85,6 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient refreshes authorization on 401 and retries")
     func testNetworkClientRefreshesOnUnauthorized() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
@@ -104,7 +94,8 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 2
+            maxRetryAttempts: 2,
+            retryDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "4", name: "Mo", email: "mo@example.com")
@@ -130,7 +121,6 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient reports authorization refresh failure")
     func testNetworkClientRefreshFailure() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
@@ -150,21 +140,18 @@ struct NetworkClientIntegrationTests {
 
         let endpoint = makeEndpointWithTestId(testId)
 
-        do {
-            _ = try await client.request(endpoint, responseType: TestUser.self)
-            Issue.record("Expected NetworkError.authorizationRefreshFailed to be thrown")
-        } catch let error as NetworkError {
-            if case .authorizationRefreshFailed = error {
-                // Expected behavior
-            } else {
-                Issue.record("Expected authorizationRefreshFailed but got \(error)")
-            }
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .authorizationRefreshFailed = networkError
+            else { return false }
+            return true
         }
     }
 
     @Test("NetworkClient maps http status to NetworkError")
     func testNetworkClientMapsStatusToError() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
@@ -175,21 +162,18 @@ struct NetworkClientIntegrationTests {
         )
 
         let endpoint = makeEndpointWithTestId(testId)
-        do {
-            _ = try await client.request(endpoint, responseType: TestUser.self)
-            Issue.record("Expected error to be thrown")
-        } catch let error as NetworkError {
-            if case .notFound = error {
-                // Expected behavior
-            } else {
-                Issue.record("Expected notFound but got \(error)")
-            }
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .notFound = networkError
+            else { return false }
+            return true
         }
     }
 
     @Test("NetworkClient maps decoding failures")
     func testNetworkClientDecodingFailure() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
@@ -200,21 +184,18 @@ struct NetworkClientIntegrationTests {
         )
 
         let endpoint = makeEndpointWithTestId(testId)
-        do {
-            _ = try await client.request(endpoint, responseType: TestUser.self)
-            Issue.record("Expected error to be thrown")
-        } catch let error as NetworkError {
-            if case .decodingFailed = error {
-                // Expected behavior
-            } else {
-                Issue.record("Expected decodingFailed but got \(error)")
-            }
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .decodingFailed = networkError
+            else { return false }
+            return true
         }
     }
 
     @Test("NetworkClient maps URL errors")
     func testNetworkClientMapsURLError() async throws {
-        TestURLProtocol.reset()
         let session = makeTestSession()
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
@@ -225,15 +206,260 @@ struct NetworkClientIntegrationTests {
         )
 
         let endpoint = makeEndpointWithTestId(testId)
-        do {
-            _ = try await client.request(endpoint, responseType: TestUser.self)
-            Issue.record("Expected error to be thrown")
-        } catch let error as NetworkError {
-            if case .timeout = error {
-                // Expected behavior
-            } else {
-                Issue.record("Expected timeout but got \(error)")
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .timeout = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    // MARK: - Encoder Convenience Tests
+
+    @Test("NetworkClient encodes Encodable body and sends request")
+    func testNetworkClientEncodesBody() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "encode-body"
+        let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        let data = try JSONEncoder().encode(responseUser)
+        TestURLProtocol.setResponses(
+            [.success(data)],
+            for: testId
+        )
+
+        struct PostEndpoint: NetworkEndpoint {
+            let testId: String
+            let baseURL = "https://api.test.com"
+            var path: String { "/users" }
+            var method: HTTPMethod { .post }
+            var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
+        }
+
+        let bodyPayload = TestUser(id: "new", name: "New", email: "new@example.com")
+        let response = try await client.request(
+            PostEndpoint(testId: testId),
+            body: bodyPayload,
+            responseType: TestUser.self
+        )
+
+        #expect(response == responseUser)
+    }
+
+    @Test("NetworkClient throws encodingFailed for non-encodable body")
+    func testNetworkClientEncodingFailure() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+
+        struct BadBody: Encodable, Sendable {
+            func encode(to encoder: any Encoder) throws {
+                throw EncodingError.invalidValue(
+                    "bad",
+                    EncodingError.Context(codingPath: [], debugDescription: "test failure")
+                )
             }
         }
+
+        await #expect {
+            try await client.request(TestEndpoint(), body: BadBody(), responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .encodingFailed = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    // MARK: - Additional Status Code Mapping Tests
+
+    @Test("NetworkClient maps 403 to forbidden error")
+    func testNetworkClientMaps403() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "status-403"
+        TestURLProtocol.setResponses([.status(403)], for: testId)
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .forbidden = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    @Test("NetworkClient maps 408 to timeout error")
+    func testNetworkClientMaps408() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "status-408"
+        TestURLProtocol.setResponses([.status(408)], for: testId)
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .timeout = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    @Test("NetworkClient maps 500 to serverError")
+    func testNetworkClientMaps500() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "status-500"
+        TestURLProtocol.setResponses([.status(500)], for: testId)
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .serverError(let code, _) = networkError
+            else { return false }
+            return code == 500
+        }
+    }
+
+    @Test("NetworkClient maps notConnectedToInternet URL error")
+    func testNetworkClientMapsNoInternet() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "no-internet"
+        TestURLProtocol.setResponses(
+            [.failure(URLError(.notConnectedToInternet))],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .noInternetConnection = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    // MARK: - Retry Delay Tests
+
+    @Test("NetworkClient retryDelay delays before retry on 401")
+    func testNetworkClientRetryDelayOnUnauthorized() async throws {
+        let session = makeTestSession()
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "expired"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "fresh")
+        )
+        let retryDelay: TimeInterval = 0.2
+        let configuration = NetworkClientConfiguration(
+            session: session,
+            authorizationProvider: provider,
+            maxRetryAttempts: 1,
+            retryDelay: retryDelay
+        )
+        let client = NetworkClient(configuration: configuration)
+        let user = TestUser(id: "delay", name: "Delay", email: "delay@example.com")
+        let data = try JSONEncoder().encode(user)
+        let testId = "retry-delay"
+        TestURLProtocol.setResponses(
+            [.status(401), .success(data)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        let start = ContinuousClock().now
+        let response = try await client.request(endpoint, responseType: TestUser.self)
+        let elapsed = ContinuousClock().now - start
+
+        #expect(response == user)
+        // The delay should be at least retryDelay (with some tolerance)
+        #expect(elapsed >= .milliseconds(150))
+    }
+
+    @Test("NetworkClient retryDelay of zero does not add delay")
+    func testNetworkClientZeroRetryDelay() async throws {
+        let session = makeTestSession()
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "expired"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "fresh")
+        )
+        let configuration = NetworkClientConfiguration(
+            session: session,
+            authorizationProvider: provider,
+            maxRetryAttempts: 1,
+            retryDelay: 0
+        )
+        let client = NetworkClient(configuration: configuration)
+        let user = TestUser(id: "nodelay", name: "NoDelay", email: "nodelay@example.com")
+        let data = try JSONEncoder().encode(user)
+        let testId = "zero-delay"
+        TestURLProtocol.setResponses(
+            [.status(401), .success(data)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        let start = ContinuousClock().now
+        let response = try await client.request(endpoint, responseType: TestUser.self)
+        let elapsed = ContinuousClock().now - start
+
+        #expect(response == user)
+        // Should complete quickly without artificial delay
+        #expect(elapsed < .milliseconds(500))
+    }
+
+    // MARK: - Auth Retry Exhaustion
+
+    @Test("NetworkClient throws unauthorized when max retries exhausted")
+    func testNetworkClientMaxRetriesExhausted() async throws {
+        let session = makeTestSession()
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "expired"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "still-expired")
+        )
+        let configuration = NetworkClientConfiguration(
+            session: session,
+            authorizationProvider: provider,
+            maxRetryAttempts: 1,
+            retryDelay: 0
+        )
+        let client = NetworkClient(configuration: configuration)
+        let testId = "max-retries"
+        // Both responses are 401 — refresh succeeds but token still rejected
+        TestURLProtocol.setResponses(
+            [.status(401), .status(401)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .unauthorized = networkError
+            else { return false }
+            return true
+        }
+
+        // Should have attempted refresh exactly once
+        let refreshCalls = await provider.refreshCallCount
+        #expect(refreshCalls == 1)
     }
 }
