@@ -85,7 +85,7 @@ public struct NetworkClientConfiguration: Sendable {
     /// The timeout interval for requests.
     public var timeoutInterval: TimeInterval
 
-    /// The delay between retry attempts.
+    /// The delay in seconds between retry attempts. Set to `0` to retry immediately.
     public var retryDelay: TimeInterval
 
     /// Creates a new network client configuration.
@@ -168,6 +168,34 @@ public actor NetworkClient: NetworkDataSource {
         responseType: T.Type
     ) async throws -> T {
         try await performRequest(endpoint, responseType: responseType, retryCount: 0)
+    }
+
+    /// Performs a network request with an `Encodable` body, encoding it with the configured encoder.
+    ///
+    /// Use this when you want the client to handle JSON encoding of the request body using
+    /// the encoder from ``NetworkClientConfiguration``.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The endpoint describing the request to perform.
+    ///   - body: The value to encode as the request body.
+    ///   - responseType: The expected response `Decodable` type to decode from the server response.
+    /// - Returns: A decoded instance of `responseType` representing the response payload.
+    /// - Throws: `NetworkError.encodingFailed` if encoding fails, or other `NetworkError` on request failure.
+    public func request<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ endpoint: any NetworkEndpoint,
+        body: Body,
+        responseType: T.Type
+    ) async throws -> T {
+        let encodedBody: Data
+        do {
+            encodedBody = try configuration.encoder.encode(body)
+        } catch {
+            Logger.error("Failed to encode request body", error: error)
+            throw NetworkError.encodingFailed(underlying: error)
+        }
+
+        let wrappedEndpoint = EncodedBodyEndpoint(wrapped: endpoint, encodedBody: encodedBody)
+        return try await performRequest(wrappedEndpoint, responseType: responseType, retryCount: 0)
     }
 
     // MARK: - Private Implementation
@@ -334,6 +362,13 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         Logger.info("Authorization refreshed successfully, retrying request")
+
+        // Apply retry delay before retrying
+        if configuration.retryDelay > 0 {
+            Logger.debug("Waiting \(configuration.retryDelay)s before retry")
+            try await Task.sleep(for: .seconds(configuration.retryDelay))
+        }
+
         // Retry the request with new authorization
         return try await performRequest(endpoint, responseType: responseType, retryCount: retryCount + 1)
     }
@@ -348,4 +383,20 @@ public actor NetworkClient: NetworkDataSource {
             return .underlying(error)
         }
     }
+}
+
+// MARK: - Encoded Body Endpoint Wrapper
+
+/// Internal wrapper that overrides an endpoint's body with pre-encoded data.
+private struct EncodedBodyEndpoint: NetworkEndpoint {
+    let wrapped: any NetworkEndpoint
+    let encodedBody: Data
+
+    var baseURL: String { wrapped.baseURL }
+    var path: String { wrapped.path }
+    var method: HTTPMethod { wrapped.method }
+    var queryItems: [URLQueryItem]? { wrapped.queryItems }
+    var headers: [String: String]? { wrapped.headers }
+    var authorization: AuthorizationType { wrapped.authorization }
+    var body: Data? { encodedBody }
 }

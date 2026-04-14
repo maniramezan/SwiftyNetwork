@@ -18,9 +18,10 @@ public actor NetworkMonitor {
     public func startMonitoring() {
         guard !isMonitoring else { return }
 
-        monitor.pathUpdateHandler = { path in
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let monitor = self else { return }
             Task {
-                await NetworkMonitor.shared.setStatus(path.status)
+                await monitor.setStatus(path.status)
             }
         }
         let queue = DispatchQueue(label: "NetworkMonitorQueue")

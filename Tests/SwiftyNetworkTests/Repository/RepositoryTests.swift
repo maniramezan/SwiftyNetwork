@@ -123,11 +123,10 @@ func testRepositoryPropagatesNetworkError() async {
     let repository = GenericRepository(networkDataSource: network, localDataSource: local)
     let key = CacheKey("error")
 
-    do {
-        _ = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .reloadIgnoringCache)
-        Issue.record("Expected error to be thrown")
-    } catch {
-        // Expected behavior - network error should propagate
+    await #expect {
+        try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .reloadIgnoringCache)
+    } throws: { error in
+        error is TestRepositoryError
     }
 }
 

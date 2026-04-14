@@ -269,3 +269,149 @@ func inMemoryCacheEvictsLRU() async {
     #expect(value2 == "value2")
     #expect(value3 == "value3")
 }
+
+// MARK: - Concurrent Cache Access Tests
+
+@Test("InMemoryCache handles concurrent reads and writes safely")
+func inMemoryCacheConcurrentAccess() async {
+    let cache = InMemoryCache<Int>()
+
+    // Perform many concurrent writes followed by reads
+    await withTaskGroup(of: Void.self) { group in
+        for i in 0..<100 {
+            group.addTask {
+                await cache.setValue(i, forKey: CacheKey("key-\(i)"))
+            }
+        }
+    }
+
+    // All 100 values should be present
+    let count = await cache.count()
+    #expect(count == 100)
+
+    // Concurrent reads should all succeed
+    await withTaskGroup(of: Int?.self) { group in
+        for i in 0..<100 {
+            group.addTask {
+                await cache.value(forKey: CacheKey("key-\(i)"))
+            }
+        }
+        var results = [Int?]()
+        for await result in group {
+            results.append(result)
+        }
+        let nonNilCount = results.compactMap { $0 }.count
+        #expect(nonNilCount == 100)
+    }
+}
+
+@Test("InMemoryCache concurrent writes to same key produce consistent state")
+func inMemoryCacheConcurrentWritesSameKey() async {
+    let cache = InMemoryCache<Int>()
+    let key = CacheKey("same-key")
+
+    // Write concurrently to the same key
+    await withTaskGroup(of: Void.self) { group in
+        for i in 0..<50 {
+            group.addTask {
+                await cache.setValue(i, forKey: key)
+            }
+        }
+    }
+
+    // Exactly one value should be stored (last writer wins)
+    let value = await cache.value(forKey: key)
+    #expect(value != nil)
+    let count = await cache.count()
+    #expect(count == 1)
+}
+
+// MARK: - LayeredCache removeAll Tests
+
+@Test("LayeredCache removeAll clears both memory and persistent layers")
+func testLayeredCacheRemoveAllPropagates() async {
+    let memoryCache = InMemoryCache<String>()
+    let persistentCache = RecordingCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
+
+    await layeredCache.setValue("v1", forKey: CacheKey("k1"))
+    await layeredCache.setValue("v2", forKey: CacheKey("k2"))
+    await layeredCache.setValue("v3", forKey: CacheKey("k3"))
+
+    // Verify values exist
+    #expect(await memoryCache.value(forKey: CacheKey("k1")) == "v1")
+
+    await layeredCache.removeAll()
+
+    // Memory should be cleared
+    #expect(await memoryCache.value(forKey: CacheKey("k1")) == nil)
+    #expect(await memoryCache.value(forKey: CacheKey("k2")) == nil)
+    #expect(await memoryCache.value(forKey: CacheKey("k3")) == nil)
+
+    // Persistent removeAll should have been called
+    let calls = await persistentCache.callCounts
+    #expect(calls.removeAll == 1)
+}
+
+@Test("LayeredCache set propagates to both layers")
+func testLayeredCacheSetPropagates() async {
+    let memoryCache = InMemoryCache<String>()
+    let persistentCache = RecordingCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
+
+    await layeredCache.setValue("value", forKey: CacheKey("key"))
+
+    #expect(await memoryCache.value(forKey: CacheKey("key")) == "value")
+    let calls = await persistentCache.callCounts
+    #expect(calls.set == 1)
+}
+
+@Test("LayeredCache timestamp falls back to persistent layer")
+func testLayeredCacheTimestampFallback() async {
+    let memoryCache = InMemoryCache<String>()
+    let persistentCache = TestPersistentCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
+    let key = CacheKey("timestamp-fallback")
+    let timestamp = Date(timeIntervalSince1970: 500)
+
+    // Only set in persistent layer
+    await persistentCache.setValue("value", forKey: key, timestamp: timestamp)
+
+    // First call to value() promotes to memory, so timestamp should be available
+    _ = await layeredCache.value(forKey: key)
+    let layeredTimestamp = await layeredCache.timestamp(forKey: key)
+    #expect(layeredTimestamp == timestamp)
+}
+
+// MARK: - AnyCache Edge Cases
+
+@Test("AnyCache wrapping InMemoryCache preserves values correctly")
+func testAnyCachePreservesValues() async {
+    let inner = InMemoryCache<String>()
+    let anyCache = AnyCache(inner)
+    let key = CacheKey("any-preserve")
+
+    await anyCache.setValue("hello", forKey: key)
+    let value = await anyCache.value(forKey: key)
+    #expect(value == "hello")
+
+    let ts = await anyCache.timestamp(forKey: key)
+    #expect(ts != nil)
+
+    await anyCache.removeValue(forKey: key)
+    #expect(await anyCache.value(forKey: key) == nil)
+}
+
+@Test("AnyCache removeAll clears all entries")
+func testAnyCacheRemoveAll() async {
+    let inner = InMemoryCache<Int>()
+    let anyCache = AnyCache(inner)
+
+    await anyCache.setValue(1, forKey: CacheKey("a"))
+    await anyCache.setValue(2, forKey: CacheKey("b"))
+
+    await anyCache.removeAll()
+
+    #expect(await anyCache.value(forKey: CacheKey("a")) == nil)
+    #expect(await anyCache.value(forKey: CacheKey("b")) == nil)
+}

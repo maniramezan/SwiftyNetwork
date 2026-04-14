@@ -5,8 +5,14 @@ import Foundation
 /// A type-erased cache that wraps any concrete cache implementation.
 ///
 /// This allows for using different cache implementations interchangeably
-/// without exposing the specific cache type.
-public final class AnyCache<T: Sendable>: @unchecked Sendable {
+/// without exposing the specific cache type. Conforms to ``Cache`` so it
+/// can be used wherever a generic cache is expected.
+///
+/// **Safety invariant for `@unchecked Sendable`**: All stored closures
+/// capture actor-isolated cache methods, so concurrent calls are serialized
+/// by the underlying actor.
+public final class AnyCache<T: Sendable>: Cache, @unchecked Sendable {
+    public typealias Value = T
     private let _getValue: (CacheKey) async -> T?
     private let _setValue: (T, CacheKey) async -> Void
     private let _removeValue: (CacheKey) async -> Void
