@@ -1,47 +1,122 @@
 import Foundation
 import Network
 
-/// An actor that monitors network path changes to provide reachability status.
+/// Reachability status reported by ``NetworkMonitor``.
+public enum NetworkReachability: Sendable, Equatable {
+    /// The network is reachable.
+    case reachable
+    /// The network is not currently reachable.
+    case unreachable
+    /// Reachability is unknown (e.g. monitoring has not started yet).
+    case unknown
+
+    /// Maps an ``NWPath/Status`` value to a reachability case.
+    init(_ status: NWPath.Status) {
+        switch status {
+        case .satisfied: self = .reachable
+        case .unsatisfied: self = .unreachable
+        case .requiresConnection: self = .unreachable
+        @unknown default: self = .unknown
+        }
+    }
+}
+
+/// An actor that monitors network path changes and exposes them via async APIs.
+///
+/// Until ``startMonitoring()`` is called, ``isReachable`` reports `false` and
+/// ``status`` reports ``NetworkReachability/unknown``. Use ``updates`` to
+/// observe a continuous stream of reachability changes.
 public actor NetworkMonitor {
     /// Shared singleton instance for global network monitoring.
     public static let shared = NetworkMonitor()
 
     private let monitor: NWPathMonitor
-    private var status = NWPath.Status.requiresConnection
+    private var currentStatus: NetworkReachability = .unknown
     private var isMonitoring = false
+    private var continuations: [UUID: AsyncStream<NetworkReachability>.Continuation] = [:]
 
+    /// Creates a new network monitor. Use ``shared`` unless multiple independent
+    /// monitors are needed.
     public init() {
         self.monitor = NWPathMonitor()
     }
 
-    /// Starts monitoring network path updates. Call with `await NetworkMonitor.shared.startMonitoring()`.
+    /// Begins observing network path changes.
+    ///
+    /// Subsequent calls are no-ops while monitoring is active.
     public func startMonitoring() {
         guard !isMonitoring else { return }
 
         monitor.pathUpdateHandler = { [weak self] path in
-            guard let monitor = self else { return }
-            Task {
-                await monitor.setStatus(path.status)
+            let reachability = NetworkReachability(path.status)
+            Task { [weak self] in
+                await self?.update(reachability)
             }
         }
-        let queue = DispatchQueue(label: "NetworkMonitorQueue")
+        let queue = DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue")
         monitor.start(queue: queue)
         isMonitoring = true
     }
 
-    /// Stops monitoring network path updates.
+    /// Stops observing network path changes and finishes any active update streams.
     public func stopMonitoring() {
         guard isMonitoring else { return }
         monitor.cancel()
         isMonitoring = false
+        for continuation in continuations.values {
+            continuation.finish()
+        }
+        continuations.removeAll()
     }
 
-    private func setStatus(_ newStatus: NWPath.Status) {
-        status = newStatus
+    /// The most recently reported reachability status.
+    public var status: NetworkReachability {
+        currentStatus
     }
 
-    /// A boolean indicating whether the network is currently reachable.
+    /// `true` if the network is currently reachable.
     public var isReachable: Bool {
-        status == .satisfied
+        currentStatus == .reachable
+    }
+
+    /// An async stream of reachability updates.
+    ///
+    /// Call this once per consumer; each call returns an independent stream.
+    /// The stream finishes when ``stopMonitoring()`` is called or when the
+    /// consumer cancels iteration.
+    public var updates: AsyncStream<NetworkReachability> {
+        AsyncStream { continuation in
+            let id = UUID()
+            // The continuation has to be registered on the actor.
+            Task { [weak self] in
+                await self?.register(continuation: continuation, id: id)
+            }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in
+                    await self?.unregister(id: id)
+                }
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func register(continuation: AsyncStream<NetworkReachability>.Continuation, id: UUID) {
+        continuations[id] = continuation
+        // Emit current status immediately so consumers don't wait for the next change.
+        continuation.yield(currentStatus)
+    }
+
+    private func unregister(id: UUID) {
+        continuations.removeValue(forKey: id)
+    }
+
+    private func update(_ newStatus: NetworkReachability) {
+        guard newStatus != currentStatus else { return }
+        currentStatus = newStatus
+        Logger.info("Network reachability changed to \(newStatus)", category: .network)
+        for continuation in continuations.values {
+            continuation.yield(newStatus)
+        }
     }
 }

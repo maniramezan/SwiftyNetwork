@@ -1,0 +1,45 @@
+@Tutorial(time: 10) {
+    @Intro(title: "Getting Started") {
+        Make your first network request with SwiftyNetwork. You'll define a typed endpoint, configure a `NetworkClient`, and decode a response into a model.
+    }
+
+    @Section(title: "Define a model and an endpoint") {
+        @ContentAndMedia {
+            Endpoints describe a single request: where it goes, what method it uses, and what shape the response has.
+        }
+
+        @Steps {
+            @Step {
+                Create a `Codable` model for the data you expect.
+
+                @Code(name: "User.swift", file: "GettingStarted-User.swift")
+            }
+
+            @Step {
+                Conform a struct to ``NetworkEndpoint`` and provide ``NetworkEndpoint/baseURL``, ``NetworkEndpoint/path``, and ``NetworkEndpoint/method``.
+
+                @Code(name: "UserEndpoint.swift", file: "GettingStarted-Endpoint.swift")
+            }
+        }
+    }
+
+    @Section(title: "Make the request") {
+        @ContentAndMedia {
+            ``NetworkClient`` is an actor — request and decode in one call.
+        }
+
+        @Steps {
+            @Step {
+                Create a client and call ``NetworkClient/request(_:responseType:)``.
+
+                @Code(name: "Fetch.swift", file: "GettingStarted-Fetch.swift")
+            }
+
+            @Step {
+                Handle ``NetworkError`` to react to specific failure modes.
+
+                @Code(name: "FetchWithErrors.swift", file: "GettingStarted-Errors.swift")
+            }
+        }
+    }
+}

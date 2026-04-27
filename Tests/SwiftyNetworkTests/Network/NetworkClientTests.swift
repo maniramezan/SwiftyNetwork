@@ -28,7 +28,7 @@ struct NetworkClientIntegrationTests {
         let response = try await client.request(endpoint, responseType: TestUser.self)
 
         #expect(response == user)
-        let count = await client.getRequestCount()
+        let count = await client.attemptCount()
         #expect(count == 1)
     }
 
@@ -59,7 +59,7 @@ struct NetworkClientIntegrationTests {
     func testNetworkClientUsesEndpointAuthorization() async throws {
         struct AuthEndpoint: NetworkEndpoint {
             let baseURL = "https://api.test.com"
-            let authorization: AuthorizationType = .basic(token: "basic-456")
+            let authorization: AuthorizationType = .basicEncoded(credential: "basic-456")
             var path: String { "/auth" }
             var method: HTTPMethod { .get }
             var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: "endpoint-auth")] }
@@ -94,7 +94,7 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 2,
+            maxAuthRefreshAttempts: 2,
             retryDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
@@ -115,7 +115,7 @@ struct NetworkClientIntegrationTests {
         #expect(response == user)
         let refreshCalls = await provider.refreshCallCount
         #expect(refreshCalls == 1)
-        let count = await client.getRequestCount()
+        let count = await client.attemptCount()
         #expect(count == 2)
     }
 
@@ -129,7 +129,7 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 1
+            maxAuthRefreshAttempts: 1
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "auth-refresh-fail"
@@ -369,7 +369,7 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 1,
+            maxAuthRefreshAttempts: 1,
             retryDelay: retryDelay
         )
         let client = NetworkClient(configuration: configuration)
@@ -402,7 +402,7 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 1,
+            maxAuthRefreshAttempts: 1,
             retryDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
@@ -437,7 +437,7 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            maxRetryAttempts: 1,
+            maxAuthRefreshAttempts: 1,
             retryDelay: 0
         )
         let client = NetworkClient(configuration: configuration)

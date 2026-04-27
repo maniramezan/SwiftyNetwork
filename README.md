@@ -15,13 +15,13 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Authentication Support**: Built-in OAuth and custom authentication providers
 - **Comprehensive Error Handling**: Detailed error types with localized descriptions
 - **Repository Pattern**: Clean separation between network and local data sources
-- **Automatic Retry**: Configurable retry logic with exponential backoff
+- **Automatic Auth Refresh**: Refreshes credentials and replays the request once on `401`
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
 ## Requirements
 
 - Swift 6.0+
-- iOS 15.0+ / macOS 15.0+
+- iOS 17.0+ / macOS 14.0+
 
 ## Code Quality
 
@@ -56,7 +56,7 @@ Add SwiftyNetwork to your `Package.swift` file:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourorg/SwiftyNetwork.git", from: "1.0.0")
+    .package(url: "https://github.com/maniramezan/SwiftyNetwork.git", from: "0.1.0")
 ]
 ```
 
@@ -132,15 +132,14 @@ do {
 func createUserRepository() -> GenericRepository<User> {
     // Create network client with configuration
     let configuration = NetworkClientConfiguration(
-        maxRetryAttempts: 3,
+        maxAuthRefreshAttempts: 3,
         timeoutInterval: 30
     )
     let networkClient = NetworkClient(configuration: configuration)
     
     // Create cache-based local data source
     let cache = InMemoryCache<User>()
-    let anyCache = AnyCache(cache)
-    let localDataSource = CacheBasedLocalDataSource(cache: anyCache)
+    let localDataSource = CacheBasedLocalDataSource(cache: cache)
     
     // Create and return repository
     return GenericRepository(
@@ -199,7 +198,7 @@ func createLayeredRepository() -> GenericRepository<User> {
     let memoryCache = InMemoryCache<User>()
     let diskCache = UserDiskCache()
     let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: diskCache)
-    let localDataSource = CacheBasedLocalDataSource(cache: AnyCache(layeredCache))
+    let localDataSource = CacheBasedLocalDataSource(cache: layeredCache)
 
     return GenericRepository(
         networkDataSource: NetworkClient.shared,
@@ -271,7 +270,7 @@ func createAuthenticatedClient(accessToken: String) -> NetworkClient {
     
     let configuration = NetworkClientConfiguration(
         authorizationProvider: authProvider,
-        maxRetryAttempts: 2
+        maxAuthRefreshAttempts: 2
     )
     
     return NetworkClient(configuration: configuration)
@@ -306,7 +305,7 @@ public actor MyCustomCache<T: Sendable>: Cache {
 
 // Use with repository
 let customCache = MyCustomCache<User>()
-let anyCache = AnyCache(customCache)
+let local = CacheBasedLocalDataSource(cache: customCache)
 // ... rest of repository setup
 ```
 
@@ -346,7 +345,7 @@ let configuration = NetworkClientConfiguration(
     decoder: JSONDecoder(),
     encoder: JSONEncoder(),
     authorizationProvider: authProvider,
-    maxRetryAttempts: 3,
+    maxAuthRefreshAttempts: 3,
     timeoutInterval: 30
 )
 
@@ -390,14 +389,17 @@ SwiftyNetwork's protocol-based design makes it easy to test:
 
 ```swift
 // Mock network data source
-struct MockNetworkDataSource: NetworkDataSource {
-    let mockResponse: Any
-    
+struct MockNetworkDataSource<R: Decodable & Sendable>: NetworkDataSource {
+    let mockResponse: R
+
     func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint, 
+        _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T {
-        return mockResponse as! T
+        guard let typed = mockResponse as? T else {
+            throw NetworkError.invalidResponse
+        }
+        return typed
     }
 }
 
@@ -427,7 +429,7 @@ xcrun llvm-cov report .build/debug/SwiftyNetworkPackageTests.xctest/Contents/Mac
   -instr-profile .build/debug/codecov/default.profdata
 ```
 
-**Current Test Coverage**: 91% line coverage, 84% region coverage across 45 tests.
+**Current Test Coverage**: 60+ tests covering caching, networking, auth, and repository flows.
 
 ## License
 

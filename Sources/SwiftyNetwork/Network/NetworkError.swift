@@ -11,10 +11,10 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     case notFound
     case timeout
     case noInternetConnection
-    case decodingFailed(underlying: Error)
-    case encodingFailed(underlying: Error)
+    case decodingFailed(underlying: any Error & Sendable)
+    case encodingFailed(underlying: any Error & Sendable)
     case authorizationRefreshFailed
-    case underlying(Error)
+    case underlying(any Error & Sendable)
 
     public var errorDescription: String? {
         switch self {

@@ -9,5 +9,7 @@ func testHTTPMethodRawValues() {
     #expect(HTTPMethod.put.rawValue == "PUT")
     #expect(HTTPMethod.delete.rawValue == "DELETE")
     #expect(HTTPMethod.patch.rawValue == "PATCH")
-    #expect(HTTPMethod.allCases.count == 5)
+    #expect(HTTPMethod.head.rawValue == "HEAD")
+    #expect(HTTPMethod.options.rawValue == "OPTIONS")
+    #expect(HTTPMethod.allCases.count == 7)
 }
