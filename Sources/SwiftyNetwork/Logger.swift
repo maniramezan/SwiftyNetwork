@@ -1,91 +1,104 @@
 import Foundation
+import os
 
-// MARK: - Package Constants
+// MARK: - Public Log Level
 
-/// The package name used for logging and debugging.
-public let swiftyNetworkPackageName = "SwiftyNetwork"
-
-// MARK: - NSLog Helper
-
-/// Logs a message using NSLog with file and line information.
+/// Controls which messages SwiftyNetwork emits to the unified logging system.
 ///
-/// - Parameters:
-///   - message: The message to log.
-///   - file: The file where the log was called (auto-populated).
-///   - line: The line number where the log was called (auto-populated).
-func nslog(
-    _ message: String,
-    file: String = #file,
-    line: Int = #line
-) {
-    let fileName = (file as NSString).lastPathComponent
-    NSLog("[\(fileName):\(line)] \(message)")
+/// Levels are ordered from least to most verbose. Setting a level enables that
+/// level and all higher-severity levels.
+public enum LogLevel: Int, Sendable, Comparable {
+    /// Emit no log messages.
+    case off = 0
+    /// Emit only error-level messages.
+    case error = 1
+    /// Emit warnings and errors.
+    case warning = 2
+    /// Emit informational messages, warnings, and errors.
+    case info = 3
+    /// Emit all messages including debug-level diagnostics.
+    case debug = 4
+
+    public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
 }
 
-// MARK: - Logging Helper
+// MARK: - Internal Logger
 
-/// Internal logging helper that provides consistent, prefixed logging throughout the package.
+/// Internal logging facade that bridges SwiftyNetwork to ``os.Logger``.
 ///
-/// This uses NSLog under the hood for system-level logging that integrates with Console.app.
+/// All log calls are routed through ``os.Logger`` for structured, privacy-aware
+/// system logging. The active level is process-wide and can be changed via
+/// ``NetworkClientConfiguration/logLevel`` or ``Logger/setLevel(_:)``.
 enum Logger {
-    /// Logs an informational message.
-    ///
-    /// - Parameters:
-    ///   - message: The message to log.
-    ///   - file: The file where the log was called (auto-populated).
-    ///   - line: The line number where the log was called (auto-populated).
-    static func info(
-        _ message: String,
-        file: String = #file,
-        line: Int = #line
-    ) {
-        nslog("[\(swiftyNetworkPackageName)] ℹ️ \(message)", file: file, line: line)
+    /// Subsystem identifier used for ``os.Logger`` instances.
+    static let subsystem = "SwiftyNetwork"
+
+    /// Categories used to group related log statements in Console.app.
+    enum Category: String {
+        case network
+        case cache
+        case auth
+        case repository
     }
 
-    /// Logs a warning message.
-    ///
-    /// - Parameters:
-    ///   - message: The message to log.
-    ///   - file: The file where the log was called (auto-populated).
-    ///   - line: The line number where the log was called (auto-populated).
-    static func warning(
-        _ message: String,
-        file: String = #file,
-        line: Int = #line
-    ) {
-        nslog("[\(swiftyNetworkPackageName)] ⚠️ \(message)", file: file, line: line)
+    /// Atomic storage for the active log level.
+    private static let _level = OSAllocatedUnfairLock<LogLevel>(initialState: .warning)
+
+    /// The current log level. Defaults to ``LogLevel/warning``.
+    static var level: LogLevel {
+        _level.withLock { $0 }
     }
 
-    /// Logs an error message.
+    /// Updates the active log level for the entire package.
     ///
-    /// - Parameters:
-    ///   - message: The message to log.
-    ///   - error: An optional error to include in the log.
-    ///   - file: The file where the log was called (auto-populated).
-    ///   - line: The line number where the log was called (auto-populated).
+    /// - Parameter newLevel: The new log level to apply.
+    static func setLevel(_ newLevel: LogLevel) {
+        _level.withLock { $0 = newLevel }
+    }
+
+    /// Returns an ``os.Logger`` for the given category. Cheap to call repeatedly.
+    private static func osLogger(for category: Category) -> os.Logger {
+        os.Logger(subsystem: subsystem, category: category.rawValue)
+    }
+
+    // MARK: - Emit
+
+    static func debug(_ message: String, category: Category = .network) {
+        guard level >= .debug else { return }
+        osLogger(for: category).debug("\(message, privacy: .public)")
+    }
+
+    static func info(_ message: String, category: Category = .network) {
+        guard level >= .info else { return }
+        osLogger(for: category).info("\(message, privacy: .public)")
+    }
+
+    static func warning(_ message: String, category: Category = .network) {
+        guard level >= .warning else { return }
+        osLogger(for: category).warning("\(message, privacy: .public)")
+    }
+
     static func error(
         _ message: String,
-        error: Error? = nil,
-        file: String = #file,
-        line: Int = #line
+        error: (any Error)? = nil,
+        category: Category = .network
     ) {
-        let errorDetail = error.map { " - Error: \($0)" } ?? ""
-        nslog("[\(swiftyNetworkPackageName)] ❌ \(message)\(errorDetail)", file: file, line: line)
+        guard level >= .error else { return }
+        if let error {
+            osLogger(for: category).error(
+                "\(message, privacy: .public) — \(String(describing: error), privacy: .private)")
+        } else {
+            osLogger(for: category).error("\(message, privacy: .public)")
+        }
     }
 
-    /// Logs a debug message (only in DEBUG builds).
-    ///
-    /// - Parameters:
-    ///   - message: The message to log.
-    ///   - file: The file where the log was called (auto-populated).
-    ///   - line: The line number where the log was called (auto-populated).
-    static func debug(
-        _ message: String,
-        file: String = #file,
-        line: Int = #line
-    ) {
-        #if DEBUG
-            nslog("[\(swiftyNetworkPackageName)] 🐛 \(message)", file: file, line: line)
-        #endif
+    // MARK: - URL Helpers
+
+    /// Logs a URL with private sanitization so query strings don't leak in the unified log.
+    static func debugURL(_ message: String, url: URL, category: Category = .network) {
+        guard level >= .debug else { return }
+        osLogger(for: category).debug("\(message, privacy: .public) \(url.absoluteString, privacy: .private)")
     }
 }

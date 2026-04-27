@@ -73,7 +73,7 @@ func testEndpointInvalidBaseURL() throws {
         var method: HTTPMethod { .get }
     }
 
-    #expect(throws: URLError.self) {
+    #expect(throws: NetworkError.self) {
         try E().makeURLRequest()
     }
 }

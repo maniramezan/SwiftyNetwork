@@ -1,0 +1,45 @@
+@Tutorial(time: 10) {
+    @Intro(title: "Authenticated requests") {
+        Use ``OAuthAuthorizationProvider`` to attach bearer tokens automatically and refresh them on 401.
+    }
+
+    @Section(title: "Attach a token") {
+        @ContentAndMedia {
+            Create an authorization provider and pass it to ``NetworkClientConfiguration``.
+        }
+
+        @Steps {
+            @Step {
+                Construct the provider with an initial access token and a refresh handler.
+
+                @Code(name: "AuthSetup.swift", file: "Auth-Setup.swift")
+            }
+
+            @Step {
+                Use the configured client like any other — every request will carry the bearer token.
+
+                @Code(name: "AuthFetch.swift", file: "Auth-Fetch.swift")
+            }
+        }
+    }
+
+    @Section(title: "Custom authorization") {
+        @ContentAndMedia {
+            For non-OAuth schemes, conform your own type to ``AuthorizationProvider`` or set ``NetworkEndpoint/authorization`` per endpoint.
+        }
+
+        @Steps {
+            @Step {
+                Set ``AuthorizationType/apiKey(key:header:)`` on individual endpoints when an API key suffices.
+
+                @Code(name: "ApiKey.swift", file: "Auth-ApiKey.swift")
+            }
+
+            @Step {
+                Or implement a custom provider for full control over header injection and refresh.
+
+                @Code(name: "CustomProvider.swift", file: "Auth-CustomProvider.swift")
+            }
+        }
+    }
+}

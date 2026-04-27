@@ -1,40 +1,44 @@
 import Foundation
 
-/// Provides authorization details for network requests and handles token refresh operations.
+/// Provides authorization details for network requests and handles token refresh.
 ///
-/// Implementers should handle secure token storage and provide thread-safe access to authorization data.
+/// Implementers should be thread-safe and idempotent under concurrent refresh
+/// requests. ``OAuthAuthorizationProvider`` provides a built-in implementation
+/// that coalesces overlapping refreshes.
 public protocol AuthorizationProvider: Sendable {
-    /// Returns the current authorization type to apply to requests.
-    ///
-    /// - Returns: The authorization type containing the current authentication credentials.
+    /// Returns the current authorization to apply to requests.
     func currentAuthorization() async -> AuthorizationType
 
-    /// Attempts to refresh authorization credentials if needed.
+    /// Attempts to refresh authorization credentials.
     ///
-    /// This method should be called when a request receives an unauthorized response.
-    /// Implementations should handle token refresh logic, including secure storage updates.
+    /// Called when a request receives an unauthorized response.
     ///
-    /// - Returns: `true` if the authorization was successfully refreshed; otherwise, `false`.
+    /// - Returns: `true` if the authorization was successfully refreshed; otherwise `false`.
     func refreshAuthorizationIfNeeded() async -> Bool
 }
 
-/// A secure OAuth bearer token provider with automatic refresh capability.
+/// An OAuth bearer token provider with refresh-token support.
 ///
-/// This implementation provides thread-safe access to OAuth tokens and handles
-/// automatic token refresh when credentials become invalid.
+/// This actor stores the active access token in memory only and serializes
+/// access via actor isolation. It does **not** use Keychain or any other
+/// secure storage — production apps should persist refresh tokens themselves
+/// using `Security.framework` or another secure mechanism, and inject
+/// refreshed tokens through the supplied refresh handler.
 ///
-/// For production use, consider storing refresh tokens securely in Keychain
-/// and implementing proper OAuth 2.0 refresh token grant flows.
+/// Concurrent calls to ``refreshAuthorizationIfNeeded()`` are coalesced so the
+/// refresh handler runs at most once per refresh cycle even if many requests
+/// receive a 401 simultaneously.
 public actor OAuthAuthorizationProvider: AuthorizationProvider {
     private var accessToken: String
     private let refreshTokenHandler: @Sendable () async -> String?
+    private var inFlightRefresh: Task<Bool, Never>?
 
-    /// Creates an OAuth authorization provider with initial credentials and refresh capability.
+    /// Creates an OAuth authorization provider.
     ///
     /// - Parameters:
     ///   - initialAccessToken: The initial OAuth access token to use for requests.
-    ///   - refreshTokenHandler: A closure that attempts to refresh the token when needed.
-    ///     Should return the new access token on success, or `nil` on failure.
+    ///   - refreshTokenHandler: A closure invoked to obtain a new access token.
+    ///     Return the new token on success, or `nil` to signal refresh failure.
     public init(
         initialAccessToken: String,
         refreshTokenHandler: @escaping @Sendable () async -> String?
@@ -43,26 +47,39 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
         self.refreshTokenHandler = refreshTokenHandler
     }
 
-    /// Returns the current authorization type to apply to requests.
-    ///
-    /// - Returns: The authorization type representing the current credentials (typically a bearer token).
+    /// Returns the current bearer token wrapped as an ``AuthorizationType``.
     public func currentAuthorization() async -> AuthorizationType {
         .bearer(token: accessToken)
     }
 
-    /// Attempts to refresh the authorization credentials.
+    /// Attempts to refresh the access token, coalescing concurrent calls.
     ///
-    /// Implementations should perform any required network calls or secure storage
-    /// updates to obtain new credentials. This method returns `true` when a new
-    /// access token was obtained and stored, otherwise `false`.
+    /// If a refresh is already in flight, this awaits its result rather than
+    /// invoking the refresh handler again.
     ///
-    /// - Returns: `true` if refresh succeeded and the provider updated its credentials; `false` otherwise.
+    /// - Returns: `true` if a new token was stored; `false` otherwise.
     public func refreshAuthorizationIfNeeded() async -> Bool {
-        guard let newToken = await refreshTokenHandler() else {
-            return false
+        if let existing = inFlightRefresh {
+            return await existing.value
         }
 
-        self.accessToken = newToken
-        return true
+        let task = Task<Bool, Never> { [weak self] in
+            await self?.performRefresh() ?? false
+        }
+        inFlightRefresh = task
+
+        let result = await task.value
+        inFlightRefresh = nil
+        return result
+    }
+
+    /// Runs the refresh handler and applies the new token if one was returned.
+    private func performRefresh() async -> Bool {
+        let newToken = await refreshTokenHandler()
+        if let newToken {
+            accessToken = newToken
+            return true
+        }
+        return false
     }
 }

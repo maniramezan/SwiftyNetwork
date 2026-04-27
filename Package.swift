@@ -5,18 +5,16 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftyNetwork",
-    platforms: [.macOS(.v15), .iOS(.v15)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(
             name: "SwiftyNetwork",
             targets: ["SwiftyNetwork"])
     ],
-    dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-format.git", from: "602.0.0")
-    ],
     targets: [
         .target(
-            name: "SwiftyNetwork"
+            name: "SwiftyNetwork",
+            resources: [.process("SwiftyNetwork.docc")]
         ),
         .testTarget(
             name: "SwiftyNetworkTests",

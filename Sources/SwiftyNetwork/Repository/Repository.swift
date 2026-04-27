@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Local Data Source Protocol
 
 /// Provides an abstraction for local data storage operations.
-public protocol LocalDataSource {
+public protocol LocalDataSource: Sendable {
     /// The type of entity stored by this data source.
     associatedtype Entity: Sendable
 
@@ -37,56 +37,47 @@ public protocol LocalDataSource {
 
 /// A local data source implementation backed by a generic cache.
 ///
-/// This provides a bridge between the repository pattern and the caching system,
-/// allowing any cache implementation to be used as a local data source.
+/// This bridges the repository pattern with the caching system, allowing any
+/// ``Cache`` implementation to be used as a local data source.
 public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
     /// The entity type managed by this data source.
     public typealias Entity = E
 
-    private let cache: AnyCache<E>
+    private let _read: @Sendable (CacheKey) async -> E?
+    private let _write: @Sendable (E, CacheKey) async -> Void
+    private let _remove: @Sendable (CacheKey) async -> Void
+    private let _removeAll: @Sendable () async -> Void
+    private let _timestamp: @Sendable (CacheKey) async -> Date?
 
-    /// Creates a cache-based local data source.
+    /// Creates a cache-based local data source from any ``Cache`` implementation.
     ///
     /// - Parameter cache: The cache implementation to use for storage.
-    public init(cache: AnyCache<E>) {
-        self.cache = cache
+    public init<C: Cache>(cache: C) where C.Value == E {
+        _read = { key in await cache.value(forKey: key) }
+        _write = { value, key in await cache.setValue(value, forKey: key) }
+        _remove = { key in await cache.removeValue(forKey: key) }
+        _removeAll = { await cache.removeAll() }
+        _timestamp = { key in await cache.timestamp(forKey: key) }
     }
 
-    /// Retrieves an entity from the local cache for the provided key.
-    ///
-    /// - Parameter key: The cache key for the entity.
-    /// - Returns: The entity if present; otherwise `nil`.
     public func read(for key: CacheKey) async -> E? {
-        await cache.value(forKey: key)
+        await _read(key)
     }
 
-    /// Stores an entity in local cache for the provided key.
-    ///
-    /// - Parameters:
-    ///   - entity: The entity to store.
-    ///   - key: The cache key to associate with the entity.
     public func write(_ entity: E, for key: CacheKey) async {
-        await cache.setValue(entity, forKey: key)
+        await _write(entity, key)
     }
 
-    /// Removes the entity associated with the given key from local cache.
-    ///
-    /// - Parameter key: The cache key to remove.
     public func remove(for key: CacheKey) async {
-        await cache.removeValue(forKey: key)
+        await _remove(key)
     }
 
-    /// Removes all entities from the local cache.
     public func removeAll() async {
-        await cache.removeAll()
+        await _removeAll()
     }
 
-    /// Returns the timestamp when the entity was last stored in the local cache.
-    ///
-    /// - Parameter key: The cache key for the entity.
-    /// - Returns: The timestamp when the entity was stored, or `nil` if not present.
     public func timestamp(for key: CacheKey) async -> Date? {
-        await cache.timestamp(forKey: key)
+        await _timestamp(key)
     }
 }
 
@@ -96,7 +87,7 @@ public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
 ///
 /// The repository pattern abstracts the data access logic and handles caching strategies,
 /// providing a clean separation between data sources and business logic.
-public protocol Repository {
+public protocol Repository: Sendable {
     /// The type of entity managed by this repository.
     associatedtype Entity: Sendable
 
@@ -124,9 +115,9 @@ public protocol Repository {
 public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
 
     private let networkDataSource: any NetworkDataSource
-    private let localRead: (CacheKey) async -> Entity?
-    private let localWrite: (Entity, CacheKey) async -> Void
-    private let localTimestamp: (CacheKey) async -> Date?
+    private let localRead: @Sendable (CacheKey) async -> Entity?
+    private let localWrite: @Sendable (Entity, CacheKey) async -> Void
+    private let localTimestamp: @Sendable (CacheKey) async -> Date?
 
     /// Creates a generic repository with the specified data sources.
     ///

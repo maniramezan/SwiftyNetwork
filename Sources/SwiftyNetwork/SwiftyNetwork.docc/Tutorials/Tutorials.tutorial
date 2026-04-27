@@ -1,0 +1,23 @@
+@Tutorials(name: "SwiftyNetwork") {
+    @Intro(title: "Get started with SwiftyNetwork") {
+        Learn how to define endpoints, make requests, cache responses, and add OAuth in three short tutorials.
+    }
+
+    @Chapter(name: "Foundations") {
+        Define endpoints and make your first request.
+
+        @TutorialReference(tutorial: "doc:GettingStarted")
+    }
+
+    @Chapter(name: "Caching") {
+        Wire up caches and pick the right policy.
+
+        @TutorialReference(tutorial: "doc:Caching")
+    }
+
+    @Chapter(name: "Authentication") {
+        Attach bearer tokens, refresh on 401, and roll custom providers.
+
+        @TutorialReference(tutorial: "doc:Authentication")
+    }
+}

@@ -1,0 +1,45 @@
+@Tutorial(time: 10) {
+    @Intro(title: "Caching responses") {
+        Cache responses with `InMemoryCache`, layer memory and persistent caches with `LayeredCache`, and pick a `CachePolicy` per request.
+    }
+
+    @Section(title: "Wire up an in-memory cache") {
+        @ContentAndMedia {
+            ``InMemoryCache`` is a thread-safe actor with optional LRU eviction.
+        }
+
+        @Steps {
+            @Step {
+                Create an `InMemoryCache` and wrap it in a `CacheBasedLocalDataSource`.
+
+                @Code(name: "RepositorySetup.swift", file: "Caching-Setup.swift")
+            }
+
+            @Step {
+                Build a ``GenericRepository`` that combines your network client and cache.
+
+                @Code(name: "Repository.swift", file: "Caching-Repository.swift")
+            }
+        }
+    }
+
+    @Section(title: "Choose a cache policy") {
+        @ContentAndMedia {
+            ``CachePolicy`` controls the read path. Pick the right one per call.
+        }
+
+        @Steps {
+            @Step {
+                Use `.returnCacheElseLoad` for a cache-first read with network fallback.
+
+                @Code(name: "PolicyCacheFirst.swift", file: "Caching-Policy-CacheFirst.swift")
+            }
+
+            @Step {
+                Use `.returnCacheIfNotExpired(maxAge:)` to bound staleness.
+
+                @Code(name: "PolicyExpiration.swift", file: "Caching-Policy-Expiration.swift")
+            }
+        }
+    }
+}

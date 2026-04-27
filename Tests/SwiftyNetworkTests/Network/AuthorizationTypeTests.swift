@@ -7,8 +7,12 @@ import Testing
 func testAuthorizationTypeAppliesHeaders() {
     var request = URLRequest(url: URL(string: "https://api.test.com")!)
 
-    AuthorizationType.basic(token: "basic").apply(to: &request)
+    AuthorizationType.basicEncoded(credential: "basic").apply(to: &request)
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Basic basic")
+
+    AuthorizationType.basic(username: "user", password: "pass").apply(to: &request)
+    let expected = Data("user:pass".utf8).base64EncodedString()
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Basic \(expected)")
 
     AuthorizationType.bearer(token: "bearer").apply(to: &request)
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer bearer")

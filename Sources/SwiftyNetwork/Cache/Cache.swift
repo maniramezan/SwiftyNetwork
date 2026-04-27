@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Cache Protocol
 
 /// A generic caching interface that provides thread-safe storage with timestamp tracking.
-public protocol Cache: AnyObject, Sendable {
+public protocol Cache: Sendable {
     /// The type of values stored in this cache.
     associatedtype Value: Sendable
 
