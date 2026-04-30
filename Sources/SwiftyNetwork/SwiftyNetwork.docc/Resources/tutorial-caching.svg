@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" role="img" aria-labelledby="title desc">
+  <title id="title">SwiftyNetwork caching</title>
+  <desc id="desc">A repository coordinates memory cache, persistent cache, and network loading.</desc>
+  <rect width="800" height="450" rx="32" fill="#162016"/>
+  <circle cx="400" cy="130" r="68" fill="#32D74B" opacity="0.95"/>
+  <rect x="110" y="270" width="160" height="90" rx="20" fill="#FFD60A" opacity="0.95"/>
+  <rect x="320" y="270" width="160" height="90" rx="20" fill="#30D158" opacity="0.95"/>
+  <rect x="530" y="270" width="160" height="90" rx="20" fill="#64D2FF" opacity="0.95"/>
+  <path d="M360 183 210 260M400 198v58M440 183l150 77" stroke="#F2FFF2" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <text x="400" y="138" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="700" fill="#07111F">Repository</text>
+  <text x="190" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="23" font-weight="700" fill="#07111F">Memory</text>
+  <text x="400" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="23" font-weight="700" fill="#07111F">Disk</text>
+  <text x="610" y="322" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="23" font-weight="700" fill="#07111F">Network</text>
+</svg>

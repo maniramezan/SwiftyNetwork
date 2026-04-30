@@ -1,17 +1,53 @@
 import Foundation
 
 /// Configuration settings for ``NetworkClient``.
+///
+/// Use this value to inject test sessions, customize JSON coding strategies,
+/// configure authorization refresh, adjust timeouts, and control package logging.
+/// A configuration is copied into each request when it starts, so updating a
+/// client affects subsequent requests but not work already in flight.
+///
+/// Example:
+/// ```swift
+/// let decoder = JSONDecoder()
+/// decoder.dateDecodingStrategy = .iso8601
+///
+/// let provider = OAuthAuthorizationProvider(initialAccessToken: "token") {
+///     await refreshAccessToken()
+/// }
+///
+/// let configuration = NetworkClientConfiguration(
+///     decoder: decoder,
+///     authorizationProvider: provider,
+///     timeoutInterval: 15,
+///     logLevel: .info
+/// )
+/// let client = NetworkClient(configuration: configuration)
+/// ```
 public struct NetworkClientConfiguration: Sendable {
     /// The URL session to use for network requests.
+    ///
+    /// Inject a custom session for tests, custom cache policies, proxy settings,
+    /// or `URLProtocol` interception. Defaults to `URLSession.shared`.
     public var session: URLSession
 
     /// The JSON decoder for parsing responses.
+    ///
+    /// Configure this when your API uses custom dates, key decoding strategies, or
+    /// other `Codable` conventions.
     public var decoder: JSONDecoder
 
     /// The JSON encoder for creating request bodies.
+    ///
+    /// Used by ``NetworkClient/request(_:body:responseType:)`` when encoding an
+    /// `Encodable` request body.
     public var encoder: JSONEncoder
 
     /// The authorization provider for handling authentication.
+    ///
+    /// When an endpoint's ``NetworkEndpoint/authorization`` is ``AuthorizationType/none``,
+    /// the client asks this provider for authorization and can call it again to
+    /// refresh credentials after a `401` response.
     public var authorizationProvider: AuthorizationProvider?
 
     /// Maximum number of authorization-refresh attempts after receiving a 401.
@@ -21,9 +57,13 @@ public struct NetworkClientConfiguration: Sendable {
     public var maxAuthRefreshAttempts: Int
 
     /// The timeout interval for requests, in seconds.
+    ///
+    /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
     public var timeoutInterval: TimeInterval
 
     /// Delay applied before retrying a request after a successful auth refresh.
+    ///
+    /// Set this to `0` in tests or when the API can be retried immediately.
     public var retryDelay: TimeInterval
 
     /// Verbosity for SwiftyNetwork's internal logger.

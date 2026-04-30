@@ -3,6 +3,21 @@ import Foundation
 // MARK: - APIClient Protocol
 
 /// A unified interface for making API requests.
+///
+/// Depend on this protocol when a type only needs to execute typed network
+/// requests. ``NetworkClient`` is the default implementation, and test targets can
+/// provide lightweight fakes.
+///
+/// Example:
+/// ```swift
+/// struct UserService {
+///     let client: any APIClient
+///
+///     func user(id: String) async throws -> User {
+///         try await client.request(UserEndpoint(id: id), responseType: User.self)
+///     }
+/// }
+/// ```
 public protocol APIClient: Sendable {
     /// Performs a network request and returns the decoded response.
     ///
@@ -20,4 +35,8 @@ public protocol APIClient: Sendable {
 // MARK: - NetworkDataSource Protocol
 
 /// Marker protocol for types that can serve as the network layer of a repository.
+///
+/// Use this when constructing ``GenericRepository``. The protocol does not add
+/// requirements beyond ``APIClient``; it communicates intent that a client is safe
+/// to use as a repository's remote data source.
 public protocol NetworkDataSource: APIClient {}

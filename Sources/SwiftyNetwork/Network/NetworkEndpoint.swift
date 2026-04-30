@@ -7,6 +7,18 @@ import Foundation
 /// Conform to this protocol to describe an HTTP request in a type-safe way.
 /// Most properties have sensible defaults, so a minimal endpoint only needs
 /// ``baseURL``, ``path``, and ``method``.
+///
+/// Example:
+/// ```swift
+/// struct UserEndpoint: NetworkEndpoint {
+///     let id: String
+///
+///     let baseURL = "https://api.example.com"
+///     var path: String { "/users/\(id)" }
+///     let method: HTTPMethod = .get
+///     var queryItems: [URLQueryItem]? { [URLQueryItem(name: "include", value: "profile")] }
+/// }
+/// ```
 public protocol NetworkEndpoint: Sendable {
     /// The base URL for the API (e.g. `"https://api.example.com"`).
     ///
@@ -31,14 +43,21 @@ public protocol NetworkEndpoint: Sendable {
     /// The request body, pre-encoded. Defaults to `nil`.
     ///
     /// Use ``NetworkClient/request(_:body:responseType:)`` to encode bodies via
-    /// the configured ``JSONEncoder`` instead of pre-encoding here.
+    /// the configured `JSONEncoder` instead of pre-encoding here.
     var body: Data? { get }
 }
 
 extension NetworkEndpoint {
+    /// Default query parameters for endpoints that do not need a query string.
     public var queryItems: [URLQueryItem]? { nil }
+
+    /// Default headers for endpoints that do not need custom HTTP headers.
     public var headers: [String: String]? { nil }
+
+    /// Default authorization strategy for endpoints that rely on client-level auth or no auth.
     public var authorization: AuthorizationType { .none }
+
+    /// Default request body for endpoints that do not send pre-encoded data.
     public var body: Data? { nil }
 }
 
@@ -53,6 +72,12 @@ extension NetworkEndpoint {
     ///
     /// - Returns: A configured `URLRequest`.
     /// - Throws: ``NetworkError/invalidURL(url:)`` if the URL cannot be constructed.
+    ///
+    /// Example:
+    /// ```swift
+    /// let request = try UserEndpoint(id: "123").makeURLRequest()
+    /// print(request.url?.absoluteString ?? "")
+    /// ```
     public func makeURLRequest() throws -> URLRequest {
         let url = try EndpointURLBuilder.url(baseURL: baseURL, path: path, queryItems: queryItems)
         var request = URLRequest(url: url)

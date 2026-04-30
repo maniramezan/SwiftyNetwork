@@ -26,6 +26,16 @@ public enum NetworkReachability: Sendable, Equatable {
 /// Until ``startMonitoring()`` is called, ``isReachable`` reports `false` and
 /// ``status`` reports ``NetworkReachability/unknown``. Use ``updates`` to
 /// observe a continuous stream of reachability changes.
+///
+/// Example:
+/// ```swift
+/// let monitor = NetworkMonitor.shared
+/// await monitor.startMonitoring()
+///
+/// for await status in await monitor.updates {
+///     print("Network status: \(status)")
+/// }
+/// ```
 public actor NetworkMonitor {
     /// Shared singleton instance for global network monitoring.
     public static let shared = NetworkMonitor()
@@ -43,6 +53,12 @@ public actor NetworkMonitor {
     /// Begins observing network path changes.
     ///
     /// Subsequent calls are no-ops while monitoring is active.
+    ///
+    /// Example:
+    /// ```swift
+    /// await NetworkMonitor.shared.startMonitoring()
+    /// let reachable = await NetworkMonitor.shared.isReachable
+    /// ```
     public func startMonitoring() {
         guard !isMonitoring else { return }
 
@@ -60,6 +76,11 @@ public actor NetworkMonitor {
     }
 
     /// Stops observing network path changes and finishes any active update streams.
+    ///
+    /// Example:
+    /// ```swift
+    /// await NetworkMonitor.shared.stopMonitoring()
+    /// ```
     public func stopMonitoring() {
         guard isMonitoring else { return }
         monitor?.cancel()
@@ -72,11 +93,16 @@ public actor NetworkMonitor {
     }
 
     /// The most recently reported reachability status.
+    ///
+    /// Before monitoring starts, this is ``NetworkReachability/unknown``.
     public var status: NetworkReachability {
         currentStatus
     }
 
     /// `true` if the network is currently reachable.
+    ///
+    /// This is a convenience wrapper around ``status`` equal to
+    /// ``NetworkReachability/reachable``.
     public var isReachable: Bool {
         currentStatus == .reachable
     }
@@ -86,6 +112,14 @@ public actor NetworkMonitor {
     /// Call this once per consumer; each call returns an independent stream.
     /// The stream finishes when ``stopMonitoring()`` is called or when the
     /// consumer cancels iteration.
+    ///
+    /// Example:
+    /// ```swift
+    /// let stream = await NetworkMonitor.shared.updates
+    /// for await status in stream {
+    ///     print(status)
+    /// }
+    /// ```
     public var updates: AsyncStream<NetworkReachability> {
         AsyncStream { continuation in
             let id = UUID()

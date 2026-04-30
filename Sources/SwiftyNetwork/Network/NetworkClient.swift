@@ -6,6 +6,17 @@ import Foundation
 /// will, however, refresh authorization once on 401 (up to
 /// ``NetworkClientConfiguration/maxAuthRefreshAttempts``) and retry the
 /// original request with the new credentials.
+///
+/// Example:
+/// ```swift
+/// struct User: Decodable, Sendable {
+///     let id: String
+///     let name: String
+/// }
+///
+/// let client = NetworkClient()
+/// let user = try await client.request(UserEndpoint(id: "123"), responseType: User.self)
+/// ```
 public actor NetworkClient: NetworkDataSource {
 
     private var configuration: NetworkClientConfiguration
@@ -15,9 +26,20 @@ public actor NetworkClient: NetworkDataSource {
     ///
     /// Suitable for simple apps. For testability or multiple distinct
     /// configurations, create dedicated ``NetworkClient`` instances.
+    ///
+    /// Example:
+    /// ```swift
+    /// let user = try await NetworkClient.shared.request(endpoint, responseType: User.self)
+    /// ```
     public static let shared = NetworkClient()
 
     /// Creates a new network client.
+    ///
+    /// Example:
+    /// ```swift
+    /// let configuration = NetworkClientConfiguration(timeoutInterval: 10, logLevel: .debug)
+    /// let client = NetworkClient(configuration: configuration)
+    /// ```
     ///
     /// - Parameter configuration: The configuration to use.
     public init(configuration: NetworkClientConfiguration = NetworkClientConfiguration()) {
@@ -27,6 +49,14 @@ public actor NetworkClient: NetworkDataSource {
 
     /// Replaces the active configuration atomically.
     ///
+    /// Existing in-flight requests continue with the configuration captured when
+    /// they started. New requests use `newConfiguration`.
+    ///
+    /// Example:
+    /// ```swift
+    /// await client.updateConfiguration(NetworkClientConfiguration(logLevel: .info))
+    /// ```
+    ///
     /// - Parameter newConfiguration: The new configuration to apply.
     public func updateConfiguration(_ newConfiguration: NetworkClientConfiguration) {
         self.configuration = newConfiguration
@@ -35,6 +65,11 @@ public actor NetworkClient: NetworkDataSource {
 
     /// Returns the cumulative number of request **attempts** made by this client,
     /// including retries triggered by auth refresh.
+    ///
+    /// Example:
+    /// ```swift
+    /// let attempts = await client.attemptCount()
+    /// ```
     public func attemptCount() async -> Int {
         requestAttemptCount
     }
@@ -48,6 +83,11 @@ public actor NetworkClient: NetworkDataSource {
     ///   - responseType: The expected `Decodable` response type.
     /// - Returns: A decoded value of `responseType`.
     /// - Throws: ``NetworkError`` if the request, response, or decoding fails.
+    ///
+    /// Example:
+    /// ```swift
+    /// let profile = try await client.request(ProfileEndpoint(), responseType: Profile.self)
+    /// ```
     public func request<T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type
@@ -65,12 +105,17 @@ public actor NetworkClient: NetworkDataSource {
     ///
     /// - Parameter endpoint: The endpoint describing the request.
     /// - Throws: ``NetworkError`` if the request or response fails.
+    ///
+    /// Example:
+    /// ```swift
+    /// try await client.request(DeleteProfileEndpoint())
+    /// ```
     public func request(_ endpoint: any NetworkEndpoint) async throws {
         _ = try await request(endpoint, responseType: EmptyResponse.self)
     }
 
     /// Performs a network request with an `Encodable` body, encoding it via the
-    /// configured ``JSONEncoder``.
+    /// configured `JSONEncoder`.
     ///
     /// - Parameters:
     ///   - endpoint: The endpoint describing the request.
@@ -79,6 +124,12 @@ public actor NetworkClient: NetworkDataSource {
     /// - Returns: A decoded value of `responseType`.
     /// - Throws: ``NetworkError/encodingFailed(underlying:)`` if encoding fails;
     ///   other ``NetworkError`` cases on transport or decoding failures.
+    ///
+    /// Example:
+    /// ```swift
+    /// let draft = CreatePostRequest(title: "Hello", body: "...")
+    /// let post = try await client.request(CreatePostEndpoint(), body: draft, responseType: Post.self)
+    /// ```
     public func request<Body: Encodable & Sendable, T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         body: Body,

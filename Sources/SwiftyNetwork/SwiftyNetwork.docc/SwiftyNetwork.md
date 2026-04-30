@@ -20,6 +20,9 @@ SwiftyNetwork provides:
 - ``HTTPMethod``
 - ``NetworkClient``
 - ``NetworkClientConfiguration``
+- ``APIClient``
+- ``NetworkDataSource``
+- ``EmptyResponse``
 - ``NetworkError``
 
 ### Authentication

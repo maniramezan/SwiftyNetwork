@@ -1,11 +1,11 @@
 @Tutorial(time: 10) {
     @Intro(title: "Authenticated requests") {
-        Use ``OAuthAuthorizationProvider`` to attach bearer tokens automatically and refresh them on 401.
+        Use `OAuthAuthorizationProvider` to attach bearer tokens automatically and refresh them on 401.
     }
 
     @Section(title: "Attach a token") {
         @ContentAndMedia {
-            Create an authorization provider and pass it to ``NetworkClientConfiguration``.
+            Create an authorization provider and pass it to `NetworkClientConfiguration`.
         }
 
         @Steps {
@@ -25,12 +25,12 @@
 
     @Section(title: "Custom authorization") {
         @ContentAndMedia {
-            For non-OAuth schemes, conform your own type to ``AuthorizationProvider`` or set ``NetworkEndpoint/authorization`` per endpoint.
+            For non-OAuth schemes, conform your own type to `AuthorizationProvider` or set endpoint authorization per endpoint.
         }
 
         @Steps {
             @Step {
-                Set ``AuthorizationType/apiKey(key:header:)`` on individual endpoints when an API key suffices.
+                Set `AuthorizationType.apiKey(key:header:)` on individual endpoints when an API key suffices.
 
                 @Code(name: "ApiKey.swift", file: "Auth-ApiKey.swift")
             }

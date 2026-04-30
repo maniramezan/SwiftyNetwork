@@ -5,6 +5,25 @@ import Foundation
 /// Implementers should be thread-safe and idempotent under concurrent refresh
 /// requests. ``OAuthAuthorizationProvider`` provides a built-in implementation
 /// that coalesces overlapping refreshes.
+///
+/// Example:
+/// ```swift
+/// actor StaticTokenProvider: AuthorizationProvider {
+///     let token: String
+///
+///     init(token: String) {
+///         self.token = token
+///     }
+///
+///     func currentAuthorization() async -> AuthorizationType {
+///         .bearer(token: token)
+///     }
+///
+///     func refreshAuthorizationIfNeeded() async -> Bool {
+///         false
+///     }
+/// }
+/// ```
 public protocol AuthorizationProvider: Sendable {
     /// Returns the current authorization to apply to requests.
     func currentAuthorization() async -> AuthorizationType
@@ -28,6 +47,16 @@ public protocol AuthorizationProvider: Sendable {
 /// Concurrent calls to ``refreshAuthorizationIfNeeded()`` are coalesced so the
 /// refresh handler runs at most once per refresh cycle even if many requests
 /// receive a 401 simultaneously.
+///
+/// Example:
+/// ```swift
+/// let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") {
+///     await tokenService.refreshAccessToken()
+/// }
+///
+/// let configuration = NetworkClientConfiguration(authorizationProvider: provider)
+/// let client = NetworkClient(configuration: configuration)
+/// ```
 public actor OAuthAuthorizationProvider: AuthorizationProvider {
     private var accessToken: String
     private let refreshTokenHandler: @Sendable () async -> String?

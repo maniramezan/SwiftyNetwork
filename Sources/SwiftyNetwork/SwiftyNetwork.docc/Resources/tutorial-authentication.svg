@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" role="img" aria-labelledby="title desc">
+  <title id="title">SwiftyNetwork authentication</title>
+  <desc id="desc">A bearer token authorizes requests and can be refreshed after an unauthorized response.</desc>
+  <rect width="800" height="450" rx="32" fill="#24172F"/>
+  <rect x="105" y="155" width="190" height="110" rx="22" fill="#FF9F0A" opacity="0.95"/>
+  <rect x="505" y="155" width="190" height="110" rx="22" fill="#5E5CE6" opacity="0.95"/>
+  <path d="M305 205h190" stroke="#FFF7EE" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M455 177l40 28-40 28" stroke="#FFF7EE" stroke-width="10" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M570 282c-32 48-128 48-160 0" stroke="#FFF7EE" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M416 315l-18-33 37 4" fill="#FFF7EE"/>
+  <text x="200" y="215" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#130B04">Token</text>
+  <text x="600" y="215" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="26" font-weight="700" fill="#F7F3FF">Request</text>
+  <text x="490" y="355" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="23" fill="#FFF7EE">Refresh on 401</text>
+</svg>

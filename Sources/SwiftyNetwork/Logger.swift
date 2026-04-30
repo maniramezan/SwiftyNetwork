@@ -7,6 +7,12 @@ import os
 ///
 /// Levels are ordered from least to most verbose. Setting a level enables that
 /// level and all higher-severity levels.
+///
+/// Example:
+/// ```swift
+/// let configuration = NetworkClientConfiguration(logLevel: .debug)
+/// let client = NetworkClient(configuration: configuration)
+/// ```
 public enum LogLevel: Int, Sendable, Comparable {
     /// Emit no log messages.
     case off = 0
@@ -19,6 +25,15 @@ public enum LogLevel: Int, Sendable, Comparable {
     /// Emit all messages including debug-level diagnostics.
     case debug = 4
 
+    /// Returns whether the left-hand level is less verbose than the right-hand level.
+    ///
+    /// This enables comparisons such as `if logLevel >= .warning` when filtering
+    /// messages by severity.
+    ///
+    /// - Parameters:
+    ///   - lhs: The first log level.
+    ///   - rhs: The second log level.
+    /// - Returns: `true` when `lhs` has a lower raw severity value than `rhs`.
     public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
         lhs.rawValue < rhs.rawValue
     }

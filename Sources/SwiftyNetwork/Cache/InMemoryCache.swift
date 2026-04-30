@@ -36,6 +36,13 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     private let maxSize: Int?
 
     /// Creates an empty in-memory cache.
+    ///
+    /// Example:
+    /// ```swift
+    /// let unlimitedCache = InMemoryCache<User>()
+    /// let boundedCache = InMemoryCache<User>(maxSize: 100)
+    /// ```
+    ///
     /// - Parameter maxSize: Optional maximum number of entries. When exceeded, LRU eviction occurs.
     public init(maxSize: Int? = nil) {
         self.maxSize = maxSize
@@ -44,6 +51,9 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     // MARK: - Cache API
 
     /// Retrieves a value for the given cache key, if present.
+    ///
+    /// Accessing a value updates its last-accessed timestamp for LRU eviction.
+    ///
     /// - Parameter key: The cache key.
     /// - Returns: The stored value, or `nil` if not found.
     public func value(forKey key: CacheKey) async -> T? {
@@ -57,6 +67,10 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     }
 
     /// Stores a value for the given cache key and records the current timestamp.
+    ///
+    /// If the cache has a `maxSize` and this write exceeds it, the least recently
+    /// used entry is evicted.
+    ///
     /// - Parameters:
     ///   - value: The value to store.
     ///   - key: The cache key.
@@ -67,6 +81,10 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     }
 
     /// Stores a value for the given cache key with an explicit timestamp.
+    ///
+    /// Use this when restoring values from persistence or preserving timestamps
+    /// during cache promotion.
+    ///
     /// - Parameters:
     ///   - value: The value to store.
     ///   - key: The cache key.
@@ -98,6 +116,12 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     // MARK: - Expiration Helpers
 
     /// Removes entries older than `maxAge` seconds.
+    ///
+    /// Example:
+    /// ```swift
+    /// await cache.removeExpiredEntries(maxAge: 300)
+    /// ```
+    ///
     /// - Parameter maxAge: Maximum allowed age in seconds. Entries older than this will be removed.
     public func removeExpiredEntries(maxAge: TimeInterval) async {
         let cutoff = Date().addingTimeInterval(-maxAge)
@@ -105,12 +129,23 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     }
 
     /// Convenience alias to match common naming: removes items older than the supplied age.
-    /// - Parameter olderThan: Age threshold in seconds. Items older than this are removed.
+    ///
+    /// Example:
+    /// ```swift
+    /// await cache.removeEntries(olderThan: 60)
+    /// ```
+    ///
+    /// - Parameter maxAge: Age threshold in seconds. Items older than this are removed.
     public func removeEntries(olderThan maxAge: TimeInterval) async {
         await removeExpiredEntries(maxAge: maxAge)
     }
 
     /// Returns the number of entries currently stored in the cache.
+    ///
+    /// Example:
+    /// ```swift
+    /// let currentSize = await cache.count()
+    /// ```
     public func count() async -> Int {
         storage.count
     }
