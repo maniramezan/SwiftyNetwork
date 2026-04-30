@@ -11,6 +11,7 @@ SwiftyNetwork provides:
 - **Composable caching** with ``InMemoryCache`` and ``LayeredCache``.
 - **Repository coordination** with ``GenericRepository`` and ``CachePolicy``.
 - **Pluggable authentication** via ``AuthorizationProvider`` and ``OAuthAuthorizationProvider``.
+- **Optional SSL pinning** via ``SSLPinningConfiguration`` for controlled hosts.
 
 ## Topics
 
@@ -30,6 +31,10 @@ SwiftyNetwork provides:
 - ``AuthorizationType``
 - ``AuthorizationProvider``
 - ``OAuthAuthorizationProvider``
+
+### Security
+
+- ``SSLPinningConfiguration``
 
 ### Caching
 

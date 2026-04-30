@@ -13,6 +13,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Type-Safe Endpoints**: Protocol-based endpoint definitions with compile-time safety
 - **Flexible Caching**: Pluggable caching system with multiple policies
 - **Authentication Support**: Built-in OAuth and custom authentication providers
+- **SSL Pinning**: Optional certificate and public-key pinning for controlled hosts
 - **Comprehensive Error Handling**: Detailed error types with localized descriptions
 - **Repository Pattern**: Clean separation between network and local data sources
 - **Automatic Auth Refresh**: Refreshes credentials and replays the request once on `401`
@@ -288,6 +289,39 @@ do {
 }
 ```
 
+### SSL Pinning
+
+Use SSL pinning when your app and API are operated together and you can safely rotate pins before server
+certificates or keys change. Pinning is enforced only for configured hosts; all other hosts use normal
+`URLSession` trust handling.
+
+```swift
+func makePinnedClient() throws -> NetworkClient {
+    guard let apiPublicKeyPin = SSLPinningConfiguration.Pin.publicKeySHA256(
+        base64Encoded: "BASE64_ENCODED_SHA256_PUBLIC_KEY_HASH"
+    ) else {
+        throw NetworkError.invalidData
+    }
+
+    let pinning = SSLPinningConfiguration(
+        pinnedHosts: [
+            "api.example.com": [apiPublicKeyPin]
+        ],
+        includesSubdomains: false,
+        requiresDefaultTrustValidation: true
+    )
+
+    let configuration = NetworkClientConfiguration(
+        sslPinning: pinning,
+        timeoutInterval: 30
+    )
+    return NetworkClient(configuration: configuration)
+}
+```
+
+For certificate pins, use `.certificate(_:)` with DER certificate data or `.certificateSHA256(base64Encoded:)`.
+For safer rotations, configure more than one accepted pin during certificate or key rollovers.
+
 ### Custom Cache Implementation
 
 ```swift
@@ -372,6 +406,7 @@ SwiftyNetwork is built around several key protocols and types:
 - **`LocalDataSource`**: Local storage abstraction
 - **`Repository`**: Combines network and local data sources
 - **`AuthorizationProvider`**: Handles authentication
+- **`SSLPinningConfiguration`**: Configures certificate and public-key pinning
 
 This design promotes clean separation of concerns, testability, and flexibility.
 
