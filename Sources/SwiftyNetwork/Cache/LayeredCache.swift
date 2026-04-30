@@ -42,21 +42,21 @@ public actor LayeredCache<T: Sendable>: Cache {
 
     public func value(forKey key: CacheKey) async -> T? {
         if let inMemory = await memoryCache.value(forKey: key) {
-            Logger.debug("Cache hit in memory for key: \(key.rawValue)")
+            Logger.debug("Cache hit in memory")
             return inMemory
         }
 
         guard let persistentCache else {
-            Logger.debug("Cache miss for key: \(key.rawValue)")
+            Logger.debug("Cache miss")
             return nil
         }
 
         guard let persisted = await persistentCache.value(forKey: key) else {
-            Logger.debug("Cache miss in both layers for key: \(key.rawValue)")
+            Logger.debug("Cache miss in both layers")
             return nil
         }
 
-        Logger.debug("Cache hit in persistent layer, promoting to memory for key: \(key.rawValue)")
+        Logger.debug("Cache hit in persistent layer, promoting to memory")
         if let timestamp = await persistentCache.timestamp(forKey: key),
             let setWithTimestamp = setMemoryValueWithTimestamp
         {

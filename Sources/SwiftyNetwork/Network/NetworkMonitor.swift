@@ -30,7 +30,7 @@ public actor NetworkMonitor {
     /// Shared singleton instance for global network monitoring.
     public static let shared = NetworkMonitor()
 
-    private let monitor: NWPathMonitor
+    private var monitor: NWPathMonitor?
     private var currentStatus: NetworkReachability = .unknown
     private var isMonitoring = false
     private var continuations: [UUID: AsyncStream<NetworkReachability>.Continuation] = [:]
@@ -38,7 +38,6 @@ public actor NetworkMonitor {
     /// Creates a new network monitor. Use ``shared`` unless multiple independent
     /// monitors are needed.
     public init() {
-        self.monitor = NWPathMonitor()
     }
 
     /// Begins observing network path changes.
@@ -47,6 +46,7 @@ public actor NetworkMonitor {
     public func startMonitoring() {
         guard !isMonitoring else { return }
 
+        let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let reachability = NetworkReachability(path.status)
             Task { [weak self] in
@@ -55,13 +55,15 @@ public actor NetworkMonitor {
         }
         let queue = DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue")
         monitor.start(queue: queue)
+        self.monitor = monitor
         isMonitoring = true
     }
 
     /// Stops observing network path changes and finishes any active update streams.
     public func stopMonitoring() {
         guard isMonitoring else { return }
-        monitor.cancel()
+        monitor?.cancel()
+        monitor = nil
         isMonitoring = false
         for continuation in continuations.values {
             continuation.finish()

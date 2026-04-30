@@ -132,7 +132,7 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
         if let lruKey {
             storage.removeValue(forKey: lruKey)
-            Logger.debug("Evicted LRU cache entry: \(lruKey.rawValue)")
+            Logger.debug("Evicted LRU cache entry")
         }
     }
 }
