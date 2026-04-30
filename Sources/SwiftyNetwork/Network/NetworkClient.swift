@@ -52,7 +52,21 @@ public actor NetworkClient: NetworkDataSource {
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T {
-        try await performRequest(endpoint, responseType: responseType, refreshAttempt: 0)
+        let configuration = self.configuration
+        return try await performRequest(
+            endpoint,
+            responseType: responseType,
+            refreshAttempt: 0,
+            configuration: configuration
+        )
+    }
+
+    /// Performs a network request that is expected to return no response body.
+    ///
+    /// - Parameter endpoint: The endpoint describing the request.
+    /// - Throws: ``NetworkError`` if the request or response fails.
+    public func request(_ endpoint: any NetworkEndpoint) async throws {
+        _ = try await request(endpoint, responseType: EmptyResponse.self)
     }
 
     /// Performs a network request with an `Encodable` body, encoding it via the
@@ -70,6 +84,7 @@ public actor NetworkClient: NetworkDataSource {
         body: Body,
         responseType: T.Type
     ) async throws -> T {
+        let configuration = self.configuration
         let encodedBody: Data
         do {
             encodedBody = try configuration.encoder.encode(body)
@@ -79,7 +94,12 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         let wrapped = EncodedBodyEndpoint(wrapped: endpoint, encodedBody: encodedBody)
-        return try await performRequest(wrapped, responseType: responseType, refreshAttempt: 0)
+        return try await performRequest(
+            wrapped,
+            responseType: responseType,
+            refreshAttempt: 0,
+            configuration: configuration
+        )
     }
 
     // MARK: - Private Request Pipeline
@@ -87,7 +107,8 @@ public actor NetworkClient: NetworkDataSource {
     private func performRequest<T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type,
-        refreshAttempt: Int
+        refreshAttempt: Int,
+        configuration: NetworkClientConfiguration
     ) async throws -> T {
         requestAttemptCount += 1
         Logger.debug("Starting request (attempt \(refreshAttempt + 1))")
@@ -99,8 +120,12 @@ public actor NetworkClient: NetworkDataSource {
         )
         Logger.debugURL("Resolved URL", url: url)
 
-        var request = buildURLRequest(from: endpoint, url: url)
-        await applyAuthorization(to: &request, from: endpoint)
+        var request = buildURLRequest(from: endpoint, url: url, configuration: configuration)
+        let providerAuthApplied = await applyAuthorization(
+            to: &request,
+            from: endpoint,
+            configuration: configuration
+        )
 
         let data: Data
         let response: URLResponse
@@ -122,15 +147,21 @@ public actor NetworkClient: NetworkDataSource {
             return try await handleUnauthorized(
                 endpoint: endpoint,
                 responseType: responseType,
-                refreshAttempt: refreshAttempt
+                refreshAttempt: refreshAttempt,
+                providerAuthApplied: providerAuthApplied,
+                configuration: configuration
             )
         }
 
         try validateStatusCode(httpResponse.statusCode, data: data)
-        return try decodeResponse(data: data, responseType: responseType)
+        return try decodeResponse(data: data, responseType: responseType, configuration: configuration)
     }
 
-    private func buildURLRequest(from endpoint: any NetworkEndpoint, url: URL) -> URLRequest {
+    private func buildURLRequest(
+        from endpoint: any NetworkEndpoint,
+        url: URL,
+        configuration: NetworkClientConfiguration
+    ) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
         request.timeoutInterval = configuration.timeoutInterval
@@ -143,13 +174,17 @@ public actor NetworkClient: NetworkDataSource {
 
     private func applyAuthorization(
         to request: inout URLRequest,
-        from endpoint: any NetworkEndpoint
-    ) async {
+        from endpoint: any NetworkEndpoint,
+        configuration: NetworkClientConfiguration
+    ) async -> Bool {
         var authType = endpoint.authorization
         if case .none = authType, let provider = configuration.authorizationProvider {
             authType = await provider.currentAuthorization()
+            authType.apply(to: &request)
+            return true
         }
         authType.apply(to: &request)
+        return false
     }
 
     private func validateStatusCode(_ statusCode: Int, data: Data) throws {
@@ -173,8 +208,16 @@ public actor NetworkClient: NetworkDataSource {
 
     private func decodeResponse<T: Decodable & Sendable>(
         data: Data,
-        responseType: T.Type
+        responseType: T.Type,
+        configuration: NetworkClientConfiguration
     ) throws -> T {
+        if data.isEmpty, responseType == EmptyResponse.self {
+            guard let emptyResponse = EmptyResponse() as? T else {
+                throw NetworkError.invalidData
+            }
+            return emptyResponse
+        }
+
         do {
             let decoded = try configuration.decoder.decode(T.self, from: data)
             Logger.debug("Successfully decoded response as \(T.self)")
@@ -188,9 +231,12 @@ public actor NetworkClient: NetworkDataSource {
     private func handleUnauthorized<T: Decodable & Sendable>(
         endpoint: any NetworkEndpoint,
         responseType: T.Type,
-        refreshAttempt: Int
+        refreshAttempt: Int,
+        providerAuthApplied: Bool,
+        configuration: NetworkClientConfiguration
     ) async throws -> T {
         guard let provider = configuration.authorizationProvider,
+            providerAuthApplied,
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
@@ -213,7 +259,8 @@ public actor NetworkClient: NetworkDataSource {
         return try await performRequest(
             endpoint,
             responseType: responseType,
-            refreshAttempt: refreshAttempt + 1
+            refreshAttempt: refreshAttempt + 1,
+            configuration: configuration
         )
     }
 

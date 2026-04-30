@@ -61,20 +61,21 @@ final class TestURLProtocol: URLProtocol {
         let data: Data?
         let expectedAuthorization: String?
         let error: Error?
+        let delay: TimeInterval
 
         /// Creates a successful response with the given data.
-        static func success(_ data: Data, statusCode: Int = 200) -> Response {
-            Response(statusCode: statusCode, data: data, expectedAuthorization: nil, error: nil)
+        static func success(_ data: Data, statusCode: Int = 200, delay: TimeInterval = 0) -> Response {
+            Response(statusCode: statusCode, data: data, expectedAuthorization: nil, error: nil, delay: delay)
         }
 
         /// Creates a response with a specific status code.
-        static func status(_ code: Int, data: Data = Data()) -> Response {
-            Response(statusCode: code, data: data, expectedAuthorization: nil, error: nil)
+        static func status(_ code: Int, data: Data = Data(), delay: TimeInterval = 0) -> Response {
+            Response(statusCode: code, data: data, expectedAuthorization: nil, error: nil, delay: delay)
         }
 
         /// Creates a failure response with an error.
-        static func failure(_ error: Error) -> Response {
-            Response(statusCode: 0, data: nil, expectedAuthorization: nil, error: error)
+        static func failure(_ error: Error, delay: TimeInterval = 0) -> Response {
+            Response(statusCode: 0, data: nil, expectedAuthorization: nil, error: error, delay: delay)
         }
     }
     private static let state = TestURLProtocolState()
@@ -100,6 +101,9 @@ final class TestURLProtocol: URLProtocol {
         guard let resp = Self.dequeueResponse(for: testId) else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
+        }
+        if resp.delay > 0 {
+            Thread.sleep(forTimeInterval: resp.delay)
         }
         if let error = resp.error {
             client?.urlProtocol(self, didFailWithError: error)

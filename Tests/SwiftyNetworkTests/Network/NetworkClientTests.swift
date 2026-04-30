@@ -194,6 +194,39 @@ struct NetworkClientIntegrationTests {
         }
     }
 
+    @Test("NetworkClient supports successful empty responses")
+    func testNetworkClientSupportsEmptyResponse() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "empty-response"
+        TestURLProtocol.setResponses(
+            [.status(204)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        let response = try await client.request(endpoint, responseType: EmptyResponse.self)
+
+        #expect(response == EmptyResponse())
+    }
+
+    @Test("NetworkClient no-body request supports successful empty responses")
+    func testNetworkClientNoBodyRequestSupportsEmptyResponse() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "no-body-empty-response"
+        TestURLProtocol.setResponses(
+            [.status(204)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+
+        try await client.request(endpoint)
+    }
+
     @Test("NetworkClient maps URL errors")
     func testNetworkClientMapsURLError() async throws {
         let session = makeTestSession()
@@ -461,5 +494,72 @@ struct NetworkClientIntegrationTests {
         // Should have attempted refresh exactly once
         let refreshCalls = await provider.refreshCallCount
         #expect(refreshCalls == 1)
+    }
+
+    @Test("NetworkClient does not refresh provider when endpoint authorization was used")
+    func testNetworkClientDoesNotRefreshProviderForEndpointAuthorization() async throws {
+        struct AuthEndpoint: NetworkEndpoint {
+            let testId: String
+            let baseURL = "https://api.test.com"
+            var path: String { "/auth" }
+            var method: HTTPMethod { .get }
+            var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
+            var authorization: AuthorizationType { .bearer(token: "endpoint-token") }
+        }
+
+        let session = makeTestSession()
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "provider-token"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "fresh-provider-token")
+        )
+        let configuration = NetworkClientConfiguration(
+            session: session,
+            authorizationProvider: provider,
+            maxAuthRefreshAttempts: 1,
+            retryDelay: 0
+        )
+        let client = NetworkClient(configuration: configuration)
+        let testId = "endpoint-auth-401"
+        TestURLProtocol.setResponses(
+            [.status(401)],
+            for: testId
+        )
+
+        await #expect {
+            try await client.request(AuthEndpoint(testId: testId), responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .unauthorized = networkError
+            else { return false }
+            return true
+        }
+
+        let refreshCalls = await provider.refreshCallCount
+        #expect(refreshCalls == 0)
+    }
+
+    @Test("NetworkClient keeps request configuration stable across awaits")
+    func testNetworkClientUsesConfigurationSnapshot() async throws {
+        let initialSession = makeTestSession()
+        let replacementSession = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: initialSession)
+        let client = NetworkClient(configuration: configuration)
+        let user = TestUser(id: "snapshot", name: "Stable", email: "stable@example.com")
+        let data = try JSONEncoder().encode(user)
+        let testId = "configuration-snapshot"
+        TestURLProtocol.setResponses(
+            [.success(data, delay: 0.05)],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        async let response = client.request(endpoint, responseType: TestUser.self)
+        await Task.yield()
+        await client.updateConfiguration(NetworkClientConfiguration(session: replacementSession))
+
+        let fetched = try await response
+
+        #expect(fetched == user)
     }
 }
