@@ -8,7 +8,15 @@ import Foundation
 /// don't want to expose a concrete cache type. The wrapper is `Sendable`
 /// because all of its stored work items are `@Sendable` closures and the
 /// underlying cache must itself be `Sendable`.
+///
+/// Example:
+/// ```swift
+/// let memoryCache = InMemoryCache<User>()
+/// let erasedCache = AnyCache(memoryCache)
+/// await erasedCache.setValue(user, forKey: CacheKey.user("123", resource: "profile"))
+/// ```
 public struct AnyCache<T: Sendable>: Cache {
+    /// The type of value stored by the wrapped cache.
     public typealias Value = T
 
     private let _getValue: @Sendable (CacheKey) async -> T?
@@ -29,16 +37,25 @@ public struct AnyCache<T: Sendable>: Cache {
     }
 
     /// Retrieves a value from the cache for the given key.
+    ///
+    /// - Parameter key: The cache key to look up.
+    /// - Returns: The cached value if it exists, otherwise `nil`.
     public func value(forKey key: CacheKey) async -> T? {
         await _getValue(key)
     }
 
     /// Stores a value in the cache for the given key.
+    ///
+    /// - Parameters:
+    ///   - value: The value to cache.
+    ///   - key: The cache key to associate with the value.
     public func setValue(_ value: T, forKey key: CacheKey) async {
         await _setValue(value, key)
     }
 
     /// Removes a value from the cache for the given key.
+    ///
+    /// - Parameter key: The cache key to remove.
     public func removeValue(forKey key: CacheKey) async {
         await _removeValue(key)
     }
@@ -49,6 +66,9 @@ public struct AnyCache<T: Sendable>: Cache {
     }
 
     /// Returns the timestamp when the value was last stored for the given key.
+    ///
+    /// - Parameter key: The cache key to inspect.
+    /// - Returns: The stored timestamp, or `nil` when the key is absent.
     public func timestamp(forKey key: CacheKey) async -> Date? {
         await _timestamp(key)
     }

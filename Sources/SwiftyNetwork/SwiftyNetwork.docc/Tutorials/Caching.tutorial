@@ -5,7 +5,7 @@
 
     @Section(title: "Wire up an in-memory cache") {
         @ContentAndMedia {
-            ``InMemoryCache`` is a thread-safe actor with optional LRU eviction.
+            `InMemoryCache` is a thread-safe actor with optional LRU eviction.
         }
 
         @Steps {
@@ -16,7 +16,7 @@
             }
 
             @Step {
-                Build a ``GenericRepository`` that combines your network client and cache.
+                Build a `GenericRepository` that combines your network client and cache.
 
                 @Code(name: "Repository.swift", file: "Caching-Repository.swift")
             }
@@ -25,7 +25,7 @@
 
     @Section(title: "Choose a cache policy") {
         @ContentAndMedia {
-            ``CachePolicy`` controls the read path. Pick the right one per call.
+            `CachePolicy` controls the read path. Pick the right one per call.
         }
 
         @Steps {

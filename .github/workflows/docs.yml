@@ -4,23 +4,27 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: "pages"
+  group: "docs-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
   docs-build:
     runs-on: macos-latest
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Swift
         uses: swift-actions/setup-swift@v2
@@ -28,7 +32,7 @@ jobs:
           swift-version: "6.2"
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build
@@ -37,34 +41,58 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
       - name: Generate DocC documentation
         run: |
-          # Build documentation using xcodebuild and docc
-          xcodebuild docbuild -scheme SwiftyNetwork \
-            -derivedDataPath /tmp/docbuild \
-            -destination 'generic/platform=macOS'
+          set -euo pipefail
 
-          # Process DocC archive for static hosting
-          $(xcrun --find docc) process-archive \
-            transform-for-static-hosting /tmp/docbuild/Build/Products/Debug/SwiftyNetwork.doccarchive \
-            --output-path /tmp/docc-site \
-            --hosting-base-path SwiftyNetwork
+          rm -rf .build/docc-symbol-graphs .build/docc-site
+          swift package dump-symbol-graph --minimum-access-level public
+
+          mkdir -p .build/docc-symbol-graphs
+          cp .build/*/symbolgraph/SwiftyNetwork.symbols.json .build/docc-symbol-graphs/
+
+          xcrun docc convert \
+            Sources/SwiftyNetwork/SwiftyNetwork.docc \
+            --additional-symbol-graph-dir .build/docc-symbol-graphs \
+            --output-dir .build/docc-site \
+            --fallback-display-name SwiftyNetwork \
+            --fallback-bundle-identifier com.manman.SwiftyNetwork \
+            --fallback-default-module-kind library \
+            --transform-for-static-hosting \
+            --hosting-base-path SwiftyNetwork \
+            --experimental-documentation-coverage \
+            --coverage-summary-level brief \
+            --warnings-as-errors
+
+      - name: Upload DocC Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: docc-site
+          path: .build/docc-site
+          if-no-files-found: error
+
+      - name: Configure GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
         with:
-          path: /tmp/docc-site
+          path: .build/docc-site
 
   docs-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: docs-build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

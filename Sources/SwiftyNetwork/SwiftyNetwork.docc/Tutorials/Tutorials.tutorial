@@ -6,17 +6,23 @@
     @Chapter(name: "Foundations") {
         Define endpoints and make your first request.
 
+        @Image(source: "tutorial-foundations.svg", alt: "A network request flowing from an endpoint to a decoded response.")
+
         @TutorialReference(tutorial: "doc:GettingStarted")
     }
 
     @Chapter(name: "Caching") {
         Wire up caches and pick the right policy.
 
+        @Image(source: "tutorial-caching.svg", alt: "A repository reading from memory cache, persistent cache, and the network.")
+
         @TutorialReference(tutorial: "doc:Caching")
     }
 
     @Chapter(name: "Authentication") {
         Attach bearer tokens, refresh on 401, and roll custom providers.
+
+        @Image(source: "tutorial-authentication.svg", alt: "An authenticated request using a bearer token and refresh flow.")
 
         @TutorialReference(tutorial: "doc:Authentication")
     }
