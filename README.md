@@ -1,9 +1,9 @@
 # SwiftyNetwork
 
-[![CI](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/build.yml/badge.svg)](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/build.yml)
-[![Swift](https://img.shields.io/badge/Swift-6.0+-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/platform-iOS%2015.0%2B%20%7C%20macOS%2015.0%2B-lightgrey.svg)](https://developer.apple.com)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Build](https://img.shields.io/github/actions/workflow/status/maniramezan/SwiftyNetwork/build.yml?branch=main&label=build)](https://github.com/maniramezan/SwiftyNetwork/actions/workflows/build.yml)
+[![Swift Versions](https://img.shields.io/endpoint?url=https://swiftpackageindex.com/api/packages/maniramezan/SwiftyNetwork/badge?type=swift-versions)](https://swiftpackageindex.com/maniramezan/SwiftyNetwork)
+[![Platforms](https://img.shields.io/endpoint?url=https://swiftpackageindex.com/api/packages/maniramezan/SwiftyNetwork/badge?type=platforms)](https://swiftpackageindex.com/maniramezan/SwiftyNetwork)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A modern, Swift-native networking library built with Swift 6 concurrency, providing a clean and type-safe API for network operations with built-in caching, authentication, and error handling.
 
