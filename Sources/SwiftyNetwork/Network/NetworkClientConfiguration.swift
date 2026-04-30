@@ -102,4 +102,51 @@ public struct NetworkClientConfiguration: Sendable {
         self.retryDelay = retryDelay
         self.logLevel = logLevel
     }
+
+    /// Creates a new network client configuration backed by an SSL-pinned `URLSession`.
+    ///
+    /// Use this initializer when you need certificate or public-key pinning. Pinning is
+    /// applied only to hosts listed in `sslPinning`; all other hosts use normal
+    /// `URLSession` trust handling.
+    ///
+    /// - Parameters:
+    ///   - sslPinning: Host pinning policies to enforce.
+    ///   - sessionConfiguration: The base URL session configuration. Defaults to `.default`.
+    ///   - delegateQueue: Queue used for URL session delegate callbacks. Defaults to the system queue.
+    ///   - decoder: The JSON decoder to use.
+    ///   - encoder: The JSON encoder to use.
+    ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
+    ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
+    ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
+    ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
+    ///   - logLevel: Verbosity for the internal logger. Defaults to ``LogLevel/warning``.
+    public init(
+        sslPinning: SSLPinningConfiguration,
+        sessionConfiguration: URLSessionConfiguration = .default,
+        delegateQueue: OperationQueue? = nil,
+        decoder: JSONDecoder = JSONDecoder(),
+        encoder: JSONEncoder = JSONEncoder(),
+        authorizationProvider: AuthorizationProvider? = nil,
+        maxAuthRefreshAttempts: Int = 1,
+        timeoutInterval: TimeInterval = 30,
+        retryDelay: TimeInterval = 1.0,
+        logLevel: LogLevel = .warning
+    ) {
+        let delegate = SSLPinningURLSessionDelegate(configuration: sslPinning)
+        let session = URLSession(
+            configuration: sessionConfiguration,
+            delegate: delegate,
+            delegateQueue: delegateQueue
+        )
+        self.init(
+            session: session,
+            decoder: decoder,
+            encoder: encoder,
+            authorizationProvider: authorizationProvider,
+            maxAuthRefreshAttempts: maxAuthRefreshAttempts,
+            timeoutInterval: timeoutInterval,
+            retryDelay: retryDelay,
+            logLevel: logLevel
+        )
+    }
 }
