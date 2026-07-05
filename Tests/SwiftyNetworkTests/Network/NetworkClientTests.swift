@@ -444,6 +444,67 @@ struct NetworkClientIntegrationTests {
         }
     }
 
+    @Test("NetworkClient maps unrecognized URLError codes to underlying")
+    func testNetworkClientMapsUnrecognizedURLErrorToUnderlying() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "unrecognized-url-error"
+        TestURLProtocol.setResponses(
+            [.failure(URLError(.cannotFindHost))],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .underlying(let underlying) = networkError
+            else { return false }
+            return !underlying.localizedDescription.isEmpty
+        }
+    }
+
+    @Test("NetworkClient maps non-URLError transport failures to underlying")
+    func testNetworkClientMapsNonURLErrorToUnderlying() async throws {
+        struct CustomTransportError: Error {}
+
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "custom-transport-error"
+        TestURLProtocol.setResponses(
+            [.failure(CustomTransportError())],
+            for: testId
+        )
+
+        let endpoint = makeEndpointWithTestId(testId)
+        await #expect {
+            try await client.request(endpoint, responseType: TestUser.self)
+        } throws: { error in
+            guard let networkError = error as? NetworkError,
+                case .underlying = networkError
+            else { return false }
+            return true
+        }
+    }
+
+    @Test("NetworkClient emits debug logs when logLevel is debug")
+    func testNetworkClientDebugLogging() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session, logLevel: .debug)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "debug-logging"
+        let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        let data = try JSONEncoder().encode(user)
+        TestURLProtocol.setResponses([.success(data)], for: testId)
+
+        let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+
+        #expect(response == user)
+    }
+
     // MARK: - Retry Delay Tests
 
     @Test("NetworkClient retryDelay delays before retry on 401")
@@ -612,7 +673,7 @@ struct NetworkClientIntegrationTests {
         let endpoint = makeEndpointWithTestId(testId)
         async let response = client.request(endpoint, responseType: TestUser.self)
         await Task.yield()
-        await client.updateConfiguration(NetworkClientConfiguration(session: replacementSession))
+        await client.updateConfiguration(NetworkClientConfiguration(session: replacementSession, logLevel: .debug))
 
         let fetched = try await response
 
