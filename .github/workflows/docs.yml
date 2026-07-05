@@ -46,6 +46,11 @@ jobs:
           set -euo pipefail
 
           rm -rf .build/docc-symbol-graphs .build/docc-site
+
+          # dump-symbol-graph tries to load every target in the package graph,
+          # including the synthesized test bundle, so the test target must be
+          # built first or it fails with "Couldn't load module ... PackageTests".
+          swift build --build-tests
           swift package dump-symbol-graph --minimum-access-level public
 
           mkdir -p .build/docc-symbol-graphs
