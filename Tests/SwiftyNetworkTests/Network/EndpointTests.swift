@@ -65,6 +65,18 @@ func testEndpointPathAppending() throws {
     #expect(req.url?.absoluteString == "https://api.test.com/base/sub")
 }
 
+@Test("NetworkEndpoint trims a trailing slash from the base URL")
+func testEndpointTrimsTrailingSlash() throws {
+    struct E: NetworkEndpoint {
+        let baseURL = "https://api.test.com/base/"
+        var path: String { "/sub" }
+        var method: HTTPMethod { .get }
+    }
+
+    let req = try E().makeURLRequest()
+    #expect(req.url?.absoluteString == "https://api.test.com/base/sub")
+}
+
 @Test("NetworkEndpoint throws on invalid base URL")
 func testEndpointInvalidBaseURL() throws {
     struct E: NetworkEndpoint {

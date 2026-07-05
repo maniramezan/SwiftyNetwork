@@ -17,6 +17,25 @@ func testCacheBasedLocalDataSourceReadWrite() async {
     #expect(await local.timestamp(for: key) != nil)
 }
 
+@Test("CacheBasedLocalDataSource removes individual and all values")
+func testCacheBasedLocalDataSourceRemove() async {
+    let cache = InMemoryCache<TestUser>()
+    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
+    let key1 = CacheKey("remove-1")
+    let key2 = CacheKey("remove-2")
+    let user = TestUser(id: "1", name: "Sam", email: "sam@example.com")
+
+    await local.write(user, for: key1)
+    await local.write(user, for: key2)
+
+    await local.remove(for: key1)
+    #expect(await local.read(for: key1) == nil)
+    #expect(await local.read(for: key2) == user)
+
+    await local.removeAll()
+    #expect(await local.read(for: key2) == nil)
+}
+
 @Test("GenericRepository returns cached data when available")
 func testRepositoryReturnsCachedData() async throws {
     let cache = InMemoryCache<TestUser>()

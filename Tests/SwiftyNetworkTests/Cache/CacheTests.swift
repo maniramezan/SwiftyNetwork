@@ -21,6 +21,28 @@ func testCacheKeyEndpointWithoutParams() {
     #expect(key.rawValue == "/users")
 }
 
+@Test("CacheKey initializes from a URL using its absolute string")
+func testCacheKeyFromURL() {
+    let url = URL(string: "https://api.example.com/users/123")!
+    let key = CacheKey(url: url)
+    #expect(key.rawValue == "https://api.example.com/users/123")
+}
+
+@Test("CacheKey initializes from components with a custom separator")
+func testCacheKeyFromComponents() {
+    let key = CacheKey(components: ["users", "123", "posts"])
+    #expect(key.rawValue == "users:123:posts")
+
+    let customSeparator = CacheKey(components: ["a", "b"], separator: "/")
+    #expect(customSeparator.rawValue == "a/b")
+}
+
+@Test("CacheKey.user builds a namespaced key")
+func testCacheKeyUserConvenience() {
+    let key = CacheKey.user("123", resource: "settings")
+    #expect(key.rawValue == "user:123:settings")
+}
+
 @Test("CacheKey conforms to Hashable")
 func testCacheKeyHashable() {
     let key1 = CacheKey("test")
@@ -134,6 +156,77 @@ func testLayeredCacheRemovePropagates() async {
     #expect(await memoryCache.value(forKey: key) == nil)
     let calls = await persistentCache.callCounts
     #expect(calls.remove == 1)
+}
+
+@Test("LayeredCache with only a memory layer stores and retrieves values")
+func testLayeredCacheMemoryOnlyInit() async {
+    let memoryCache = InMemoryCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache)
+    let key = CacheKey("memory-only")
+
+    await layeredCache.setValue("value", forKey: key)
+
+    #expect(await layeredCache.value(forKey: key) == "value")
+    #expect(await layeredCache.timestamp(forKey: key) != nil)
+}
+
+@Test("LayeredCache with only a memory layer reports a miss for absent keys")
+func testLayeredCacheMemoryOnlyMiss() async {
+    let layeredCache = LayeredCache(memoryCache: InMemoryCache<String>())
+    let key = CacheKey("memory-only-miss")
+
+    #expect(await layeredCache.value(forKey: key) == nil)
+    #expect(await layeredCache.timestamp(forKey: key) == nil)
+}
+
+@Test("LayeredCache reports a miss when neither layer has the value")
+func testLayeredCacheMissesBothLayers() async {
+    let memoryCache = InMemoryCache<String>()
+    let persistentCache = TestPersistentCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
+    let key = CacheKey("miss-both-layers")
+
+    #expect(await layeredCache.value(forKey: key) == nil)
+    #expect(await layeredCache.timestamp(forKey: key) == nil)
+}
+
+@Test("LayeredCache promotes persisted values without a timestamp using the current time")
+func testLayeredCachePromotesWithoutTimestamp() async {
+    let memoryCache = InMemoryCache<String>()
+    let persistentCache = NoTimestampPersistentCache<String>()
+    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
+    let key = CacheKey("promote-no-timestamp")
+
+    await persistentCache.setValue("value", forKey: key)
+
+    let value = await layeredCache.value(forKey: key)
+
+    #expect(value == "value")
+    #expect(await memoryCache.value(forKey: key) == "value")
+}
+
+private actor NoTimestampPersistentCache<Value: Sendable>: PersistentCache {
+    private var storage: [CacheKey: Value] = [:]
+
+    func value(forKey key: CacheKey) async -> Value? {
+        storage[key]
+    }
+
+    func setValue(_ value: Value, forKey key: CacheKey) async {
+        storage[key] = value
+    }
+
+    func removeValue(forKey key: CacheKey) async {
+        storage.removeValue(forKey: key)
+    }
+
+    func removeAll() async {
+        storage.removeAll()
+    }
+
+    func timestamp(forKey key: CacheKey) async -> Date? {
+        nil
+    }
 }
 
 private actor TestPersistentCache<Value: Sendable>: PersistentCache {
