@@ -86,11 +86,19 @@ jobs:
           </html>
           EOF
 
+      - name: Archive DocC site
+        run: |
+          # DocC's data/ JSON files can contain colons (e.g. init(_:).json), which
+          # actions/upload-artifact rejects as invalid on NTFS. Zip first so only
+          # the single archive file is validated, not each entry inside it.
+          cd .build/docc-site
+          zip -r -X ../docc-site.zip .
+
       - name: Upload DocC Artifact
         uses: actions/upload-artifact@v7
         with:
           name: docc-site
-          path: .build/docc-site
+          path: .build/docc-site.zip
           if-no-files-found: error
 
       - name: Configure GitHub Pages
