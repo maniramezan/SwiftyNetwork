@@ -69,8 +69,11 @@ public struct NetworkClientConfiguration: Sendable {
     /// Verbosity for SwiftyNetwork's internal logger.
     ///
     /// Setting this updates the package-wide log level when a client is created
-    /// or its configuration is replaced.
-    public var logLevel: LogLevel
+    /// or its configuration is replaced. When `nil` (the default), the current
+    /// package-wide level — ``LogLevel/warning`` unless changed — is left
+    /// untouched, so creating additional clients never resets logging chosen by
+    /// another configuration.
+    public var logLevel: LogLevel?
 
     /// Creates a new network client configuration.
     ///
@@ -82,7 +85,8 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
     ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
-    ///   - logLevel: Verbosity for the internal logger. Defaults to ``LogLevel/warning``.
+    ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
+    ///     leaves the package-wide level unchanged.
     public init(
         session: URLSession = .shared,
         decoder: JSONDecoder = JSONDecoder(),
@@ -91,7 +95,7 @@ public struct NetworkClientConfiguration: Sendable {
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
-        logLevel: LogLevel = .warning
+        logLevel: LogLevel? = nil
     ) {
         self.session = session
         self.decoder = decoder
@@ -119,7 +123,8 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
     ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
-    ///   - logLevel: Verbosity for the internal logger. Defaults to ``LogLevel/warning``.
+    ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
+    ///     leaves the package-wide level unchanged.
     public init(
         sslPinning: SSLPinningConfiguration,
         sessionConfiguration: URLSessionConfiguration = .default,
@@ -130,7 +135,7 @@ public struct NetworkClientConfiguration: Sendable {
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
-        logLevel: LogLevel = .warning
+        logLevel: LogLevel? = nil
     ) {
         let delegate = SSLPinningURLSessionDelegate(configuration: sslPinning)
         let session = URLSession(

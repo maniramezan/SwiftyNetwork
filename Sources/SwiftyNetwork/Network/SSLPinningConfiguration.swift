@@ -15,7 +15,18 @@ public struct SSLPinningConfiguration: Sendable, Equatable {
         /// Pins the SHA-256 hash of the DER-encoded certificate bytes.
         case certificateSHA256(Data)
 
-        /// Pins the SHA-256 hash of the public key bytes exported by Security.
+        /// Pins the SHA-256 hash of the DER-encoded `SubjectPublicKeyInfo` (SPKI) of the public key.
+        ///
+        /// This matches the industry-standard pin format used by HPKP and TrustKit.
+        /// Generate a pin for a live server with:
+        /// ```
+        /// openssl s_client -connect api.example.com:443 < /dev/null 2>/dev/null \
+        ///   | openssl x509 -pubkey -noout \
+        ///   | openssl pkey -pubin -outform der \
+        ///   | openssl dgst -sha256 -binary \
+        ///   | base64
+        /// ```
+        /// RSA (2048/3072/4096-bit) and EC (P-256/P-384/P-521) keys are supported.
         case publicKeySHA256(Data)
 
         /// Creates a certificate SHA-256 pin from a Base64-encoded 32-byte hash.
@@ -30,6 +41,9 @@ public struct SSLPinningConfiguration: Sendable, Equatable {
         }
 
         /// Creates a public-key SHA-256 pin from a Base64-encoded 32-byte hash.
+        ///
+        /// The hash must be computed over the DER-encoded `SubjectPublicKeyInfo`;
+        /// see ``publicKeySHA256(_:)`` for how to generate one.
         ///
         /// - Parameter value: Base64-encoded SHA-256 hash data.
         /// - Returns: A pin when the value decodes to exactly 32 bytes; otherwise `nil`.
@@ -212,16 +226,99 @@ enum SSLPinningTrustEvaluator {
                 continue
             }
 
-            var copyError: Unmanaged<CFError>?
-            guard let keyData = SecKeyCopyExternalRepresentation(publicKey, &copyError) as Data? else {
-                if let error = copyError?.takeRetainedValue() {
-                    Logger.error("Failed to export public key for SSL pinning", error: error, category: .security)
-                }
+            guard let spki = subjectPublicKeyInfo(for: publicKey) else {
+                Logger.error(
+                    "Failed to build SubjectPublicKeyInfo for SSL pinning; skipping key", category: .security)
                 continue
             }
-            keys.append(keyData)
+            keys.append(spki)
         }
         return keys
+    }
+
+    /// Builds the DER-encoded `SubjectPublicKeyInfo` for a public key so pin
+    /// hashes match the industry-standard SPKI SHA-256 format.
+    ///
+    /// Security exports RSA keys as PKCS#1 and EC keys as raw points, so the
+    /// ASN.1 algorithm identifier and BIT STRING framing must be rebuilt here.
+    /// Returns `nil` for unsupported key types or curves.
+    static func subjectPublicKeyInfo(for key: SecKey) -> Data? {
+        var copyError: Unmanaged<CFError>?
+        guard let keyData = SecKeyCopyExternalRepresentation(key, &copyError) as Data? else {
+            if let error = copyError?.takeRetainedValue() {
+                Logger.error("Failed to export public key for SSL pinning", error: error, category: .security)
+            }
+            return nil
+        }
+
+        guard let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
+            let keyType = attributes[kSecAttrKeyType] as? String
+        else {
+            return nil
+        }
+
+        let algorithmIdentifier: Data
+        if keyType == (kSecAttrKeyTypeRSA as String) {
+            // SEQUENCE { OID 1.2.840.113549.1.1.1 (rsaEncryption), NULL }
+            algorithmIdentifier = Data([
+                0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+                0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+            ])
+        } else if keyType == (kSecAttrKeyTypeECSECPrimeRandom as String) {
+            guard let keySizeInBits = attributes[kSecAttrKeySizeInBits] as? Int,
+                let curveOID = ecCurveOID(forKeySizeInBits: keySizeInBits)
+            else {
+                return nil
+            }
+            // OID 1.2.840.10045.2.1 (ecPublicKey)
+            let ecPublicKeyOID = Data([0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])
+            algorithmIdentifier = derSequence(ecPublicKeyOID + curveOID)
+        } else {
+            return nil
+        }
+
+        return derSequence(algorithmIdentifier + derBitString(keyData))
+    }
+
+    private static func ecCurveOID(forKeySizeInBits keySizeInBits: Int) -> Data? {
+        switch keySizeInBits {
+        case 256:
+            // OID 1.2.840.10045.3.1.7 (prime256v1 / P-256)
+            return Data([0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07])
+        case 384:
+            // OID 1.3.132.0.34 (secp384r1 / P-384)
+            return Data([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22])
+        case 521:
+            // OID 1.3.132.0.35 (secp521r1 / P-521)
+            return Data([0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23])
+        default:
+            return nil
+        }
+    }
+
+    // MARK: - Minimal DER Encoding
+
+    private static func derLength(_ length: Int) -> Data {
+        guard length >= 128 else {
+            return Data([UInt8(length)])
+        }
+        var bytes = [UInt8]()
+        var value = length
+        while value > 0 {
+            bytes.insert(UInt8(value & 0xff), at: 0)
+            value >>= 8
+        }
+        return Data([0x80 | UInt8(bytes.count)]) + bytes
+    }
+
+    private static func derSequence(_ content: Data) -> Data {
+        Data([0x30]) + derLength(content.count) + content
+    }
+
+    private static func derBitString(_ content: Data) -> Data {
+        // Leading 0x00 indicates no unused bits in the final byte.
+        let padded = Data([0x00]) + content
+        return Data([0x03]) + derLength(padded.count) + padded
     }
 }
 

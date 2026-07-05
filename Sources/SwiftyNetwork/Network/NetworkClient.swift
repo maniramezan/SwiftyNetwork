@@ -44,7 +44,9 @@ public actor NetworkClient: NetworkDataSource {
     /// - Parameter configuration: The configuration to use.
     public init(configuration: NetworkClientConfiguration = NetworkClientConfiguration()) {
         self.configuration = configuration
-        Logger.setLevel(configuration.logLevel)
+        if let logLevel = configuration.logLevel {
+            Logger.setLevel(logLevel)
+        }
     }
 
     /// Replaces the active configuration atomically.
@@ -60,7 +62,9 @@ public actor NetworkClient: NetworkDataSource {
     /// - Parameter newConfiguration: The new configuration to apply.
     public func updateConfiguration(_ newConfiguration: NetworkClientConfiguration) {
         self.configuration = newConfiguration
-        Logger.setLevel(newConfiguration.logLevel)
+        if let logLevel = newConfiguration.logLevel {
+            Logger.setLevel(logLevel)
+        }
     }
 
     /// Returns the cumulative number of request **attempts** made by this client,
@@ -116,6 +120,9 @@ public actor NetworkClient: NetworkDataSource {
 
     /// Performs a network request with an `Encodable` body, encoding it via the
     /// configured `JSONEncoder`.
+    ///
+    /// A `Content-Type: application/json` header is added automatically unless
+    /// the endpoint already declares a `Content-Type` header.
     ///
     /// - Parameters:
     ///   - endpoint: The endpoint describing the request.
@@ -345,6 +352,10 @@ struct AnySendableError: Error, Sendable, CustomStringConvertible {
 }
 
 /// Internal wrapper that overrides an endpoint's body with pre-encoded data.
+///
+/// Because the body is always JSON produced by the configured `JSONEncoder`,
+/// a `Content-Type: application/json` header is added unless the wrapped
+/// endpoint already declares a `Content-Type` header.
 struct EncodedBodyEndpoint: NetworkEndpoint {
     let wrapped: any NetworkEndpoint
     let encodedBody: Data
@@ -353,7 +364,15 @@ struct EncodedBodyEndpoint: NetworkEndpoint {
     var path: String { wrapped.path }
     var method: HTTPMethod { wrapped.method }
     var queryItems: [URLQueryItem]? { wrapped.queryItems }
-    var headers: [String: String]? { wrapped.headers }
     var authorization: AuthorizationType { wrapped.authorization }
     var body: Data? { encodedBody }
+
+    var headers: [String: String]? {
+        var headers = wrapped.headers ?? [:]
+        let hasContentType = headers.keys.contains { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }
+        if !hasContentType {
+            headers["Content-Type"] = "application/json"
+        }
+        return headers
+    }
 }
