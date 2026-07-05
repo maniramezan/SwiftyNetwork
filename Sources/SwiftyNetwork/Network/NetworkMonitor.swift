@@ -111,7 +111,9 @@ public actor NetworkMonitor {
     ///
     /// Call this once per consumer; each call returns an independent stream.
     /// The stream finishes when ``stopMonitoring()`` is called or when the
-    /// consumer cancels iteration.
+    /// consumer cancels iteration. A stream created while monitoring is stopped
+    /// (including one created concurrently with ``stopMonitoring()``) stays idle
+    /// and resumes delivering values once monitoring starts again.
     ///
     /// Example:
     /// ```swift

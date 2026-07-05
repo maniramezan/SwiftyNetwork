@@ -21,5 +21,5 @@ let package = Package(
             dependencies: ["SwiftyNetwork"]
         ),
     ],
-    swiftLanguageModes: [.v6],
+    swiftLanguageModes: [.v6]
 )

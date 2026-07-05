@@ -319,6 +319,17 @@ func makePinnedClient() throws -> NetworkClient {
 }
 ```
 
+Public-key pins use the industry-standard SPKI SHA-256 format (the same format as HPKP and TrustKit).
+Generate one for a live server with:
+
+```bash
+openssl s_client -connect api.example.com:443 < /dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary \
+  | base64
+```
+
 For certificate pins, use `.certificate(_:)` with DER certificate data or `.certificateSHA256(base64Encoded:)`.
 For safer rotations, configure more than one accepted pin during certificate or key rollovers.
 
@@ -464,7 +475,7 @@ xcrun llvm-cov report .build/debug/SwiftyNetworkPackageTests.xctest/Contents/Mac
   -instr-profile .build/debug/codecov/default.profdata
 ```
 
-**Current Test Coverage**: 60+ tests covering caching, networking, auth, and repository flows.
+The test suite covers caching, networking, auth, SSL pinning, and repository flows.
 
 ## License
 

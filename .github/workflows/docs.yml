@@ -64,6 +64,23 @@ jobs:
             --coverage-summary-level brief \
             --warnings-as-errors
 
+      - name: Add root redirect to documentation
+        run: |
+          cat > .build/docc-site/index.html <<'EOF'
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=documentation/swiftynetwork">
+              <link rel="canonical" href="documentation/swiftynetwork">
+              <title>SwiftyNetwork Documentation</title>
+            </head>
+            <body>
+              <p>Redirecting to <a href="documentation/swiftynetwork">SwiftyNetwork documentation</a>…</p>
+            </body>
+          </html>
+          EOF
+
       - name: Upload DocC Artifact
         uses: actions/upload-artifact@v7
         with:

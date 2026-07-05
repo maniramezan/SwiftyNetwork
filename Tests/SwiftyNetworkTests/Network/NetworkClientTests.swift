@@ -282,6 +282,62 @@ struct NetworkClientIntegrationTests {
         #expect(response == responseUser)
     }
 
+    @Test("NetworkClient adds Content-Type application/json for encoded bodies")
+    func testNetworkClientAddsJSONContentType() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "encode-body-content-type"
+        let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        let data = try JSONEncoder().encode(responseUser)
+        TestURLProtocol.setResponses([.success(data)], for: testId)
+
+        struct PostEndpoint: NetworkEndpoint {
+            let testId: String
+            let baseURL = "https://api.test.com"
+            var path: String { "/users" }
+            var method: HTTPMethod { .post }
+            var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
+        }
+
+        let bodyPayload = TestUser(id: "new", name: "New", email: "new@example.com")
+        _ = try await client.request(PostEndpoint(testId: testId), body: bodyPayload, responseType: TestUser.self)
+
+        let headers = TestURLProtocol.getLastRequestHeaders(for: testId)
+        #expect(contentType(in: headers) == "application/json")
+    }
+
+    @Test("NetworkClient preserves endpoint Content-Type for encoded bodies")
+    func testNetworkClientPreservesEndpointContentType() async throws {
+        let session = makeTestSession()
+        let configuration = NetworkClientConfiguration(session: session)
+        let client = NetworkClient(configuration: configuration)
+        let testId = "encode-body-custom-content-type"
+        let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        let data = try JSONEncoder().encode(responseUser)
+        TestURLProtocol.setResponses([.success(data)], for: testId)
+
+        struct PostEndpoint: NetworkEndpoint {
+            let testId: String
+            let baseURL = "https://api.test.com"
+            var path: String { "/users" }
+            var method: HTTPMethod { .post }
+            var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
+            var headers: [String: String]? { ["Content-Type": "application/vnd.api+json"] }
+        }
+
+        let bodyPayload = TestUser(id: "new", name: "New", email: "new@example.com")
+        _ = try await client.request(PostEndpoint(testId: testId), body: bodyPayload, responseType: TestUser.self)
+
+        let headers = TestURLProtocol.getLastRequestHeaders(for: testId)
+        #expect(contentType(in: headers) == "application/vnd.api+json")
+    }
+
+    /// Looks up the Content-Type header case-insensitively in captured request headers.
+    private func contentType(in headers: [String: String]?) -> String? {
+        headers?.first { $0.key.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value
+    }
+
     @Test("NetworkClient throws encodingFailed for non-encodable body")
     func testNetworkClientEncodingFailure() async throws {
         let session = makeTestSession()

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 
 @testable import SwiftyNetwork
@@ -94,6 +95,41 @@ struct SSLPinningConfigurationTests {
                 publicKeyData: []
             )
         )
+    }
+
+    @Test("SPKI construction matches the standard SPKI encoding for EC P-256 and RSA 2048 keys")
+    func testSubjectPublicKeyInfoMatchesStandardEncoding() throws {
+        var error: Unmanaged<CFError>?
+
+        let ecAttributes: [CFString: Any] = [
+            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
+            kSecAttrKeySizeInBits: 256,
+        ]
+        let ecPrivateKey = try #require(SecKeyCreateRandomKey(ecAttributes as CFDictionary, &error))
+        let ecPublicKey = try #require(SecKeyCopyPublicKey(ecPrivateKey))
+        let ecRawKey = try #require(SecKeyCopyExternalRepresentation(ecPublicKey, &error) as Data?)
+        let ecSPKI = try #require(SSLPinningTrustEvaluator.subjectPublicKeyInfo(for: ecPublicKey))
+        // Canonical SPKI prefix for an uncompressed P-256 public key (as used by TrustKit/HPKP).
+        let ecHeader = Data([
+            0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+            0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+        ])
+        #expect(ecSPKI == ecHeader + ecRawKey)
+
+        let rsaAttributes: [CFString: Any] = [
+            kSecAttrKeyType: kSecAttrKeyTypeRSA,
+            kSecAttrKeySizeInBits: 2048,
+        ]
+        let rsaPrivateKey = try #require(SecKeyCreateRandomKey(rsaAttributes as CFDictionary, &error))
+        let rsaPublicKey = try #require(SecKeyCopyPublicKey(rsaPrivateKey))
+        let rsaRawKey = try #require(SecKeyCopyExternalRepresentation(rsaPublicKey, &error) as Data?)
+        let rsaSPKI = try #require(SSLPinningTrustEvaluator.subjectPublicKeyInfo(for: rsaPublicKey))
+        // Canonical SPKI prefix for a 2048-bit RSA public key (as used by TrustKit/HPKP).
+        let rsaHeader = Data([
+            0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+            0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00,
+        ])
+        #expect(rsaSPKI == rsaHeader + rsaRawKey)
     }
 
     @Test("Pinned session initializer preserves request configuration")
