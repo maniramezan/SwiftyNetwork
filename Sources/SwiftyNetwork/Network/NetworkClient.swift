@@ -101,7 +101,8 @@ public actor NetworkClient: NetworkDataSource {
             endpoint,
             responseType: responseType,
             refreshAttempt: 0,
-            configuration: configuration
+            configuration: configuration,
+            requestID: UUID()
         )
     }
 
@@ -156,7 +157,8 @@ public actor NetworkClient: NetworkDataSource {
             wrapped,
             responseType: responseType,
             refreshAttempt: 0,
-            configuration: configuration
+            configuration: configuration,
+            requestID: UUID()
         )
     }
 
@@ -166,10 +168,12 @@ public actor NetworkClient: NetworkDataSource {
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type,
         refreshAttempt: Int,
-        configuration: NetworkClientConfiguration
+        configuration: NetworkClientConfiguration,
+        requestID: UUID
     ) async throws -> T {
         requestAttemptCount += 1
-        Logger.debug("Starting request (attempt \(refreshAttempt + 1))")
+        let attempt = refreshAttempt + 1
+        Logger.debug("Starting request (attempt \(attempt))")
 
         let url = try EndpointURLBuilder.url(
             baseURL: endpoint.baseURL,
@@ -177,6 +181,13 @@ public actor NetworkClient: NetworkDataSource {
             queryItems: endpoint.queryItems
         )
         Logger.debugURL("Resolved URL", url: url)
+
+        let method = endpoint.method
+        let instrumentation = configuration.instrumentation
+        await instrumentation?.requestStarted(
+            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt)
+        )
+        let startedAt = Date()
 
         var request = buildURLRequest(from: endpoint, url: url, configuration: configuration)
         let providerAuthApplied = await applyAuthorization(
@@ -191,13 +202,45 @@ public actor NetworkClient: NetworkDataSource {
             (data, response) = try await configuration.session.data(for: request)
         } catch let error as URLError {
             Logger.error("URL error during request", error: error)
-            throw mapURLError(error)
+            let mapped = NetworkError.mapURLError(error)
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: mapped
+                )
+            )
+            throw mapped
         } catch {
             Logger.error("Unexpected error during request", error: error)
-            throw NetworkError.underlying(AnySendableError(error))
+            let mapped = NetworkError.underlying(AnySendableError(error))
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: mapped
+                )
+            )
+            throw mapped
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: .invalidResponse
+                )
+            )
             throw NetworkError.invalidResponse
         }
 
@@ -207,12 +250,42 @@ public actor NetworkClient: NetworkDataSource {
                 responseType: responseType,
                 refreshAttempt: refreshAttempt,
                 providerAuthApplied: providerAuthApplied,
-                configuration: configuration
+                configuration: configuration,
+                requestID: requestID,
+                url: url,
+                method: method,
+                attempt: attempt,
+                startedAt: startedAt
             )
         }
 
-        try validateStatusCode(httpResponse.statusCode, data: data)
-        return try decodeResponse(data: data, responseType: responseType, configuration: configuration)
+        do {
+            try validateStatusCode(httpResponse.statusCode, data: data)
+            let decoded = try decodeResponse(data: data, responseType: responseType, configuration: configuration)
+            await instrumentation?.requestCompleted(
+                NetworkRequestCompletion(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    statusCode: httpResponse.statusCode,
+                    duration: Date().timeIntervalSince(startedAt)
+                )
+            )
+            return decoded
+        } catch let error as NetworkError {
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: error
+                )
+            )
+            throw error
+        }
     }
 
     private func buildURLRequest(
@@ -291,13 +364,29 @@ public actor NetworkClient: NetworkDataSource {
         responseType: T.Type,
         refreshAttempt: Int,
         providerAuthApplied: Bool,
-        configuration: NetworkClientConfiguration
+        configuration: NetworkClientConfiguration,
+        requestID: UUID,
+        url: URL,
+        method: HTTPMethod,
+        attempt: Int,
+        startedAt: Date
     ) async throws -> T {
+        let instrumentation = configuration.instrumentation
         guard let provider = configuration.authorizationProvider,
             providerAuthApplied,
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: .unauthorized
+                )
+            )
             throw NetworkError.unauthorized
         }
 
@@ -305,6 +394,16 @@ public actor NetworkClient: NetworkDataSource {
         let refreshed = await provider.refreshAuthorizationIfNeeded()
         guard refreshed else {
             Logger.error("Authorization refresh failed", category: .auth)
+            await instrumentation?.requestFailed(
+                NetworkRequestFailure(
+                    requestID: requestID,
+                    url: url,
+                    method: method,
+                    attempt: attempt,
+                    duration: Date().timeIntervalSince(startedAt),
+                    error: .authorizationRefreshFailed
+                )
+            )
             throw NetworkError.authorizationRefreshFailed
         }
         Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
@@ -314,24 +413,19 @@ public actor NetworkClient: NetworkDataSource {
             try await Task.sleep(for: .seconds(configuration.retryDelay))
         }
 
+        await instrumentation?.requestRetried(
+            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt + 1)
+        )
+
         return try await performRequest(
             endpoint,
             responseType: responseType,
             refreshAttempt: refreshAttempt + 1,
-            configuration: configuration
+            configuration: configuration,
+            requestID: requestID
         )
     }
 
-    private func mapURLError(_ error: URLError) -> NetworkError {
-        switch error.code {
-        case .notConnectedToInternet:
-            return .noInternetConnection
-        case .timedOut:
-            return .timeout
-        default:
-            return .underlying(AnySendableError(error))
-        }
-    }
 }
 
 // MARK: - Internal Helpers

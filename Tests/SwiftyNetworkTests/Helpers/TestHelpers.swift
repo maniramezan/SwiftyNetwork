@@ -268,3 +268,16 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
         return refreshResult
     }
 }
+
+/// Records every ``NetworkInstrumentation`` event for later assertions.
+actor FakeNetworkInstrumentation: NetworkInstrumentation {
+    private(set) var started: [NetworkRequestAttempt] = []
+    private(set) var retried: [NetworkRequestAttempt] = []
+    private(set) var completed: [NetworkRequestCompletion] = []
+    private(set) var failed: [NetworkRequestFailure] = []
+
+    func requestStarted(_ event: NetworkRequestAttempt) async { started.append(event) }
+    func requestRetried(_ event: NetworkRequestAttempt) async { retried.append(event) }
+    func requestCompleted(_ event: NetworkRequestCompletion) async { completed.append(event) }
+    func requestFailed(_ event: NetworkRequestFailure) async { failed.append(event) }
+}
