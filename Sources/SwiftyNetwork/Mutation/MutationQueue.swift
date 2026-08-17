@@ -91,7 +91,8 @@ public actor MutationQueue {
         latestStatusByKey[key]
     }
 
-    /// Resumes processing for every mutation currently persisted in ``store``.
+    /// Resumes processing for every mutation currently persisted in the
+    /// configured ``MutationStore``.
     ///
     /// A durable store can hold mutations that were pending when the process
     /// was last killed; those are otherwise never picked back up, since
