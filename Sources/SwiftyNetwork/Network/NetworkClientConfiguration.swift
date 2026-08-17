@@ -75,6 +75,14 @@ public struct NetworkClientConfiguration: Sendable {
     /// another configuration.
     public var logLevel: LogLevel?
 
+    /// Observer for request timing, retries, and outcomes.
+    ///
+    /// Inject an app-supplied ``NetworkInstrumentation`` conformance to feed
+    /// events into your own observability stack (e.g. an OpenTelemetry
+    /// adapter) without SwiftyNetwork depending on that SDK. `nil` by
+    /// default -- instrumentation is entirely opt-in.
+    public var instrumentation: (any NetworkInstrumentation)?
+
     /// Creates a new network client configuration.
     ///
     /// - Parameters:
@@ -87,6 +95,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
+    ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     public init(
         session: URLSession = .shared,
         decoder: JSONDecoder = JSONDecoder(),
@@ -95,7 +104,8 @@ public struct NetworkClientConfiguration: Sendable {
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
-        logLevel: LogLevel? = nil
+        logLevel: LogLevel? = nil,
+        instrumentation: (any NetworkInstrumentation)? = nil
     ) {
         self.session = session
         self.decoder = decoder
@@ -105,6 +115,7 @@ public struct NetworkClientConfiguration: Sendable {
         self.timeoutInterval = timeoutInterval
         self.retryDelay = retryDelay
         self.logLevel = logLevel
+        self.instrumentation = instrumentation
     }
 
     /// Creates a new network client configuration backed by an SSL-pinned `URLSession`.
@@ -125,6 +136,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
+    ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     public init(
         sslPinning: SSLPinningConfiguration,
         sessionConfiguration: URLSessionConfiguration = .default,
@@ -135,7 +147,8 @@ public struct NetworkClientConfiguration: Sendable {
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
-        logLevel: LogLevel? = nil
+        logLevel: LogLevel? = nil,
+        instrumentation: (any NetworkInstrumentation)? = nil
     ) {
         let delegate = SSLPinningURLSessionDelegate(configuration: sslPinning)
         let session = URLSession(
@@ -151,7 +164,8 @@ public struct NetworkClientConfiguration: Sendable {
             maxAuthRefreshAttempts: maxAuthRefreshAttempts,
             timeoutInterval: timeoutInterval,
             retryDelay: retryDelay,
-            logLevel: logLevel
+            logLevel: logLevel,
+            instrumentation: instrumentation
         )
     }
 }

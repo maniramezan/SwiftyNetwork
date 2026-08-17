@@ -13,6 +13,8 @@ SwiftyNetwork provides:
 - **Pluggable authentication** via ``AuthorizationProvider`` and ``OAuthAuthorizationProvider``.
 - **Optional SSL pinning** via ``SSLPinningConfiguration`` for controlled hosts.
 - **Fire-and-forget mutations** with ``MutationQueue``, including background retry, coalescing, and pluggable persistence via ``MutationStore``.
+- **Single-flight remote data caching** with ``RemoteDataCache`` -- deduplicates concurrent fetches for the same key, composable with any ``Cache`` for app-configurable memory/disk layering.
+- **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with shared ``NetworkError/classification`` for retry policies and telemetry alike.
 
 ## Topics
 
@@ -26,6 +28,14 @@ SwiftyNetwork provides:
 - ``NetworkDataSource``
 - ``EmptyResponse``
 - ``NetworkError``
+- ``NetworkErrorClassification``
+
+### Instrumentation
+
+- ``NetworkInstrumentation``
+- ``NetworkRequestAttempt``
+- ``NetworkRequestCompletion``
+- ``NetworkRequestFailure``
 
 ### Authentication
 
@@ -47,6 +57,8 @@ SwiftyNetwork provides:
 - ``AnyCache``
 - ``CacheKey``
 - ``CachePolicy``
+- ``SingleFlightCache``
+- ``RemoteDataCache``
 
 ### Repository
 
