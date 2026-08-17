@@ -51,6 +51,24 @@ struct MutationRetryPolicyTests {
         #expect(!MutationRetryPolicy.defaultIsRetryable(URLError(.badURL)))
     }
 
+    @Test("defaultIsRetryable delegates to NetworkError.isTransient, the shared classification source of truth")
+    func defaultIsRetryableDelegatesToNetworkErrorIsTransient() {
+        let errors: [NetworkError] = [
+            .timeout,
+            .noInternetConnection,
+            .invalidResponse,
+            .serverError(statusCode: 500, data: nil),
+            .serverError(statusCode: 400, data: nil),
+            .unauthorized,
+            .forbidden,
+            .notFound,
+            .invalidURL(url: "bad"),
+        ]
+        for error in errors {
+            #expect(MutationRetryPolicy.defaultIsRetryable(error) == error.isTransient)
+        }
+    }
+
     @Test("maxAttempts and baseDelay are clamped to non-negative values")
     func negativeValuesAreClamped() {
         let policy = MutationRetryPolicy(maxAttempts: -1, baseDelay: -5, maxDelay: -10)

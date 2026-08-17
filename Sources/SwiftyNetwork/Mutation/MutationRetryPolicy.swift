@@ -69,21 +69,16 @@ public struct MutationRetryPolicy: Sendable {
 
     /// The default transient-error classifier used by ``default``.
     ///
+    /// Delegates to ``NetworkError/isTransient``, the single source of truth
+    /// for transient-error classification shared across the package (retry
+    /// policies and telemetry code alike).
+    ///
     /// - Parameter error: The error thrown by the mutation's network call.
     /// - Returns: `true` for timeouts, missing connectivity, malformed
     ///   responses, and 5xx server errors; `false` for everything else,
     ///   including non-``NetworkError`` errors.
     public static func defaultIsRetryable(_ error: any Error) -> Bool {
-        guard let networkError = error as? NetworkError else { return false }
-        switch networkError {
-        case .timeout, .noInternetConnection, .invalidResponse:
-            return true
-        case .serverError(let statusCode, _):
-            return statusCode >= 500
-        case .invalidURL, .invalidData, .unauthorized, .forbidden, .notFound, .decodingFailed, .encodingFailed,
-            .authorizationRefreshFailed, .underlying:
-            return false
-        }
+        (error as? NetworkError)?.isTransient ?? false
     }
 
     /// Computes the backoff delay before a given retry attempt.
