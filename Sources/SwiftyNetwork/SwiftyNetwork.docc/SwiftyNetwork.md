@@ -12,6 +12,7 @@ SwiftyNetwork provides:
 - **Repository coordination** with ``GenericRepository`` and ``CachePolicy``.
 - **Pluggable authentication** via ``AuthorizationProvider`` and ``OAuthAuthorizationProvider``.
 - **Optional SSL pinning** via ``SSLPinningConfiguration`` for controlled hosts.
+- **Fire-and-forget mutations** with ``MutationQueue``, including background retry, coalescing, and pluggable persistence via ``MutationStore``.
 
 ## Topics
 
@@ -53,6 +54,17 @@ SwiftyNetwork provides:
 - ``GenericRepository``
 - ``LocalDataSource``
 - ``CacheBasedLocalDataSource``
+
+### Mutations
+
+- ``MutationQueue``
+- ``MutationRequest``
+- ``MutationKey``
+- ``MutationStatus``
+- ``MutationFailureReason``
+- ``MutationRetryPolicy``
+- ``MutationStore``
+- ``InMemoryMutationStore``
 
 ### Reachability
 
