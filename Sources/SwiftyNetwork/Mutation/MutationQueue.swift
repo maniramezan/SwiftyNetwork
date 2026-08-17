@@ -79,6 +79,7 @@ public actor MutationQueue {
     ///   - request: The mutation to execute.
     ///   - key: The logical mutation this belongs to, for coalescing.
     public func enqueue(_ request: MutationRequest, key: MutationKey) async {
+        Logger.debug("Enqueuing mutation for key \(key)", category: .mutation)
         await store.save(request, for: key)
         setStatus(.pending, for: key)
         startProcessingIfNeeded(for: key)
@@ -101,7 +102,9 @@ public actor MutationQueue {
     /// call unconditionally, including with ``InMemoryMutationStore``, which
     /// is simply empty on a fresh launch).
     public func resumePendingMutations() async {
-        for key in await store.allKeys() {
+        let keys = await store.allKeys()
+        Logger.info("Resuming \(keys.count) pending mutation(s) from the store", category: .mutation)
+        for key in keys {
             setStatus(.pending, for: key)
             startProcessingIfNeeded(for: key)
         }
@@ -140,31 +143,46 @@ public actor MutationQueue {
         while !Task.isCancelled {
             guard let request = await store.load(for: key) else { return }
 
+            Logger.debug("Executing mutation for key \(key) (attempt \(attempt + 1))", category: .mutation)
             do {
                 _ = try await client.request(request, responseType: EmptyResponse.self)
 
                 if await store.removeIfCurrent(request, for: key) {
+                    Logger.debug("Mutation succeeded for key \(key)", category: .mutation)
                     setStatus(.succeeded, for: key)
                     return
                 }
                 // A newer value was enqueued while this call was in flight.
                 // Process it next instead of discarding it.
+                Logger.debug(
+                    "Mutation for key \(key) was superseded while in flight; processing replacement",
+                    category: .mutation
+                )
                 attempt = 0
                 setStatus(.pending, for: key)
             } catch {
                 attempt += 1
                 guard retryPolicy.isRetryable(error), attempt <= retryPolicy.maxAttempts else {
                     if await store.removeIfCurrent(request, for: key) {
+                        Logger.error("Mutation failed permanently for key \(key)", error: error, category: .mutation)
                         setStatus(.failed(MutationFailureReason(error)), for: key)
                         return
                     }
                     // A newer value replaced this one while it was failing
                     // permanently; that replacement deserves its own attempts
                     // rather than being discarded alongside the old failure.
+                    Logger.debug(
+                        "Mutation for key \(key) was superseded during a permanent failure; processing replacement",
+                        category: .mutation
+                    )
                     attempt = 0
                     setStatus(.pending, for: key)
                     continue
                 }
+                Logger.warning(
+                    "Mutation for key \(key) failed transiently (attempt \(attempt)); retrying",
+                    category: .mutation
+                )
                 setStatus(.retrying(attempt: attempt), for: key)
                 let delay = retryPolicy.delay(forAttempt: attempt)
                 if delay > 0 {

@@ -290,6 +290,32 @@ struct MutationQueueTests {
         #expect(slowStatus != .succeeded)
     }
 
+    @Test("Debug-level logging exercises every log call site without changing behavior")
+    func loggingAtDebugLevelDoesNotAffectOutcomes() async {
+        // Matches the existing convention (see NetworkClientTests) of setting
+        // the package-wide log level to .debug without resetting it -- the
+        // level is process-global, and no test asserts on log output.
+        Logger.setLevel(.debug)
+
+        // Exercise resumePendingMutations (.info), a transient-then-success
+        // retry (.debug + .warning + .debug), and a permanent failure (.error).
+        let store = InMemoryMutationStore()
+        await store.save(makeRequest(liked: true), for: "resume:1")
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .success, .failure(NetworkError.forbidden)])
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
+        let stream = await queue.events()
+
+        async let resumeSucceeded = firstEvent(in: stream) { $0.key == "resume:1" && $0.status == .succeeded }
+        await queue.resumePendingMutations()
+        #expect(await resumeSucceeded != nil)
+
+        async let permanentlyFailed = firstEvent(in: stream) { $0.key == "other:1" && $0.status != .pending }
+        await queue.enqueue(makeRequest(path: "/other"), key: "other:1")
+        let failedEvent = await permanentlyFailed
+
+        #expect(failedEvent?.status == .failed(MutationFailureReason(NetworkError.forbidden)))
+    }
+
     @Test("status(for:) returns nil for a key that was never enqueued")
     func statusForUnknownKeyIsNil() async {
         let queue = MutationQueue(client: FakeAPIClient(outcomes: []), store: InMemoryMutationStore())

@@ -57,6 +57,7 @@ enum Logger {
         case auth
         case repository
         case security
+        case mutation
     }
 
     /// Atomic storage for the active log level.
