@@ -17,6 +17,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Comprehensive Error Handling**: Detailed error types with localized descriptions
 - **Repository Pattern**: Clean separation between network and local data sources
 - **Automatic Auth Refresh**: Refreshes credentials and replays the request once on `401`
+- **Fire-and-Forget Mutations**: Background retry, key-based coalescing, and pluggable persistence via `MutationQueue`
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
 ## Requirements
@@ -289,6 +290,55 @@ do {
 }
 ```
 
+### Fire-and-Forget Mutations with MutationQueue
+
+Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
+shouldn't block the UI on the network round trip and shouldn't be silently lost to a transient
+failure. `NetworkClient` deliberately doesn't retry transient/5xx errors on its own; `MutationQueue`
+is the dedicated retry loop for this class of call, with exponential backoff, coalescing by key,
+and status reporting.
+
+```swift
+let queue = MutationQueue(client: NetworkClient.shared)
+
+// Enqueue returns immediately; the network call and any retries run in the background.
+let request = MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42"))
+await queue.enqueue(request, key: "like:video:42")
+
+// Rapid toggling coalesces to the latest desired state instead of replaying
+// every intermediate call.
+let undo = MutationRequest(endpoint: UnlikeVideoEndpoint(videoID: "42"))
+await queue.enqueue(undo, key: "like:video:42")
+
+// Observe outcomes to reflect status in the UI; MutationQueue reports what
+// happened, it doesn't manage optimistic UI state itself.
+for await event in await queue.events() where event.key == "like:video:42" {
+    switch event.status {
+    case .succeeded:
+        break
+    case .failed:
+        showLikeFailedError()
+    case .pending, .retrying:
+        break
+    }
+}
+```
+
+Persistence is pluggable via the `MutationStore` protocol. `InMemoryMutationStore` ships as the
+default (mutations are lost if the process is killed, which is fine for most forgivable
+mutations); implement `MutationStore` yourself for durable persistence that survives a relaunch.
+Because `MutationRequest` is `Codable`, a durable store can serialize "which endpoint plus what
+body" directly and replay it on the next launch via `resumePendingMutations()`.
+
+```swift
+let queue = MutationQueue(client: NetworkClient.shared, store: MyDurableMutationStore())
+await queue.resumePendingMutations() // call once at startup
+```
+
+> **Note:** `MutationRequest` can carry secrets (bearer tokens, API keys) via its captured
+> `AuthorizationType`. A durable `MutationStore` is responsible for storing the encoded request
+> securely (e.g. Keychain-backed) -- SwiftyNetwork does not encrypt persisted mutations itself.
+
 ### SSL Pinning
 
 Use SSL pinning when your app and API are operated together and you can safely rotate pins before server
@@ -418,6 +468,8 @@ SwiftyNetwork is built around several key protocols and types:
 - **`Repository`**: Combines network and local data sources
 - **`AuthorizationProvider`**: Handles authentication
 - **`SSLPinningConfiguration`**: Configures certificate and public-key pinning
+- **`MutationQueue`**: Fire-and-forget mutations with background retry and coalescing
+- **`MutationStore`**: Pluggable persistence for pending mutations
 
 This design promotes clean separation of concerns, testability, and flexibility.
 
