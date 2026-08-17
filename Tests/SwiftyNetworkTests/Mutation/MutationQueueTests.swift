@@ -150,6 +150,103 @@ struct MutationQueueTests {
         #expect(await fake.recordedRequests.last?.body == unliked.body)
     }
 
+    @Test("A non-retryable failure does not discard a replacement enqueued while it was in flight")
+    func nonRetryableFailurePreservesInFlightReplacement() async {
+        let gate = Gate()
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden), .success], gate: gate)
+        let store = InMemoryMutationStore()
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
+        let stream = await queue.events()
+
+        let liked = makeRequest(liked: true)
+        let unliked = makeRequest(liked: false)
+
+        async let finalEvent = firstEvent(in: stream) { event in
+            guard event.key == "like:video:42" else { return false }
+            switch event.status {
+            case .succeeded, .failed: return true
+            case .pending, .retrying: return false
+            }
+        }
+
+        await queue.enqueue(liked, key: "like:video:42")
+        while await fake.callCount == 0 { await Task.yield() }
+        await queue.enqueue(unliked, key: "like:video:42")
+        await gate.open()
+        let terminalEvent = await finalEvent
+
+        // The old (now-superseded) call fails permanently, but "unliked" was
+        // already saved as the new desired state -- it must still be
+        // processed and reported, not silently dropped alongside the failure.
+        #expect(terminalEvent?.status == .succeeded)
+        #expect(await fake.callCount == 2)
+        #expect(await fake.recordedRequests.map(\.body) == [liked.body, unliked.body])
+        #expect(await store.load(for: "like:video:42") == nil)
+    }
+
+    @Test("Exhausted retries do not discard a replacement enqueued while the terminal attempt is in flight")
+    func exhaustedRetriesPreserveReplacement() async {
+        // Only the terminal (second, index 1) attempt is gated: the first
+        // attempt fails and schedules a retry, then the retry blocks so the
+        // test can supersede the key while that terminal attempt is in flight.
+        let terminalAttemptGate = Gate()
+        let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
+        let fake = FakeAPIClient(
+            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success],
+            gatesByCallIndex: [1: terminalAttemptGate]
+        )
+        let store = InMemoryMutationStore()
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: policy)
+        let stream = await queue.events()
+
+        let liked = makeRequest(liked: true)
+        let unliked = makeRequest(liked: false)
+
+        async let finalEvent = firstEvent(in: stream) { event in
+            event.key == "like:video:42" && event.status == .succeeded
+        }
+
+        await queue.enqueue(liked, key: "like:video:42")
+        while await fake.callCount < 2 { await Task.yield() }
+        await queue.enqueue(unliked, key: "like:video:42")
+        await terminalAttemptGate.open()
+        let succeeded = await finalEvent
+
+        #expect(succeeded != nil)
+        #expect(await fake.callCount == 3)
+        #expect(await fake.recordedRequests.last?.body == unliked.body)
+        #expect(await store.load(for: "like:video:42") == nil)
+    }
+
+    @Test("resumePendingMutations processes mutations already in a durable store")
+    func resumePendingMutationsProcessesExistingEntries() async {
+        let fake = FakeAPIClient(outcomes: [.success])
+        let store = InMemoryMutationStore()
+        // Simulate a durable store that already had a mutation saved from a
+        // previous process, before any MutationQueue observed it.
+        await store.save(makeRequest(), for: "like:video:42")
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
+        let stream = await queue.events()
+
+        async let finalEvent = firstEvent(in: stream) { $0.key == "like:video:42" && $0.status == .succeeded }
+        await queue.resumePendingMutations()
+        let succeeded = await finalEvent
+
+        #expect(succeeded != nil)
+        #expect(await fake.callCount == 1)
+        #expect(await store.load(for: "like:video:42") == nil)
+    }
+
+    @Test("resumePendingMutations is a no-op when the store is empty")
+    func resumePendingMutationsNoOpWhenEmpty() async {
+        let fake = FakeAPIClient(outcomes: [])
+        let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
+
+        await queue.resumePendingMutations()
+
+        #expect(await fake.callCount == 0)
+    }
+
     @Test("A positive retry delay is actually awaited before the next attempt")
     func retryDelayIsAwaited() async {
         let policy = MutationRetryPolicy(maxAttempts: 3, baseDelay: 0.01, maxDelay: 0.01, jitterRange: 1...1)

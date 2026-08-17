@@ -46,6 +46,42 @@ struct InMemoryMutationStoreTests {
         #expect(await store.load(for: "key") == nil)
     }
 
+    @Test("removeIfCurrent removes and returns true when the stored value still matches")
+    func removeIfCurrentRemovesMatchingValue() async {
+        let store = InMemoryMutationStore()
+        let request = MutationRequest(baseURL: "https://api.test.com", path: "/x", method: .post)
+        await store.save(request, for: "key")
+
+        let removed = await store.removeIfCurrent(request, for: "key")
+
+        #expect(removed)
+        #expect(await store.load(for: "key") == nil)
+    }
+
+    @Test("removeIfCurrent leaves a replaced value in place and returns false")
+    func removeIfCurrentPreservesReplacedValue() async {
+        let store = InMemoryMutationStore()
+        let original = MutationRequest(baseURL: "https://api.test.com", path: "/original", method: .post)
+        let replacement = MutationRequest(baseURL: "https://api.test.com", path: "/replacement", method: .post)
+        await store.save(original, for: "key")
+        await store.save(replacement, for: "key")
+
+        let removed = await store.removeIfCurrent(original, for: "key")
+
+        #expect(!removed)
+        #expect(await store.load(for: "key") == replacement)
+    }
+
+    @Test("removeIfCurrent returns false for a key with no stored value")
+    func removeIfCurrentMissingKeyReturnsFalse() async {
+        let store = InMemoryMutationStore()
+        let request = MutationRequest(baseURL: "https://api.test.com", path: "/x", method: .post)
+
+        let removed = await store.removeIfCurrent(request, for: "missing")
+
+        #expect(!removed)
+    }
+
     @Test("allKeys reflects saved and removed keys")
     func allKeysReflectsState() async {
         let store = InMemoryMutationStore()

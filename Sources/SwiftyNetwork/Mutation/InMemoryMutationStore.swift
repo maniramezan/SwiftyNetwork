@@ -29,6 +29,12 @@ public actor InMemoryMutationStore: MutationStore {
         requestsByKey.removeValue(forKey: key)
     }
 
+    public func removeIfCurrent(_ request: MutationRequest, for key: MutationKey) async -> Bool {
+        guard requestsByKey[key] == request else { return false }
+        requestsByKey.removeValue(forKey: key)
+        return true
+    }
+
     public func allKeys() async -> [MutationKey] {
         Array(requestsByKey.keys)
     }

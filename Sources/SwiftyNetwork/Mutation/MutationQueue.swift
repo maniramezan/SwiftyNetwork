@@ -91,6 +91,21 @@ public actor MutationQueue {
         latestStatusByKey[key]
     }
 
+    /// Resumes processing for every mutation currently persisted in ``store``.
+    ///
+    /// A durable store can hold mutations that were pending when the process
+    /// was last killed; those are otherwise never picked back up, since
+    /// nothing else calls ``MutationStore/allKeys()``. Call this once at
+    /// startup after constructing a queue backed by a durable store (safe to
+    /// call unconditionally, including with ``InMemoryMutationStore``, which
+    /// is simply empty on a fresh launch).
+    public func resumePendingMutations() async {
+        for key in await store.allKeys() {
+            setStatus(.pending, for: key)
+            startProcessingIfNeeded(for: key)
+        }
+    }
+
     /// A stream of status changes across all mutation keys.
     ///
     /// The stream only emits events that occur after it is created; it does
@@ -127,9 +142,7 @@ public actor MutationQueue {
             do {
                 _ = try await client.request(request, responseType: EmptyResponse.self)
 
-                let latest = await store.load(for: key)
-                if latest == request {
-                    await store.remove(for: key)
+                if await store.removeIfCurrent(request, for: key) {
                     setStatus(.succeeded, for: key)
                     return
                 }
@@ -140,9 +153,16 @@ public actor MutationQueue {
             } catch {
                 attempt += 1
                 guard retryPolicy.isRetryable(error), attempt <= retryPolicy.maxAttempts else {
-                    await store.remove(for: key)
-                    setStatus(.failed(MutationFailureReason(error)), for: key)
-                    return
+                    if await store.removeIfCurrent(request, for: key) {
+                        setStatus(.failed(MutationFailureReason(error)), for: key)
+                        return
+                    }
+                    // A newer value replaced this one while it was failing
+                    // permanently; that replacement deserves its own attempts
+                    // rather than being discarded alongside the old failure.
+                    attempt = 0
+                    setStatus(.pending, for: key)
+                    continue
                 }
                 setStatus(.retrying(attempt: attempt), for: key)
                 let delay = retryPolicy.delay(forAttempt: attempt)

@@ -168,24 +168,33 @@ actor FakeAPIClient: APIClient {
     private var outcomes: [Outcome]
     private let delayNanoseconds: UInt64
     private let gate: Gate?
+    /// Per-call gates, indexed by 0-based call number. Lets a test block a
+    /// *specific* call (e.g. only the second attempt) rather than every call,
+    /// which a single shared `Gate` can't express once it's been opened once.
+    private let gatesByCallIndex: [Int: Gate]
     private(set) var callCount = 0
     private(set) var recordedRequests: [MutationRequest] = []
 
-    init(outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: Gate? = nil) {
+    init(outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: Gate? = nil, gatesByCallIndex: [Int: Gate] = [:]) {
         self.outcomes = outcomes
         self.delayNanoseconds = delayNanoseconds
         self.gate = gate
+        self.gatesByCallIndex = gatesByCallIndex
     }
 
     func request<T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T {
+        let callIndex = callCount
         callCount += 1
         recordedRequests.append(MutationRequest(endpoint: endpoint))
 
         if let gate {
             await gate.wait()
+        }
+        if let perCallGate = gatesByCallIndex[callIndex] {
+            await perCallGate.wait()
         }
         if delayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: delayNanoseconds)
