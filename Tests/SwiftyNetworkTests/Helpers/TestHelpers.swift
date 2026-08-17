@@ -136,6 +136,101 @@ func makeTestSession() -> URLSession {
     return URLSession(configuration: configuration)
 }
 
+/// A single-use rendezvous point: `wait()` suspends until `open()` is called
+/// (or returns immediately if `open()` already happened). Used to force a
+/// deterministic interleaving between a fake network call and a test's
+/// subsequent actions, instead of relying on a race won by a fixed delay.
+actor Gate {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+/// A scriptable ``APIClient`` for testing ``MutationQueue`` without going
+/// through `URLSession`. Each call to `request` consumes the next queued
+/// outcome and records the endpoint's path for later assertions.
+actor FakeAPIClient: APIClient {
+    enum Outcome {
+        case success
+        case failure(any Error & Sendable)
+    }
+
+    private var outcomes: [Outcome]
+    private let delayNanoseconds: UInt64
+    private let gate: Gate?
+    private(set) var callCount = 0
+    private(set) var recordedRequests: [MutationRequest] = []
+
+    init(outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: Gate? = nil) {
+        self.outcomes = outcomes
+        self.delayNanoseconds = delayNanoseconds
+        self.gate = gate
+    }
+
+    func request<T: Decodable & Sendable>(
+        _ endpoint: any NetworkEndpoint,
+        responseType: T.Type
+    ) async throws -> T {
+        callCount += 1
+        recordedRequests.append(MutationRequest(endpoint: endpoint))
+
+        if let gate {
+            await gate.wait()
+        }
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+
+        let outcome = outcomes.isEmpty ? .success : outcomes.removeFirst()
+        switch outcome {
+        case .success:
+            guard let value = EmptyResponse() as? T else { throw NetworkError.invalidData }
+            return value
+        case .failure(let error):
+            throw error
+        }
+    }
+}
+
+/// Consumes exactly `count` events from an `AsyncStream`, or fewer if the
+/// stream never yields that many. Bounded so a failing assertion doesn't
+/// hang the test indefinitely.
+func collectEvents<T: Sendable>(_ stream: AsyncStream<T>, count: Int) async -> [T] {
+    var results: [T] = []
+    var iterator = stream.makeAsyncIterator()
+    for _ in 0..<count {
+        guard let event = await iterator.next() else { break }
+        results.append(event)
+    }
+    return results
+}
+
+/// Consumes events from an `AsyncStream` until `predicate` matches, giving up
+/// after `maxCount` events so a failing assertion doesn't hang the test
+/// indefinitely. Returns the matching event, or `nil` if it never arrived.
+func firstEvent<T: Sendable>(
+    in stream: AsyncStream<T>,
+    maxCount: Int = 50,
+    where predicate: (T) -> Bool
+) async -> T? {
+    var iterator = stream.makeAsyncIterator()
+    for _ in 0..<maxCount {
+        guard let event = await iterator.next() else { return nil }
+        if predicate(event) { return event }
+    }
+    return nil
+}
+
 public actor TestAuthorizationProvider: AuthorizationProvider {
     private var currentAuth: AuthorizationType
     private let refreshResult: Bool
