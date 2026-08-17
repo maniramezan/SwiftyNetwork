@@ -14,6 +14,7 @@ SwiftyNetwork is a zero-dependency Swift networking library built for Swift 6 st
 - `InMemoryCache<T>` / `LayeredCache<T>` -- caching implementations
 - `GenericRepository<T>` -- coordinates network + cache with `CachePolicy`
 - `AuthorizationProvider` -- protocol for injectable auth (see `OAuthAuthorizationProvider`)
+- `MutationQueue` -- actor for fire-and-forget mutations with background retry, coalescing by `MutationKey`, and pluggable persistence via `MutationStore`
 
 ## Project Structure
 
@@ -35,14 +36,23 @@ Sources/SwiftyNetwork/
 │   ├── InMemoryCache.swift   # Actor with LRU eviction
 │   ├── AnyCache.swift        # Type-erased wrapper (conforms to Cache, @unchecked Sendable)
 │   └── LayeredCache.swift    # Memory + persistent with promotion
-└── Repository/
-    └── Repository.swift      # LocalDataSource, CacheBasedLocalDataSource, GenericRepository
+├── Repository/
+│   └── Repository.swift      # LocalDataSource, CacheBasedLocalDataSource, GenericRepository
+└── Mutation/
+    ├── MutationQueue.swift        # Actor: enqueue, background retry, coalescing, status via AsyncStream
+    ├── MutationRequest.swift      # Codable NetworkEndpoint value type (endpoint + body), replayable
+    ├── MutationKey.swift          # Coalescing key
+    ├── MutationStatus.swift       # pending/retrying/succeeded/failed + MutationFailureReason
+    ├── MutationRetryPolicy.swift  # Exponential backoff + jitter, transient-error classification
+    ├── MutationStore.swift        # Pluggable persistence protocol
+    └── InMemoryMutationStore.swift  # Default in-memory MutationStore
 
 Tests/SwiftyNetworkTests/
 ├── Helpers/TestHelpers.swift # TestURLProtocol, TestAuthorizationProvider, factories
 ├── Network/                  # 20 tests across 7 files
 ├── Cache/CacheTests.swift    # 22 tests covering all cache types
-└── Repository/RepositoryTests.swift  # 7 tests covering all policies
+├── Repository/RepositoryTests.swift  # 7 tests covering all policies
+└── Mutation/                 # Queue retry/coalescing/status, request/store/policy unit tests
 ```
 
 ## Quick Commands
@@ -169,6 +179,18 @@ GenericRepository.fetch(endpoint, cacheKey, policy) →
   [.returnCacheIfNotExpired]    → cache fresh? return : fetch + cache
 ```
 
+### Mutation Flow
+
+```
+MutationQueue.enqueue(request, key) → store.save (coalescing point) → returns immediately
+  background Task per key:
+    load → APIClient.request → success? → removeIfCurrent(request) → .succeeded
+                                        ↳ store changed (coalesced replacement)? → process it next
+                              → failure? → retryable && attempts left? → .retrying → backoff → retry
+                                        ↳ else → removeIfCurrent(request) → .failed
+                                              ↳ store changed? → process replacement next instead
+```
+
 ### Cache Hierarchy
 
 ```
@@ -187,6 +209,11 @@ AnyCache<T> (type-erased wrapper, @unchecked Sendable)
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder
 - All actors use instance isolation -- no locks or GCD in production code
 - `TestURLProtocolState` uses `NSLock` because `URLProtocol.startLoading()` is synchronous
+- `MutationRequest` is `Codable` (not a closure) so a durable `MutationStore` can serialize
+  "which endpoint plus what body" and replay it after relaunch
+- Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
+  non-suspending check-and-remove -- composing `load` then `remove` from outside reintroduces
+  the race it exists to close
 
 ## Security
 
@@ -195,6 +222,9 @@ AnyCache<T> (type-erased wrapper, @unchecked Sendable)
 - Scrub sensitive headers before logging
 - `Logger` never logs tokens, credentials, or PII
 - Validate URLs (scheme + host) in endpoints
+- `MutationRequest` can carry secrets via its captured `AuthorizationType` (bearer tokens, API
+  keys); a durable `MutationStore` implementation is responsible for encrypting persisted
+  mutations (e.g. Keychain-backed) -- SwiftyNetwork does not encrypt them itself
 
 ## Documentation Files
 
