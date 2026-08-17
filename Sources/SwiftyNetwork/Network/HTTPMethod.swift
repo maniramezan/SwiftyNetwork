@@ -14,7 +14,7 @@ import Foundation
 ///     let method: HTTPMethod = .post
 /// }
 /// ```
-public enum HTTPMethod: String, Sendable, CaseIterable {
+public enum HTTPMethod: String, Sendable, CaseIterable, Codable, Equatable {
     /// Retrieves a resource without a request body.
     case get = "GET"
 

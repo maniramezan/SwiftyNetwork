@@ -16,7 +16,7 @@ import Foundation
 ///     let authorization: AuthorizationType = .bearer(token: "access-token")
 /// }
 /// ```
-public enum AuthorizationType: Sendable, Equatable {
+public enum AuthorizationType: Sendable, Equatable, Codable {
     /// No authorization header is added.
     case none
 
@@ -76,6 +76,76 @@ public enum AuthorizationType: Sendable, Equatable {
             request.setValue(key, forHTTPHeaderField: header)
         case .custom(let header, let value):
             request.setValue(value, forHTTPHeaderField: header)
+        }
+    }
+}
+
+// MARK: - Codable
+
+extension AuthorizationType {
+    private enum CodingKeys: String, CodingKey {
+        case kind, username, password, credential, token, key, header, value
+    }
+
+    /// Discriminator persisted alongside a case's associated values.
+    ///
+    /// `AuthorizationType` cannot derive `Codable` automatically because its
+    /// cases carry associated values; this keeps the wire format stable and
+    /// explicit rather than relying on enum-case ordering.
+    private enum Kind: String, Codable {
+        case none, basic, basicEncoded, bearer, apiKey, custom
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .none:
+            self = .none
+        case .basic:
+            self = .basic(
+                username: try container.decode(String.self, forKey: .username),
+                password: try container.decode(String.self, forKey: .password)
+            )
+        case .basicEncoded:
+            self = .basicEncoded(credential: try container.decode(String.self, forKey: .credential))
+        case .bearer:
+            self = .bearer(token: try container.decode(String.self, forKey: .token))
+        case .apiKey:
+            self = .apiKey(
+                key: try container.decode(String.self, forKey: .key),
+                header: try container.decode(String.self, forKey: .header)
+            )
+        case .custom:
+            self = .custom(
+                header: try container.decode(String.self, forKey: .header),
+                value: try container.decode(String.self, forKey: .value)
+            )
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .none:
+            try container.encode(Kind.none, forKey: .kind)
+        case .basic(let username, let password):
+            try container.encode(Kind.basic, forKey: .kind)
+            try container.encode(username, forKey: .username)
+            try container.encode(password, forKey: .password)
+        case .basicEncoded(let credential):
+            try container.encode(Kind.basicEncoded, forKey: .kind)
+            try container.encode(credential, forKey: .credential)
+        case .bearer(let token):
+            try container.encode(Kind.bearer, forKey: .kind)
+            try container.encode(token, forKey: .token)
+        case .apiKey(let key, let header):
+            try container.encode(Kind.apiKey, forKey: .kind)
+            try container.encode(key, forKey: .key)
+            try container.encode(header, forKey: .header)
+        case .custom(let header, let value):
+            try container.encode(Kind.custom, forKey: .kind)
+            try container.encode(header, forKey: .header)
+            try container.encode(value, forKey: .value)
         }
     }
 }
