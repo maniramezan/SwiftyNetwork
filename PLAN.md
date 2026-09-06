@@ -97,7 +97,7 @@ Tests/SwiftyNetworkTests/
 ### When to Break Backward Compatibility
 - Only for major versions
 - Provide deprecation warnings first
-- Document migration path in CHANGELOG
+- Document migration paths in the pull request description
 - Consider adding compatibility shims
 
 ## Anti-Patterns to Avoid
@@ -125,7 +125,7 @@ Before releasing a new version:
 
 1. [ ] All tests pass (`swift test`)
 2. [ ] Documentation is updated (README, DocC)
-3. [ ] CHANGELOG.md has entry for this version
+3. [ ] Pull request describes user-facing changes and migration notes
 4. [ ] No compiler warnings
 5. [ ] Backward compatibility preserved (or documented)
 6. [ ] Version number bumped in appropriate places
