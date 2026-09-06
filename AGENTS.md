@@ -20,13 +20,13 @@ SwiftyNetwork is a zero-dependency Swift networking library built for Swift 6 st
 
 ```
 Sources/SwiftyNetwork/
-├── Logger.swift              # Internal logging (NSLog, DEBUG-gated)
+├── Logger.swift              # Internal logging (os.Logger, privacy-aware)
 ├── Network/
 │   ├── HTTPMethod.swift      # HTTP verb enum
 │   ├── AuthorizationType.swift  # Auth header strategies
 │   ├── AuthProvider.swift    # AuthorizationProvider protocol + OAuth actor
-│   ├── Endpoint.swift        # NetworkEndpoint.makeURLRequest() extension
-│   ├── ClientAPI.swift       # NetworkEndpoint, APIClient, NetworkDataSource, NetworkClient
+│   ├── NetworkEndpoint.swift        # NetworkEndpoint.makeURLRequest() extension
+│   ├── NetworkClient.swift       # Actor-based HTTP execution (protocols in separate files)
 │   ├── NetworkError.swift    # Error enum with LocalizedError
 │   └── NetworkMonitor.swift  # NWPathMonitor reachability actor
 ├── Cache/
@@ -34,7 +34,7 @@ Sources/SwiftyNetwork/
 │   ├── CacheKey.swift        # Hashable key with convenience factories
 │   ├── CachePolicy.swift     # Strategy enum (cacheFirst, reload, expiration)
 │   ├── InMemoryCache.swift   # Actor with LRU eviction
-│   ├── AnyCache.swift        # Type-erased wrapper (conforms to Cache, @unchecked Sendable)
+│   ├── AnyCache.swift        # Type-erased Sendable struct (conforms to Cache)
 │   └── LayeredCache.swift    # Memory + persistent with promotion
 ├── Repository/
 │   └── Repository.swift      # LocalDataSource, CacheBasedLocalDataSource, GenericRepository
@@ -49,8 +49,8 @@ Sources/SwiftyNetwork/
 
 Tests/SwiftyNetworkTests/
 ├── Helpers/TestHelpers.swift # TestURLProtocol, TestAuthorizationProvider, factories
-├── Network/                  # 20 tests across 7 files
-├── Cache/CacheTests.swift    # 22 tests covering all cache types
+├── Network/                  # Request, auth, pinning, instrumentation, and endpoint tests
+├── Cache/CacheTests.swift    # Cache types and policies
 ├── Repository/RepositoryTests.swift  # 7 tests covering all policies
 └── Mutation/                 # Queue retry/coalescing/status, request/store/policy unit tests
 ```
@@ -63,7 +63,7 @@ swift build                     # Debug build
 swift build -c release          # Release build
 
 # Test
-swift test                      # All tests (~60 tests)
+swift test                      # All tests
 swift test --filter CacheTests  # Specific suite
 swift test --enable-code-coverage  # With coverage
 
@@ -93,7 +93,7 @@ swift package generate-documentation \
 ### Naming
 
 - Types/Protocols/Actors: `PascalCase` (`NetworkClient`, `CachePolicy`)
-- Functions/Properties: `lowerCamelCase` (`fetchUser`, `maxRetryAttempts`)
+- Functions/Properties: `lowerCamelCase` (`fetchUser`, `maxAuthRefreshAttempts`)
 - Test files: match type name + `Tests` (`NetworkClientTests.swift`)
 - Test functions: descriptive using `@Test("description")` attribute
 
@@ -197,14 +197,14 @@ MutationQueue.enqueue(request, key) → store.save (coalescing point) → return
 Cache (protocol) → TimestampedCache → InMemoryCache<T> (actor, LRU)
                  → PersistentCache (marker, you implement)
                  → LayeredCache<T> (actor, memory + persistent)
-AnyCache<T> (type-erased wrapper, @unchecked Sendable)
+AnyCache<T> (type-erased Sendable struct)
 ```
 
 ### Key Design Points
 
 - `NetworkEndpoint` is the only endpoint protocol (has defaults, used by NetworkClient)
-- `makeURLRequest()` is an extension on `NetworkEndpoint` in `Endpoint.swift` (standalone URL building)
-- `AnyCache` conforms to `Cache` protocol -- type-erased wrapper with `@unchecked Sendable`
+- `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
+- `AnyCache` conforms to `Cache` protocol -- struct with immutable `@Sendable` closures
 - `retryDelay` applies `Task.sleep(for:)` before auth retry; use `retryDelay: 0` in tests
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder
 - All actors use instance isolation -- no locks or GCD in production code
@@ -220,7 +220,7 @@ AnyCache<T> (type-erased wrapper, @unchecked Sendable)
 - Never commit API keys, tokens, credentials, or production URLs
 - Inject auth via `AuthorizationProvider` -- never hardcode tokens
 - Scrub sensitive headers before logging
-- `Logger` never logs tokens, credentials, or PII
+- `Logger` marks URLs and underlying errors private; redact sensitive values before exporting diagnostics
 - Validate URLs (scheme + host) in endpoints
 - `MutationRequest` can carry secrets via its captured `AuthorizationType` (bearer tokens, API
   keys); a durable `MutationStore` implementation is responsible for encrypting persisted

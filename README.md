@@ -38,13 +38,6 @@ swift format format --in-place --recursive --parallel Sources Tests  # Format in
 swift format lint --recursive --parallel Sources Tests                # Check for violations
 ```
 
-Using SPM command plugins:
-
-```bash
-swift package plugin --allow-writing-to-package-directory swift-format
-swift package plugin swift-format-lint
-```
-
 ### CI
 
 swift-format runs in strict mode on all PRs (warnings treated as errors).
@@ -156,7 +149,7 @@ func createUserRepository() -> GenericRepository<User> {
 `NetworkClient` conforms to `APIClient`, so you can accept any implementation in higher-level code:
 
 ```swift
-func fetchUser(client: APIClient, baseURL: String, userId: String) async throws -> User {
+func fetchUser(client: any APIClient, baseURL: String, userId: String) async throws -> User {
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
     return try await client.request(endpoint, responseType: User.self)
 }
@@ -539,3 +532,14 @@ SwiftyNetwork is available under the MIT license. See the [LICENSE](LICENSE) fil
 - **Live docs**: [https://maniramezan.github.io/SwiftyNetwork](https://maniramezan.github.io/SwiftyNetwork)
 - **Issues**: [GitHub Issues](https://github.com/maniramezan/SwiftyNetwork/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/maniramezan/SwiftyNetwork/discussions)
+
+## GraphQL
+
+See [the GraphQL guide](GRAPHQL.md) for typed variables, response envelopes,
+partial results, and transport limitations. GraphQL uses the existing HTTP
+pipeline; no schema compiler or additional dependency is required.
+
+## Architecture and review
+
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the current implementation and
+[REVIEW.md](REVIEW.md) records remaining correctness and performance work.
