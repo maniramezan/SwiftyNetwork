@@ -7,10 +7,15 @@ import Foundation
 /// Wraps any ``Cache``-conforming type and adds ``value(forKey:orFetch:)``: on a
 /// miss, the first caller for a key runs `fetch` while every other concurrent
 /// caller for that same key awaits the same in-flight `Task` instead of
-/// triggering a duplicate fetch (e.g. a duplicate network request). Plain
-/// ``Cache`` operations (`value(forKey:)`, `setValue`, `removeValue`,
-/// `removeAll`, `timestamp(forKey:)`) pass straight through to the wrapped
-/// cache and are unaffected by in-flight coalescing.
+/// triggering a duplicate fetch (e.g. a duplicate network request).
+///
+/// Storage operations are serialized, including the final fetch commit. Explicit
+/// writes and removals invalidate the affected flight, even if its fetch ignores
+/// cancellation. Use this wrapper exclusively to mutate the underlying cache.
+/// Wrapped cache methods must not call back into this wrapper. Storage is queued
+/// across all keys, so a slow custom store can delay otherwise unrelated reads.
+/// A canceled caller does not cancel work shared with other callers; it observes
+/// cancellation after the shared work finishes. Different keys fetch concurrently.
 ///
 /// `SingleFlightCache` adds only deduplication -- size limits, eviction, and
 /// persistence are entirely up to whatever ``Cache`` you wrap (e.g.
@@ -29,7 +34,16 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
     public typealias Value = Wrapped.Value
 
     private let wrapped: Wrapped
-    private var inFlightFetches: [CacheKey: Task<Value, any Error>] = [:]
+    let operations = CacheOperationGate()
+    private struct Flight: Sendable {
+        let id: UUID
+        let task: Task<Value, any Error>
+    }
+    private enum Lookup: Sendable {
+        case cached(Value)
+        case flight(Flight)
+    }
+    private var inFlightFetches: [CacheKey: Flight] = [:]
 
     /// Wraps an existing cache with single-flight fetch coalescing.
     ///
@@ -38,32 +52,49 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
         self.wrapped = wrapped
     }
 
-    // MARK: - Cache API (pass-through)
+    // MARK: - Cache API
 
+    /// Reads the stored value after preceding storage operations finish.
     public func value(forKey key: CacheKey) async -> Value? {
-        await wrapped.value(forKey: key)
+        await operations.run { await self.wrapped.value(forKey: key) }
     }
 
+    /// Invalidates a pending fetch and stores an explicit value.
     public func setValue(_ value: Value, forKey key: CacheKey) async {
-        await wrapped.setValue(value, forKey: key)
-    }
-
-    public func removeValue(forKey key: CacheKey) async {
-        await wrapped.removeValue(forKey: key)
-        inFlightFetches[key]?.cancel()
-        inFlightFetches[key] = nil
-    }
-
-    public func removeAll() async {
-        await wrapped.removeAll()
-        for task in inFlightFetches.values {
-            task.cancel()
+        await operations.run {
+            await self.invalidate(key)
+            await self.wrapped.setValue(value, forKey: key)
         }
-        inFlightFetches.removeAll()
     }
 
+    /// Cancels the current fetch and removes the stored value before returning.
+    public func removeValue(forKey key: CacheKey) async {
+        await operations.run {
+            await self.invalidate(key)
+            await self.wrapped.removeValue(forKey: key)
+        }
+    }
+
+    /// Cancels all current fetches and clears storage before returning.
+    public func removeAll() async {
+        await operations.run {
+            await self.invalidateAll()
+            await self.wrapped.removeAll()
+        }
+    }
+
+    /// Reads the timestamp after preceding storage operations finish.
     public func timestamp(forKey key: CacheKey) async -> Date? {
-        await wrapped.timestamp(forKey: key)
+        await operations.run { await self.wrapped.timestamp(forKey: key) }
+    }
+
+    private func invalidate(_ key: CacheKey) {
+        inFlightFetches.removeValue(forKey: key)?.task.cancel()
+    }
+
+    private func invalidateAll() {
+        for flight in inFlightFetches.values { flight.task.cancel() }
+        inFlightFetches.removeAll()
     }
 
     // MARK: - Single-Flight Fetch
@@ -81,31 +112,50 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
     ///   - fetch: Produces the value on a cache miss. Runs at most once per
     ///     concurrent burst of calls for `key`.
     /// - Returns: The cached or freshly fetched value.
-    /// - Throws: Whatever `fetch` throws, if the fetch fails.
+    /// - Throws: The fetch error, or `CancellationError` if the caller is canceled
+    ///   or a write/removal supersedes the fetch before it commits.
     public func value(forKey key: CacheKey, orFetch fetch: @escaping @Sendable () async throws -> Value) async throws
         -> Value
     {
-        if let cached = await wrapped.value(forKey: key) {
-            return cached
+        try Task.checkCancellation()
+        let lookup = await operations.run { await self.lookup(key, fetch: fetch) }
+        let value: Value
+        switch lookup {
+        case .cached(let cached): value = cached
+        case .flight(let flight): value = try await flight.task.value
         }
+        try Task.checkCancellation()
+        return value
+    }
 
-        if let inFlight = inFlightFetches[key] {
-            return try await inFlight.value
-        }
-
+    // Called only while holding operations, including across wrapped-cache awaits.
+    private func lookup(_ key: CacheKey, fetch: @escaping @Sendable () async throws -> Value) async -> Lookup {
+        if let cached = await wrapped.value(forKey: key) { return .cached(cached) }
+        if let flight = inFlightFetches[key] { return .flight(flight) }
+        let id = UUID()
         let task = Task<Value, any Error> {
-            try await fetch()
+            do {
+                let value = try await fetch()
+                try Task.checkCancellation()
+                return try await self.operations.run { try await self.commit(value, key: key, id: id) }
+            } catch {
+                await self.operations.run { await self.clearFlight(key, id: id) }
+                throw error
+            }
         }
-        inFlightFetches[key] = task
+        let flight = Flight(id: id, task: task)
+        inFlightFetches[key] = flight
+        return .flight(flight)
+    }
 
-        do {
-            let value = try await task.value
-            inFlightFetches[key] = nil
-            await wrapped.setValue(value, forKey: key)
-            return value
-        } catch {
-            inFlightFetches[key] = nil
-            throw error
-        }
+    private func commit(_ value: Value, key: CacheKey, id: UUID) async throws -> Value {
+        guard inFlightFetches[key]?.id == id else { throw CancellationError() }
+        await wrapped.setValue(value, forKey: key)
+        clearFlight(key, id: id)
+        return value
+    }
+
+    private func clearFlight(_ key: CacheKey, id: UUID) {
+        if inFlightFetches[key]?.id == id { inFlightFetches[key] = nil }
     }
 }

@@ -47,8 +47,12 @@ conformance is compiler-checked. Cache protocols also support Sendable value
 implementations. `GenericRepository` holds Sendable forwarding closures.
 
 Actor isolation prevents data races, but an `await` allows another operation to
-interleave. Compound cache operations across awaits are not transactions. Invalidation and
-promotion races remain under review; see [the review backlog](REVIEW.md).
+interleave. `SingleFlightCache` and `LayeredCache` serialize their storage operations across
+awaits using an internal gate. Single-flight fetches run outside it and commit only
+while their flight identity remains current. Access underlying storage exclusively
+through the wrapper, and never call back into that wrapper from a storage method.
+Individual operations are ordered; separate value/timestamp calls still do not
+form a transaction. See [the review backlog](REVIEW.md) for remaining contracts.
 
 Shared OAuth refreshes and single-flight fetches use owned unstructured tasks
 because multiple independent callers share their lifetime. Mutation workers must

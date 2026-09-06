@@ -7,6 +7,9 @@
 - Repeated leading path slash normalization matching the documented contract.
 - Current architecture, GraphQL recipe, security boundaries, and migration notes.
 - Removed README commands for formatter plugins absent from Package.swift.
+- Serialized compound cache operations, fenced single-flight completion by identity,
+  and invalidated pending fetches on explicit writes and removals. Regression tests
+  use gates and queue admission checks to force suspended commits/promotions.
 
 ## Priority follow-ups
 
@@ -15,7 +18,6 @@ security audit or measured performance gains.
 
 | Priority | Finding | Proposed change and acceptance criteria |
 | --- | --- | --- |
-| High | Single-flight invalidation and layered promotion can race across awaits. | Serialize compound storage operations and fence late fetch completions by identity; test suspended commits, replacement flights, and removals. |
 | High | Credentialed requests accept arbitrary endpoint hosts and URLSession redirects; pinning applies only to listed hosts. | Design an opt-in allowed-origin and redirect policy covering custom API-key headers, scheme downgrade, and injected sessions. Test with a local redirect server. |
 | Medium | GraphQL error bodies and headers cannot always be recovered after HTTP mapping. | Add a raw response abstraction preserving status, headers, and data; layer typed decoding on it. Use that boundary for GraphQL errors, Retry-After, ETags, and content-type validation. Preserve current typed API behavior. |
 | Medium | `NetworkClient` durations use wall-clock Date; synchronous JSON encoding/decoding runs on its actor. | Use a monotonic clock for elapsed durations. Benchmark concurrent large payloads before moving decoding to a separate executor or introducing coder factories. |
@@ -46,3 +48,26 @@ All six added regression tests passed. Strict swift-format lint and
 nested sandbox disabled to run within the workspace's existing restrictions.
 The full suite still needs a clean run on a host with working Security services;
 this review does not establish live TLS handshake or redirect behavior.
+
+## Cache ordering contract
+
+`SingleFlightCache` and `LayeredCache` now queue storage operations across awaits.
+Single-flight network fetches remain concurrent across keys and run outside the
+storage gate. Explicit writes/removals cancel and invalidate the affected flight;
+late completions cannot clear replacement flights or overwrite their values.
+All callers sharing a flight await its cache commit before returning.
+
+A canceled caller does not cancel the shared fetch and observes cancellation when
+that work finishes. Cancellation does not bypass a queued storage mutation.
+Use wrapped caches exclusively through their wrapper; direct mutations bypass
+these guarantees. Custom storage must not recursively call the same wrapper.
+Serialization covers all keys, so slow storage creates head-of-line blocking;
+per-key storage queues with a global removeAll barrier are a possible measured
+optimization, not required for correctness. Separate value/timestamp API calls
+still do not form an atomic snapshot for repository consumers.
+
+Cache-fix validation: the full suite ran 180 tests with 177 passing and the same
+three previously reproduced TLS failures. After adding the independent-key fetch
+regression, all seven ordering tests passed (including parameterized invalidation
+and layered-removal cases). The release build, strict formatting, and diff checks
+passed. No performance improvement is claimed for the storage serialization change.
