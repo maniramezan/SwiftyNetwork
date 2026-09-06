@@ -150,14 +150,14 @@ let endpoint = makeEndpointWithTestId("test-id")
 - Imperative mood: `"Add cache size limits"` not `"Added..."`
 - Optional scope prefix: `cache:`, `network:`, `docs:`, `tests:`, `repo:`
 - Reference issues: `Fixes #123`
-- Co-author tag for AI contributions (see CLAUDE.md for Claude-specific tag)
+- Do not add `Co-Authored-By: Codex` or other Codex attribution trailers to commits.
 
 ### Pull Requests
 
 - Summary of changes and architectural impact
 - Testing evidence (test output, coverage)
 - Migration notes if breaking changes
-- Update CHANGELOG.md for user-facing changes
+- Do not create or maintain changelog files. Describe user-facing changes and migration notes in PR descriptions.
 
 ## Architecture Quick Reference
 
@@ -236,4 +236,3 @@ AnyCache<T> (type-erased Sendable struct)
 | [README.md](README.md) | User-facing documentation with installation and examples |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Human contributor guide: setup, style, PR process |
 | [PLAN.md](PLAN.md) | Feature planning checklist and decision framework |
-| [CHANGELOG.md](CHANGELOG.md) | Version history and breaking changes |

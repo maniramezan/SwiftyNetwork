@@ -201,7 +201,7 @@ tests: Add coverage for edge cases in CachePolicy
    - ✅ Build succeeds
    - ✅ All tests pass
    - ✅ Code coverage is maintained or improved
-4. **Update CHANGELOG.md** with your changes
+4. **Describe user-facing changes and migration notes** in your pull request; do not add a changelog file
 5. **Provide clear PR description**:
    - What problem does this solve?
    - What approach did you take?
