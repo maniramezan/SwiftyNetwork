@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Measure request instrumentation with a monotonic clock so system time corrections do not distort durations.
+
 - Prevent invalidated single-flight fetches from repopulating storage or clearing replacements.
 - Make explicit cache writes supersede pending fetches; canceled callers leave shared work running.
 - Serialize layered promotion, writes, and removal so concurrent operations cannot diverge cache tiers.

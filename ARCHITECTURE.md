@@ -37,7 +37,9 @@ A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `retryDelay` before replay. This is **not** general transient-error retry.
 Endpoint-specific authorization does not trigger provider refresh. Attempt counts
 include auth replays. Instrumentation callbacks are awaited and therefore add to
-request latency; observers should do bounded work.
+request latency; observers should do bounded work. Durations use `ContinuousClock`
+and therefore remain unaffected by wall-clock corrections. They include authorization,
+transport, and decoding, excluding the initial and terminal instrumentation callbacks.
 
 ## Concurrency and ownership
 

@@ -124,7 +124,9 @@ public struct NetworkRequestCompletion: Sendable {
     /// The HTTP status code returned.
     public let statusCode: Int
 
-    /// Wall-clock time from just before the network call to receiving the response.
+    /// Monotonic elapsed seconds, including authorization, transport, and decoding.
+    /// Measurement starts after `requestStarted` returns and excludes the
+    /// `requestCompleted` callback itself. System clock changes do not affect it.
     public let duration: TimeInterval
 
     public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, statusCode: Int, duration: TimeInterval) {
@@ -153,7 +155,9 @@ public struct NetworkRequestFailure: Sendable {
     /// See ``NetworkRequestAttempt/attempt``.
     public let attempt: Int
 
-    /// Wall-clock time from just before the network call to the failure being observed.
+    /// Monotonic elapsed seconds from after `requestStarted` returns until failure.
+    /// Includes authorization and any failed auth refresh, but excludes the
+    /// `requestFailed` callback itself. System clock changes do not affect it.
     public let duration: TimeInterval
 
     /// The error that terminated this attempt. Use ``NetworkError/classification``

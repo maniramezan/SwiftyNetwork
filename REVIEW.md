@@ -20,7 +20,7 @@ security audit or measured performance gains.
 | --- | --- | --- |
 | High | Credentialed requests accept arbitrary endpoint hosts and URLSession redirects; pinning applies only to listed hosts. | Design an opt-in allowed-origin and redirect policy covering custom API-key headers, scheme downgrade, and injected sessions. Test with a local redirect server. |
 | Medium | GraphQL error bodies and headers cannot always be recovered after HTTP mapping. | Add a raw response abstraction preserving status, headers, and data; layer typed decoding on it. Use that boundary for GraphQL errors, Retry-After, ETags, and content-type validation. Preserve current typed API behavior. |
-| Medium | `NetworkClient` durations use wall-clock Date; synchronous JSON encoding/decoding runs on its actor. | Use a monotonic clock for elapsed durations. Benchmark concurrent large payloads before moving decoding to a separate executor or introducing coder factories. |
+| Medium | Synchronous JSON encoding/decoding runs on the client actor. | Benchmark concurrent large payloads before moving decoding to a separate executor or introducing coder factories. |
 | Medium | LRU eviction scans all entries and relies on Date ordering; entry count does not bound bytes in `RemoteDataCache`. | Benchmark realistic cache sizes; consider a sequence-based access order, O(1) LRU structure, and optional byte-cost limits based on evidence. |
 | Medium | Repositories read values and timestamps separately; concurrent requests are not coalesced at the repository boundary. | Explore atomic cache-entry reads and explicit repository fetch sharing without conflating cache policies or users. |
 | Medium | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording. | Document ownership and prohibit concurrent external coder reconfiguration; evaluate factory-based configuration in an API proposal. |
@@ -71,3 +71,6 @@ three previously reproduced TLS failures. After adding the independent-key fetch
 regression, all seven ordering tests passed (including parameterized invalidation
 and layered-removal cases). The release build, strict formatting, and diff checks
 passed. No performance improvement is claimed for the storage serialization change.
+
+Monotonic timing batch: request event durations now use ContinuousClock, preserving
+the public TimeInterval representation and documenting measured pipeline boundaries.
