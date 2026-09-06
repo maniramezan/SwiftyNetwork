@@ -174,7 +174,7 @@ public actor NetworkClient: NetworkDataSource {
         await instrumentation?.requestStarted(
             NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt)
         )
-        let startedAt = Date()
+        let startedAt = ContinuousClock.now
 
         var request = buildURLRequest(from: endpoint, url: url, configuration: configuration)
         let providerAuthApplied = await applyAuthorization(
@@ -196,7 +196,7 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: mapped
                 )
             )
@@ -210,7 +210,7 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: mapped
                 )
             )
@@ -224,7 +224,7 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: .invalidResponse
                 )
             )
@@ -256,7 +256,7 @@ public actor NetworkClient: NetworkDataSource {
                     method: method,
                     attempt: attempt,
                     statusCode: httpResponse.statusCode,
-                    duration: Date().timeIntervalSince(startedAt)
+                    duration: elapsedTime(since: startedAt)
                 )
             )
             return decoded
@@ -267,12 +267,18 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: error
                 )
             )
             throw error
         }
+    }
+
+    /// ContinuousClock is unaffected by wall-clock corrections and includes sleep.
+    private func elapsedTime(since start: ContinuousClock.Instant) -> TimeInterval {
+        let components = start.duration(to: .now).components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 
     private func buildURLRequest(
@@ -351,7 +357,7 @@ public actor NetworkClient: NetworkDataSource {
         url: URL,
         method: HTTPMethod,
         attempt: Int,
-        startedAt: Date
+        startedAt: ContinuousClock.Instant
     ) async throws -> T {
         let instrumentation = configuration.instrumentation
         guard let provider = configuration.authorizationProvider,
@@ -365,7 +371,7 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: .unauthorized
                 )
             )
@@ -382,7 +388,7 @@ public actor NetworkClient: NetworkDataSource {
                     url: url,
                     method: method,
                     attempt: attempt,
-                    duration: Date().timeIntervalSince(startedAt),
+                    duration: elapsedTime(since: startedAt),
                     error: .authorizationRefreshFailed
                 )
             )
