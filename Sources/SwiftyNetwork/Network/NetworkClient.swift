@@ -106,19 +106,6 @@ public actor NetworkClient: NetworkDataSource {
         )
     }
 
-    /// Performs a network request that is expected to return no response body.
-    ///
-    /// - Parameter endpoint: The endpoint describing the request.
-    /// - Throws: ``NetworkError`` if the request or response fails.
-    ///
-    /// Example:
-    /// ```swift
-    /// try await client.request(DeleteProfileEndpoint())
-    /// ```
-    public func request(_ endpoint: any NetworkEndpoint) async throws {
-        _ = try await request(endpoint, responseType: EmptyResponse.self)
-    }
-
     /// Performs a network request with an `Encodable` body, encoding it via the
     /// configured `JSONEncoder`.
     ///
@@ -293,13 +280,8 @@ public actor NetworkClient: NetworkDataSource {
         url: URL,
         configuration: NetworkClientConfiguration
     ) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = endpoint.method.rawValue
+        var request = endpoint.makeUnauthenticatedURLRequest(url: url)
         request.timeoutInterval = configuration.timeoutInterval
-        endpoint.headers?.forEach { key, value in
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-        request.httpBody = endpoint.body
         return request
     }
 

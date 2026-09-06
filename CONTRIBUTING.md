@@ -16,7 +16,7 @@ Thank you for your interest in contributing to SwiftyNetwork! We welcome contrib
 ### Requirements
 - Swift 6.0+
 - Xcode 16.0+ (for iOS/macOS development)
-- macOS 15.0+ (for running tests)
+- macOS 14.0+ (package minimum; your Xcode version may require a newer macOS)
 
 ### Building the Project
 
@@ -65,7 +65,7 @@ Configuration is defined in `.swift-format` at the repository root.
 
 ### Naming Conventions
 - **Types/Protocols/Actors**: `PascalCase` (e.g., `NetworkClient`, `CachePolicy`)
-- **Functions/Properties/Variables**: `lowerCamelCase` (e.g., `fetchUser`, `maxRetryAttempts`)
+- **Functions/Properties/Variables**: `lowerCamelCase` (e.g., `fetchUser`, `maxAuthRefreshAttempts`)
 - **Test Methods**: Descriptive names using `@Test` attribute
 
 ### Documentation

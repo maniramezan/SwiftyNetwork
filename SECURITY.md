@@ -57,3 +57,20 @@ We support good-faith security research. As long as you make a reasonable
 effort to avoid privacy violations, data destruction, and service
 disruption while researching, we will not pursue legal action against
 you for your report.
+
+## Integration boundaries
+
+- Use HTTPS for sensitive traffic. Endpoint validation also permits HTTP.
+- Scope credentialed clients to trusted origins. TLS pinning is not an origin
+  allowlist; unlisted and redirected hosts use URLSession's normal handling.
+  Applications using custom credential headers should enforce redirect policy
+  through an appropriately configured session delegate.
+- Exact pinning policies override ancestor policies; otherwise the nearest
+  ancestor allowing subdomains wins. Keep default trust validation enabled.
+- Instrumentation receives complete URLs and errors, which may include response
+  bodies. Redact before exporting telemetry. Unified logging privacy annotations
+  do not remove secrets from the original values.
+- Partition cache keys by account/tenant and clear sensitive data on logout.
+  RemoteDataCache keys only by URL; isolate instances for authenticated content.
+- Encrypt sensitive durable mutations, including captured authorization and body
+  data. Persistence and retry do not guarantee exactly-once server execution.

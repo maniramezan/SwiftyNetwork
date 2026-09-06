@@ -80,6 +80,13 @@ extension NetworkEndpoint {
     /// ```
     public func makeURLRequest() throws -> URLRequest {
         let url = try EndpointURLBuilder.url(baseURL: baseURL, path: path, queryItems: queryItems)
+        var request = makeUnauthenticatedURLRequest(url: url)
+        authorization.apply(to: &request)
+        return request
+    }
+
+    /// Shared assembly; provider authorization is applied separately by the client.
+    func makeUnauthenticatedURLRequest(url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
         if let headers {
@@ -90,7 +97,6 @@ extension NetworkEndpoint {
         if let body {
             request.httpBody = body
         }
-        authorization.apply(to: &request)
         return request
     }
 }
@@ -147,6 +153,6 @@ extension String {
 
     fileprivate var ensuringLeadingSlash: String {
         if isEmpty { return "" }
-        return hasPrefix("/") ? self : "/" + self
+        return "/" + drop(while: { $0 == "/" })
     }
 }

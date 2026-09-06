@@ -89,3 +89,10 @@ func testEndpointInvalidBaseURL() throws {
         try E().makeURLRequest()
     }
 }
+
+@Test("Endpoint normalizes repeated leading slashes without changing the host")
+func testEndpointRepeatedLeadingSlashes() throws {
+    let url = try EndpointURLBuilder.url(
+        baseURL: "https://api.example.com/base///", path: "///items", queryItems: nil)
+    #expect(url.absoluteString == "https://api.example.com/base/items")
+}

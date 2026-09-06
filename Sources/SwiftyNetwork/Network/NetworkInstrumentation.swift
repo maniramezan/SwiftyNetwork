@@ -42,6 +42,10 @@ import Foundation
 /// this protocol's job -- it's already possible via ``NetworkEndpoint/headers``,
 /// fully under the caller's control.
 ///
+/// Events contain complete URLs and errors, potentially including sensitive query
+/// parameters and response bodies. Redact these before exporting telemetry.
+/// Callbacks are awaited and should finish promptly to avoid delaying requests.
+///
 /// All methods have a no-op default, so a conformer only needs to implement
 /// the events it cares about. Methods are `async` but not `throws`:
 /// instrumentation must never fail a request.

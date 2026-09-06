@@ -85,7 +85,10 @@ public struct SSLPinningConfiguration: Sendable, Equatable {
         }
     }
 
-    /// Policies keyed by host name.
+    /// Policies keyed by canonical lowercase host name, without leading or trailing dots.
+    ///
+    /// Exact matches take precedence; otherwise the most specific matching
+    /// ancestor with `includesSubdomains` wins.
     public var policies: [String: HostPolicy]
 
     /// Creates SSL pinning configuration.
@@ -127,8 +130,12 @@ public struct SSLPinningConfiguration: Sendable, Equatable {
             return policy
         }
 
-        for (policyHost, policy) in policies where policy.includesSubdomains {
-            if host.hasSuffix("." + policyHost) {
+        // Walk from the nearest parent outward so dictionary order cannot
+        // cause a broader policy to override a more specific one.
+        var ancestor = host[...]
+        while let dot = ancestor.firstIndex(of: ".") {
+            ancestor = ancestor[ancestor.index(after: dot)...]
+            if let policy = policies[String(ancestor)], policy.includesSubdomains {
                 return policy
             }
         }

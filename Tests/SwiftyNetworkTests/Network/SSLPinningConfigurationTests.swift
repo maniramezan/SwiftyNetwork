@@ -420,3 +420,19 @@ struct SSLPinningConfigurationTests {
         #expect(response == user)
     }
 }
+
+@Test("Pinning chooses the nearest matching ancestor and respects label boundaries")
+func testPinningPolicySpecificity() {
+    let broad = SSLPinningConfiguration.HostPolicy(pins: [.certificate(Data([1]))], includesSubdomains: true)
+    let narrow = SSLPinningConfiguration.HostPolicy(pins: [], includesSubdomains: true)
+    let exact = SSLPinningConfiguration.HostPolicy(pins: [.certificate(Data([2]))])
+    let configuration = SSLPinningConfiguration(policies: [
+        "example.com": broad,
+        "api.example.com": narrow,
+        "exact.api.example.com": exact,
+    ])
+    #expect(configuration.policy(forHost: "child.api.example.com") == narrow)
+    #expect(configuration.policy(forHost: "EXACT.API.EXAMPLE.COM.") == exact)
+    #expect(configuration.policy(forHost: "other.example.com") == broad)
+    #expect(configuration.policy(forHost: "notexample.com") == nil)
+}
