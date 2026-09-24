@@ -58,8 +58,19 @@ public actor MutationQueue {
     private let store: any MutationStore
     private let retryPolicy: MutationRetryPolicy
 
+    /// A background task processing one key. The `id` lets a worker detect
+    /// that it was cancelled and replaced, so it never touches the store or
+    /// publishes status on behalf of a newer worker.
+    private struct Worker {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
     private var latestStatusByKey: [MutationKey: MutationStatus] = [:]
-    private var processingTaskByKey: [MutationKey: Task<Void, Never>] = [:]
+    private var workerByKey: [MutationKey: Worker] = [:]
+    /// Serializes enqueue and cancel so a cancel can never remove a request
+    /// saved by an enqueue that interleaved with it (or vice versa).
+    private let operations = CacheOperationGate()
     private var eventContinuations: [UUID: AsyncStream<MutationEvent>.Continuation] = [:]
 
     /// Creates a mutation queue.
@@ -91,10 +102,56 @@ public actor MutationQueue {
     ///   - request: The mutation to execute.
     ///   - key: The logical mutation this belongs to, for coalescing.
     public func enqueue(_ request: MutationRequest, key: MutationKey) async {
+        await operations.run { await self.performEnqueue(request, key: key) }
+    }
+
+    private func performEnqueue(_ request: MutationRequest, key: MutationKey) async {
         Logger.debug("Enqueuing mutation for key \(key)", category: .mutation)
         await store.save(request, for: key)
         setStatus(.pending, for: key)
         startProcessingIfNeeded(for: key)
+    }
+
+    /// Cancels the pending mutation for `key` and removes it from the store.
+    ///
+    /// Use this when the desired state no longer matters (for example, the
+    /// user deleted the item). If a mutation is pending or retrying, it
+    /// finishes with ``MutationStatus/failed(_:)`` and a reason whose
+    /// ``MutationFailureReason/isCancellation`` is `true`. A request already
+    /// on the wire can't be recalled: the server may still apply it, but its
+    /// result is ignored. Does nothing if `key` has no pending mutation.
+    ///
+    /// - Parameter key: The logical mutation to cancel.
+    public func cancel(_ key: MutationKey) async {
+        await operations.run { await self.performCancel(key) }
+    }
+
+    /// Cancels every pending mutation and clears the store.
+    ///
+    /// Call this on sign-out. Persisted mutations can carry credentials and
+    /// must not be replayed for the next user.
+    public func cancelAll() async {
+        await operations.run {
+            var keys = Set(await self.store.allKeys())
+            keys.formUnion(await self.activeKeys())
+            for key in keys {
+                await self.performCancel(key)
+            }
+        }
+    }
+
+    private func activeKeys() -> [MutationKey] {
+        Array(workerByKey.keys)
+    }
+
+    private func performCancel(_ key: MutationKey) async {
+        let worker = workerByKey.removeValue(forKey: key)
+        worker?.task.cancel()
+        let hadStoredRequest = await store.load(for: key) != nil
+        await store.remove(for: key)
+        guard worker != nil || hadStoredRequest else { return }
+        Logger.debug("Cancelled mutation for key \(key)", category: .mutation)
+        setStatus(.failed(MutationFailureReason(CancellationError())), for: key)
     }
 
     /// The most recently observed status for `key`, if it has ever been enqueued.
@@ -142,24 +199,42 @@ public actor MutationQueue {
     // MARK: - Processing
 
     private func startProcessingIfNeeded(for key: MutationKey) {
-        guard processingTaskByKey[key] == nil else { return }
-        processingTaskByKey[key] = Task { [weak self] in
-            await self?.process(key: key)
+        guard workerByKey[key] == nil else { return }
+        let id = UUID()
+        // The task can't start running `process` until this actor-isolated
+        // method returns, so the worker is registered before it runs.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.process(key: key, workerID: id)
         }
+        workerByKey[key] = Worker(id: id, task: task)
     }
 
-    private func process(key: MutationKey) async {
-        defer { processingTaskByKey[key] = nil }
+    private func isCurrentWorker(_ id: UUID, for key: MutationKey) -> Bool {
+        workerByKey[key]?.id == id && !Task.isCancelled
+    }
+
+    private func process(key: MutationKey, workerID: UUID) async {
+        defer {
+            if workerByKey[key]?.id == workerID {
+                workerByKey[key] = nil
+            }
+        }
 
         var attempt = 0
-        while !Task.isCancelled {
-            guard let request = await store.load(for: key) else { return }
+        while isCurrentWorker(workerID, for: key) {
+            guard let request = await store.load(for: key), isCurrentWorker(workerID, for: key) else { return }
 
             Logger.debug("Executing mutation for key \(key) (attempt \(attempt + 1))", category: .mutation)
             do {
                 _ = try await client.request(request, responseType: EmptyResponse.self)
+                // Cancelled while on the wire: the queue already reported the
+                // cancellation, so ignore this outcome entirely.
+                guard isCurrentWorker(workerID, for: key) else { return }
 
-                if await store.removeIfCurrent(request, for: key) {
+                let removed = await store.removeIfCurrent(request, for: key)
+                guard isCurrentWorker(workerID, for: key) else { return }
+                if removed {
                     Logger.debug("Mutation succeeded for key \(key)", category: .mutation)
                     setStatus(.succeeded, for: key)
                     return
@@ -173,9 +248,12 @@ public actor MutationQueue {
                 attempt = 0
                 setStatus(.pending, for: key)
             } catch {
+                guard isCurrentWorker(workerID, for: key) else { return }
                 attempt += 1
                 guard retryPolicy.isRetryable(error), attempt <= retryPolicy.maxAttempts else {
-                    if await store.removeIfCurrent(request, for: key) {
+                    let removed = await store.removeIfCurrent(request, for: key)
+                    guard isCurrentWorker(workerID, for: key) else { return }
+                    if removed {
                         Logger.error("Mutation failed permanently for key \(key)", error: error, category: .mutation)
                         setStatus(.failed(MutationFailureReason(error)), for: key)
                         return
