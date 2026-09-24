@@ -198,8 +198,18 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
     private func store(_ value: T, forKey key: CacheKey, timestamp: Date) {
         let entryCost = cost.map { max(0, $0(value)) } ?? 0
-        if let replaced = storage.peekValue(forKey: key) {
+        if let replaced = storage.removeValue(forKey: key) {
             currentCost -= replaced.cost
+        }
+        if let maxCost {
+            // Make room before adding: summing two valid costs can overflow Int.
+            while entryCost > maxCost - currentCost,
+                let evicted = storage.removeLeastRecentlyUsed()
+            {
+                currentCost -= evicted.value.cost
+                Logger.debug("Evicted LRU cache entry to stay within limits", category: .cache)
+            }
+            guard entryCost <= maxCost else { return }
         }
         storage.setValue(CacheEntry(value: value, timestamp: timestamp, cost: entryCost), forKey: key)
         currentCost += entryCost
