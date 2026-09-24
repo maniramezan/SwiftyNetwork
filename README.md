@@ -18,6 +18,9 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Repository Pattern**: Clean separation between network and local data sources
 - **Automatic Auth Refresh**: Refreshes credentials and replays the request once on `401`
 - **Fire-and-Forget Mutations**: Background retry, key-based coalescing, and pluggable persistence via `MutationQueue`
+- **Fetch Deduplication**: `SingleFlightCache` and `RemoteDataCache` share one fetch across concurrent callers
+- **Reachability & Instrumentation**: `NetworkMonitor` streams reachability; `NetworkInstrumentation` exposes request timing and outcomes
+- **Test Doubles**: The `SwiftyNetworkTesting` product ships `MockAPIClient` for unit tests and previews
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
 ## Requirements
@@ -283,6 +286,11 @@ do {
 }
 ```
 
+`OAuthAuthorizationProvider` coalesces concurrent refreshes, and a `401` for a token that another request
+already replaced retries with the new token instead of refreshing again. That matters for servers that
+rotate refresh tokens. Call `updateAccessToken(_:)` after sign-in to swap the token without rebuilding the
+client. Custom providers get the same behavior by implementing `refreshAuthorization(rejecting:)`.
+
 ### Fire-and-Forget Mutations with MutationQueue
 
 Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
@@ -376,6 +384,58 @@ openssl s_client -connect api.example.com:443 < /dev/null 2>/dev/null \
 For certificate pins, use `.certificate(_:)` with DER certificate data or `.certificateSHA256(base64Encoded:)`.
 For safer rotations, configure more than one accepted pin during certificate or key rollovers.
 
+### Deduplicating Fetches with SingleFlightCache and RemoteDataCache
+
+`SingleFlightCache` wraps any `Cache` so concurrent misses for the same key share one fetch.
+`RemoteDataCache` builds on it to cache raw response bytes (for example images) by URL.
+
+```swift
+let users = SingleFlightCache(InMemoryCache<User>(maxSize: 500))
+// Ten concurrent callers trigger one network request.
+let user = try await users.value(forKey: "user:42") {
+    try await client.request(UserEndpoint(baseURL: baseURL, userId: "42"), responseType: User.self)
+}
+
+let images = RemoteDataCache(cache: InMemoryCache<Data>(maxSize: 200))
+let avatar = try await images.data(for: avatarURL)
+```
+
+`RemoteDataCache` keys only by URL. Use a separate instance per account for authenticated content.
+
+### Reachability with NetworkMonitor
+
+```swift
+let monitor = NetworkMonitor.shared
+await monitor.startMonitoring()
+
+for await status in await monitor.updates {
+    offlineBanner.isHidden = status == .reachable
+}
+```
+
+Each `updates` stream starts with the current status and only keeps the latest value for slow consumers.
+
+### Request Instrumentation
+
+Conform to `NetworkInstrumentation` to feed request timing and outcomes into your observability stack.
+Every method has a no-op default, so implement only what you need.
+
+```swift
+struct RequestMetrics: NetworkInstrumentation {
+    func requestCompleted(_ event: NetworkRequestCompletion) async {
+        Metrics.record("http.duration", event.duration, tags: ["status": "\(event.statusCode)"])
+    }
+
+    func requestFailed(_ event: NetworkRequestFailure) async {
+        Metrics.increment("http.failure", tags: ["category": "\(event.error.classification)"])
+    }
+}
+
+let client = NetworkClient(configuration: NetworkClientConfiguration(instrumentation: RequestMetrics()))
+```
+
+Events include full URLs and errors. Redact them before exporting.
+
 ### Custom Cache Implementation
 
 ```swift
@@ -422,6 +482,10 @@ do {
     // Handle other errors
 }
 ```
+
+Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
+Timeouts, lost connectivity, malformed responses, and 5xx statuses count as transient. This is the same rule
+`MutationRetryPolicy.default` uses.
 
 ## Configuration
 
@@ -476,31 +540,50 @@ All operations in SwiftyNetwork are thread-safe:
 
 ## Testing
 
-SwiftyNetwork's protocol-based design makes it easy to test:
+Add the `SwiftyNetworkTesting` product to your **test target** to get `MockAPIClient`, a scriptable
+`APIClient` that records every request:
 
 ```swift
-// Mock network data source
-struct MockNetworkDataSource<R: Decodable & Sendable>: NetworkDataSource {
-    let mockResponse: R
-
-    func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
-        responseType: T.Type
-    ) async throws -> T {
-        guard let typed = mockResponse as? T else {
-            throw NetworkError.invalidResponse
-        }
-        return typed
-    }
-}
-
-// Use in tests
-let mockDataSource = MockNetworkDataSource(mockResponse: mockUser)
-let repository = GenericRepository(
-    networkDataSource: mockDataSource,
-    localDataSource: mockLocalDataSource
+.testTarget(
+    name: "MyAppTests",
+    dependencies: [
+        "MyApp",
+        .product(name: "SwiftyNetworkTesting", package: "SwiftyNetwork"),
+    ]
 )
 ```
+
+```swift
+import SwiftyNetwork
+import SwiftyNetworkTesting
+import Testing
+
+@Test func likeRetriesTransientFailures() async throws {
+    let client = MockAPIClient()
+    // The first call times out, then every later call succeeds.
+    await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+
+    let queue = MutationQueue(client: client, retryPolicy: .immediate())
+    await queue.enqueue(MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42")), key: "like:video:42")
+    // ... await a `.succeeded` event from `queue.events()`
+
+    let sent = await client.requests(to: "/likes")
+    #expect(sent.count == 2)
+}
+
+@Test func repositoryCachesUsers() async throws {
+    let client = MockAPIClient()
+    try await client.stub(.get, "/users/123", returning: User(id: "123", name: "Ada", email: "ada@example.com"))
+    let repository = GenericRepository(
+        networkDataSource: client,
+        localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<User>())
+    )
+    // ...
+}
+```
+
+Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw
+`MockAPIClient.UnstubbedRequestError` unless you set a fallback with `setFallback(_:)`.
 
 ## Contributing
 
