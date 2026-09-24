@@ -15,6 +15,18 @@ func testCacheKeyEndpointSorting() {
     #expect(key.rawValue == "/users?a=1&b=2")
 }
 
+@Test("CacheKey endpoint parameters cannot collide with separators")
+func testCacheKeyEndpointEscaping() {
+    let combined = CacheKey.endpoint("/search", parameters: ["q": "red&sort=asc"])
+    let separate = CacheKey.endpoint("/search", parameters: ["q": "red", "sort": "asc"])
+    let equalsInKey = CacheKey.endpoint("/search", parameters: ["q=red": "asc"])
+
+    #expect(combined.rawValue == "/search?q=red%26sort%3Dasc")
+    #expect(combined != separate)
+    #expect(equalsInKey.rawValue == "/search?q%3Dred=asc")
+    #expect(equalsInKey != CacheKey.endpoint("/search", parameters: ["q": "red=asc"]))
+}
+
 @Test("CacheKey endpoint without parameters")
 func testCacheKeyEndpointWithoutParams() {
     let key = CacheKey.endpoint("/users", parameters: [:])

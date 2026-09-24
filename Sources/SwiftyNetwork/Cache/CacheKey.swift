@@ -78,7 +78,9 @@ extension CacheKey {
     /// Creates a cache key for API endpoint data.
     ///
     /// Parameters are sorted by key so equivalent dictionaries produce stable
-    /// cache keys regardless of dictionary iteration order.
+    /// cache keys regardless of dictionary iteration order. Keys and values use
+    /// percent encoding so their `&`, `=`, and `?` characters cannot collide
+    /// with the separators in the resulting cache key.
     ///
     /// Example:
     /// ```swift
@@ -91,8 +93,25 @@ extension CacheKey {
     /// - Returns: A cache key for the API endpoint.
     public static func endpoint(_ endpoint: String, parameters: [String: String] = [:]) -> CacheKey {
         let sortedParams = parameters.sorted { $0.key < $1.key }
-        let paramString = sortedParams.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        let paramString = sortedParams.map { "\(escape($0.key))=\(escape($0.value))" }.joined(separator: "&")
         let fullKey = paramString.isEmpty ? endpoint : "\(endpoint)?\(paramString)"
         return CacheKey(fullKey)
+    }
+
+    private static func escape(_ component: String) -> String {
+        let hex = Array("0123456789ABCDEF".utf8)
+        var encoded: [UInt8] = []
+        encoded.reserveCapacity(component.utf8.count)
+        for byte in component.utf8 {
+            switch byte {
+            case 65...90, 97...122, 48...57, 45, 46, 95, 126:
+                encoded.append(byte)
+            default:
+                encoded.append(37)
+                encoded.append(hex[Int(byte >> 4)])
+                encoded.append(hex[Int(byte & 0x0F)])
+            }
+        }
+        return String(decoding: encoded, as: UTF8.self)
     }
 }
