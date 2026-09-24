@@ -30,12 +30,20 @@ public enum MutationStatus: Sendable, Equatable {
 /// so it can travel through ``MutationStatus`` and be compared in tests,
 /// mirroring how `NetworkClient` wraps foreign errors internally.
 public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertible {
+    /// A description of the underlying error.
     public let description: String
+
+    /// `true` when the mutation ended because ``MutationQueue/cancel(_:)`` or
+    /// ``MutationQueue/cancelAll()`` was called, not because the request failed.
+    ///
+    /// Check this before showing a failure message or rolling back an optimistic update.
+    public let isCancellation: Bool
 
     /// Captures a description of the given error.
     ///
     /// - Parameter error: The error that caused the mutation to fail permanently.
     public init(_ error: any Error) {
         self.description = String(describing: error)
+        self.isCancellation = error is CancellationError
     }
 }
