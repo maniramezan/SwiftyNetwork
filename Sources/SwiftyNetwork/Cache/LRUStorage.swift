@@ -97,16 +97,17 @@ struct LRUStorage<Key: Hashable, Value> {
     }
 
     /// Removes every entry whose value satisfies `shouldRemove`. O(n).
-    mutating func removeAll(where shouldRemove: (Value) -> Bool) {
+    ///
+    /// - Returns: The removed values, so callers can release per-entry bookkeeping.
+    @discardableResult
+    mutating func removeAll(where shouldRemove: (Value) -> Bool) -> [Value] {
         var keysToRemove: [Key] = []
         for (key, index) in indexByKey {
             if let node = nodes[index], shouldRemove(node.value) {
                 keysToRemove.append(key)
             }
         }
-        for key in keysToRemove {
-            removeValue(forKey: key)
-        }
+        return keysToRemove.compactMap { removeValue(forKey: $0) }
     }
 
     /// Removes every entry.
