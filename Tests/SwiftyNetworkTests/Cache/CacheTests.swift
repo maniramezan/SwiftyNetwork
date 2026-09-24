@@ -508,3 +508,33 @@ func testAnyCacheRemoveAll() async {
     #expect(await anyCache.value(forKey: CacheKey("a")) == nil)
     #expect(await anyCache.value(forKey: CacheKey("b")) == nil)
 }
+
+@Test("InMemoryCache evicts by access order, not insertion order")
+func inMemoryCacheEvictsByAccessOrder() async {
+    let cache = InMemoryCache<String>(maxSize: 2)
+    await cache.setValue("value1", forKey: CacheKey("key1"))
+    await cache.setValue("value2", forKey: CacheKey("key2"))
+    // Touch key1 so key2 becomes the least recently used entry.
+    _ = await cache.value(forKey: CacheKey("key1"))
+    await cache.setValue("value3", forKey: CacheKey("key3"))
+
+    #expect(await cache.value(forKey: CacheKey("key1")) == "value1")
+    #expect(await cache.value(forKey: CacheKey("key2")) == nil)
+    #expect(await cache.value(forKey: CacheKey("key3")) == "value3")
+}
+
+@Test("InMemoryCache treats a negative maxSize as zero")
+func inMemoryCacheNegativeMaxSize() async {
+    let cache = InMemoryCache<String>(maxSize: -1)
+    await cache.setValue("value", forKey: CacheKey("key"))
+
+    #expect(await cache.count() == 0)
+}
+
+@Test("CacheKey supports string literals and describes itself by raw value")
+func cacheKeyStringLiteral() {
+    let key: CacheKey = "user:123:profile"
+
+    #expect(key == CacheKey("user:123:profile"))
+    #expect(key.description == "user:123:profile")
+}
