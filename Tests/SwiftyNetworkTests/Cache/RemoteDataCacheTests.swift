@@ -65,6 +65,31 @@ struct RemoteDataCacheTests {
         #expect(await cache.cachedData(for: url) == nil)
     }
 
+    @Test("Maps 4xx statuses the same way NetworkClient does")
+    func mapsClientErrorsLikeNetworkClient() async {
+        let cases: [(status: Int, expected: NetworkErrorClassification)] = [
+            (401, .unauthorized),
+            (403, .forbidden),
+            (404, .notFound),
+            (408, .timeout),
+            (429, .serverError(statusCode: 429)),
+        ]
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+
+        for (status, expected) in cases {
+            let testId = "status-mapping-\(status)"
+            TestURLProtocol.setResponses([.status(status)], for: testId)
+            do {
+                _ = try await cache.data(for: makeURL(testId: testId))
+                Issue.record("Expected status \(status) to throw")
+            } catch let error as NetworkError {
+                #expect(error.classification == expected, "status \(status)")
+            } catch {
+                Issue.record("Unexpected error for status \(status): \(error)")
+            }
+        }
+    }
+
     @Test("Maps a transport failure to the corresponding NetworkError classification")
     func mapsTransportFailure() async throws {
         let testId = "transport-failure"
