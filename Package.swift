@@ -22,7 +22,8 @@ let package = Package(
         ),
         .target(
             name: "SwiftyNetworkTesting",
-            dependencies: ["SwiftyNetwork"]
+            dependencies: ["SwiftyNetwork"],
+            resources: [.process("SwiftyNetworkTesting.docc")]
         ),
         .testTarget(
             name: "SwiftyNetworkTests",
