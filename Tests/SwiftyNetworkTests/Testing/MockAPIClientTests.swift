@@ -91,8 +91,9 @@ struct MockAPIClientTests {
             localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<TestUser>())
         )
 
-        _ = try await repository.fetch(using: UserEndpoint(), cacheKey: "user:1", policy: .returnCacheElseLoad)
-        let cached = try await repository.fetch(using: UserEndpoint(), cacheKey: "user:1", policy: .returnCacheElseLoad)
+        let key = CacheKey("user:1")
+        _ = try await repository.fetch(using: UserEndpoint(), cacheKey: key, policy: .returnCacheElseLoad)
+        let cached = try await repository.fetch(using: UserEndpoint(), cacheKey: key, policy: .returnCacheElseLoad)
 
         #expect(cached == user)
         #expect(await client.recordedRequests.count == 1)
