@@ -22,15 +22,14 @@ import Foundation
 /// ```
 public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
-    /// Internal storage entry that contains the value, timestamp, and last access time.
+    /// Internal storage entry that contains the value and the time it was stored.
     private struct CacheEntry {
         let value: T
         let timestamp: Date
-        var lastAccessed: Date
     }
 
-    // Underlying storage dictionary. Access is protected by actor isolation.
-    private var storage = [CacheKey: CacheEntry]()
+    /// Entries in least-recently-used order. Access is protected by actor isolation.
+    private var storage = LRUStorage<CacheKey, CacheEntry>()
 
     /// Maximum number of entries allowed in the cache. When exceeded, least recently used entries are evicted.
     private let maxSize: Int?
@@ -44,26 +43,21 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     /// ```
     ///
     /// - Parameter maxSize: Optional maximum number of entries. When exceeded, LRU eviction occurs.
+    ///   Negative values are treated as `0`.
     public init(maxSize: Int? = nil) {
-        self.maxSize = maxSize
+        self.maxSize = maxSize.map { max(0, $0) }
     }
 
     // MARK: - Cache API
 
     /// Retrieves a value for the given cache key, if present.
     ///
-    /// Accessing a value updates its last-accessed timestamp for LRU eviction.
+    /// Accessing a value marks it as most recently used for LRU eviction.
     ///
     /// - Parameter key: The cache key.
     /// - Returns: The stored value, or `nil` if not found.
     public func value(forKey key: CacheKey) async -> T? {
-        guard var entry = storage[key] else {
-            return nil
-        }
-        // Update last accessed time for LRU tracking
-        entry.lastAccessed = Date()
-        storage[key] = entry
-        return entry.value
+        storage.value(forKey: key)?.value
     }
 
     /// Stores a value for the given cache key and records the current timestamp.
@@ -75,9 +69,8 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     ///   - value: The value to store.
     ///   - key: The cache key.
     public func setValue(_ value: T, forKey key: CacheKey) async {
-        let now = Date()
-        storage[key] = CacheEntry(value: value, timestamp: now, lastAccessed: now)
-        await evictLRUIfNeeded()
+        storage.setValue(CacheEntry(value: value, timestamp: Date()), forKey: key)
+        evictLRUIfNeeded()
     }
 
     /// Stores a value for the given cache key with an explicit timestamp.
@@ -90,9 +83,8 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     ///   - key: The cache key.
     ///   - timestamp: The timestamp to record for the cached value.
     public func setValue(_ value: T, forKey key: CacheKey, timestamp: Date) async {
-        let now = Date()
-        storage[key] = CacheEntry(value: value, timestamp: timestamp, lastAccessed: now)
-        await evictLRUIfNeeded()
+        storage.setValue(CacheEntry(value: value, timestamp: timestamp), forKey: key)
+        evictLRUIfNeeded()
     }
 
     /// Removes the value associated with the given key.
@@ -110,7 +102,7 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     /// - Parameter key: The cache key to inspect.
     /// - Returns: The cache timestamp, or `nil` if there is no value for the key.
     public func timestamp(forKey key: CacheKey) async -> Date? {
-        storage[key]?.timestamp
+        storage.peekValue(forKey: key)?.timestamp
     }
 
     // MARK: - Expiration Helpers
@@ -125,7 +117,7 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     /// - Parameter maxAge: Maximum allowed age in seconds. Entries older than this will be removed.
     public func removeExpiredEntries(maxAge: TimeInterval) async {
         let cutoff = Date().addingTimeInterval(-maxAge)
-        storage = storage.filter { $0.value.timestamp > cutoff }
+        storage.removeAll { $0.timestamp <= cutoff }
     }
 
     /// Convenience alias to match common naming: removes items older than the supplied age.
@@ -152,22 +144,11 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
     // MARK: - Private Helpers
 
-    /// Evicts the least recently used entry if the cache exceeds its maximum size.
-    private func evictLRUIfNeeded() async {
-        guard let maxSize, storage.count > maxSize else {
-            return
-        }
-
-        Logger.debug("Cache size (\(storage.count)) exceeds limit (\(maxSize)), evicting LRU entry")
-
-        // Find the least recently used entry
-        let lruKey = storage.min { a, b in
-            a.value.lastAccessed < b.value.lastAccessed
-        }?.key
-
-        if let lruKey {
-            storage.removeValue(forKey: lruKey)
-            Logger.debug("Evicted LRU cache entry")
+    /// Evicts least recently used entries until the cache fits within its maximum size.
+    private func evictLRUIfNeeded() {
+        guard let maxSize else { return }
+        while storage.count > maxSize, storage.removeLeastRecentlyUsed() != nil {
+            Logger.debug("Evicted LRU cache entry to stay within limit (\(maxSize))", category: .cache)
         }
     }
 }
