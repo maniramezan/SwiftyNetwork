@@ -1,7 +1,7 @@
 import Foundation
 import SwiftyNetwork
 
-/// A scriptable ``SwiftyNetwork/APIClient`` for unit tests and SwiftUI previews.
+/// A scriptable `APIClient` for unit tests and SwiftUI previews.
 ///
 /// Stub responses per HTTP method and path, then inject the mock wherever the
 /// code under test accepts `any APIClient` or a `NetworkDataSource` (for
