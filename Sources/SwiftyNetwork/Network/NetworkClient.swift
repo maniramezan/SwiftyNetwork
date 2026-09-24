@@ -169,66 +169,30 @@ public actor NetworkClient: NetworkDataSource {
         )
         Logger.debugURL("Resolved URL", url: url)
 
-        let method = endpoint.method
-        let instrumentation = configuration.instrumentation
-        await instrumentation?.requestStarted(
-            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt)
+        var trace = RequestTrace(
+            instrumentation: configuration.instrumentation,
+            requestID: requestID,
+            url: url,
+            method: endpoint.method,
+            attempt: attempt
         )
-        let startedAt = ContinuousClock.now
+        await trace.start()
 
-        var request = buildURLRequest(from: endpoint, url: url, configuration: configuration)
-        let providerAuthApplied = await applyAuthorization(
+        var request = endpoint.makeUnauthenticatedURLRequest(url: url)
+        request.timeoutInterval = configuration.timeoutInterval
+        let providerAuthorization = await applyAuthorization(
             to: &request,
             from: endpoint,
             configuration: configuration
         )
 
         let data: Data
-        let response: URLResponse
+        let httpResponse: HTTPURLResponse
         do {
-            (data, response) = try await configuration.session.data(for: request)
-        } catch let error as URLError {
-            Logger.error("URL error during request", error: error)
-            let mapped = NetworkError.mapURLError(error)
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: mapped
-                )
-            )
-            throw mapped
-        } catch {
-            Logger.error("Unexpected error during request", error: error)
-            let mapped = NetworkError.underlying(AnySendableError(error))
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: mapped
-                )
-            )
-            throw mapped
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: .invalidResponse
-                )
-            )
-            throw NetworkError.invalidResponse
+            (data, httpResponse) = try await send(request, session: configuration.session)
+        } catch let error as NetworkError {
+            await trace.failed(error)
+            throw error
         }
 
         if httpResponse.statusCode == 401 {
@@ -236,93 +200,61 @@ public actor NetworkClient: NetworkDataSource {
                 endpoint: endpoint,
                 responseType: responseType,
                 refreshAttempt: refreshAttempt,
-                providerAuthApplied: providerAuthApplied,
+                rejectedAuthorization: providerAuthorization,
                 configuration: configuration,
-                requestID: requestID,
-                url: url,
-                method: method,
-                attempt: attempt,
-                startedAt: startedAt
+                trace: trace
             )
         }
 
         do {
-            try validateStatusCode(httpResponse.statusCode, data: data)
+            try HTTPStatusValidator.validate(statusCode: httpResponse.statusCode, data: data)
             let decoded = try decodeResponse(data: data, responseType: responseType, configuration: configuration)
-            await instrumentation?.requestCompleted(
-                NetworkRequestCompletion(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    statusCode: httpResponse.statusCode,
-                    duration: elapsedTime(since: startedAt)
-                )
-            )
+            await trace.completed(statusCode: httpResponse.statusCode)
             return decoded
         } catch let error as NetworkError {
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: error
-                )
-            )
+            await trace.failed(error)
             throw error
         }
     }
 
-    /// ContinuousClock is unaffected by wall-clock corrections and includes sleep.
-    private func elapsedTime(since start: ContinuousClock.Instant) -> TimeInterval {
-        let components = start.duration(to: .now).components
-        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    /// Executes `request`, mapping every transport failure to a ``NetworkError``.
+    private func send(_ request: URLRequest, session: URLSession) async throws -> (Data, HTTPURLResponse) {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            Logger.error("URL error during request", error: error)
+            throw NetworkError.mapURLError(error)
+        } catch {
+            Logger.error("Unexpected error during request", error: error)
+            throw NetworkError.underlying(AnySendableError(error))
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        return (data, httpResponse)
     }
 
-    private func buildURLRequest(
-        from endpoint: any NetworkEndpoint,
-        url: URL,
-        configuration: NetworkClientConfiguration
-    ) -> URLRequest {
-        var request = endpoint.makeUnauthenticatedURLRequest(url: url)
-        request.timeoutInterval = configuration.timeoutInterval
-        return request
-    }
-
+    /// Applies endpoint authorization, falling back to the configured provider
+    /// when the endpoint declares ``AuthorizationType/none``.
+    ///
+    /// - Returns: The provider-supplied authorization that was applied, or `nil`
+    ///   when the endpoint's own authorization was used. Only provider
+    ///   authorization is eligible for refresh after a `401`.
     private func applyAuthorization(
         to request: inout URLRequest,
         from endpoint: any NetworkEndpoint,
         configuration: NetworkClientConfiguration
-    ) async -> Bool {
-        var authType = endpoint.authorization
-        if case .none = authType, let provider = configuration.authorizationProvider {
-            authType = await provider.currentAuthorization()
-            authType.apply(to: &request)
-            return true
+    ) async -> AuthorizationType? {
+        if case .none = endpoint.authorization, let provider = configuration.authorizationProvider {
+            let providerAuthorization = await provider.currentAuthorization()
+            providerAuthorization.apply(to: &request)
+            return providerAuthorization
         }
-        authType.apply(to: &request)
-        return false
-    }
-
-    private func validateStatusCode(_ statusCode: Int, data: Data) throws {
-        switch statusCode {
-        case 200..<300:
-            Logger.debug("Request successful with status \(statusCode)")
-        case 403:
-            Logger.warning("Forbidden request (403)")
-            throw NetworkError.forbidden
-        case 404:
-            Logger.warning("Resource not found (404)")
-            throw NetworkError.notFound
-        case 408:
-            Logger.warning("Request timeout (408)")
-            throw NetworkError.timeout
-        default:
-            Logger.error("Server error with status \(statusCode)")
-            throw NetworkError.serverError(statusCode: statusCode, data: data)
-        }
+        endpoint.authorization.apply(to: &request)
+        return nil
     }
 
     private func decodeResponse<T: Decodable & Sendable>(
@@ -351,110 +283,46 @@ public actor NetworkClient: NetworkDataSource {
         endpoint: any NetworkEndpoint,
         responseType: T.Type,
         refreshAttempt: Int,
-        providerAuthApplied: Bool,
+        rejectedAuthorization: AuthorizationType?,
         configuration: NetworkClientConfiguration,
-        requestID: UUID,
-        url: URL,
-        method: HTTPMethod,
-        attempt: Int,
-        startedAt: ContinuousClock.Instant
+        trace: RequestTrace
     ) async throws -> T {
-        let instrumentation = configuration.instrumentation
         guard let provider = configuration.authorizationProvider,
-            providerAuthApplied,
+            let rejectedAuthorization,
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: .unauthorized
-                )
-            )
+            await trace.failed(.unauthorized)
             throw NetworkError.unauthorized
         }
 
         Logger.info("Attempting to refresh authorization", category: .auth)
-        let refreshed = await provider.refreshAuthorizationIfNeeded()
-        guard refreshed else {
+        guard await provider.refreshAuthorization(rejecting: rejectedAuthorization) else {
             Logger.error("Authorization refresh failed", category: .auth)
-            await instrumentation?.requestFailed(
-                NetworkRequestFailure(
-                    requestID: requestID,
-                    url: url,
-                    method: method,
-                    attempt: attempt,
-                    duration: elapsedTime(since: startedAt),
-                    error: .authorizationRefreshFailed
-                )
-            )
+            await trace.failed(.authorizationRefreshFailed)
             throw NetworkError.authorizationRefreshFailed
         }
         Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
 
         if configuration.retryDelay > 0 {
             Logger.debug("Waiting \(configuration.retryDelay)s before retry")
-            try await Task.sleep(for: .seconds(configuration.retryDelay))
+            do {
+                try await Task.sleep(for: .seconds(configuration.retryDelay))
+            } catch {
+                // Cancelled while waiting: close out this attempt for observers.
+                await trace.failed(.underlying(AnySendableError(error)))
+                throw error
+            }
         }
 
-        await instrumentation?.requestRetried(
-            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt + 1)
-        )
+        await trace.retrying()
 
         return try await performRequest(
             endpoint,
             responseType: responseType,
             refreshAttempt: refreshAttempt + 1,
             configuration: configuration,
-            requestID: requestID
+            requestID: trace.requestID
         )
-    }
-
-}
-
-// MARK: - Internal Helpers
-
-/// Wraps any `Error` so it can be carried as `any Error & Sendable` in
-/// ``NetworkError`` cases without requiring callers to declare Sendable
-/// conformance on their own error types.
-struct AnySendableError: Error, Sendable, CustomStringConvertible {
-    let description: String
-    let localizedDescriptionValue: String
-
-    init(_ error: any Error) {
-        self.description = String(describing: error)
-        self.localizedDescriptionValue = error.localizedDescription
-    }
-
-    var localizedDescription: String { localizedDescriptionValue }
-}
-
-/// Internal wrapper that overrides an endpoint's body with pre-encoded data.
-///
-/// Because the body is always JSON produced by the configured `JSONEncoder`,
-/// a `Content-Type: application/json` header is added unless the wrapped
-/// endpoint already declares a `Content-Type` header.
-struct EncodedBodyEndpoint: NetworkEndpoint {
-    let wrapped: any NetworkEndpoint
-    let encodedBody: Data
-
-    var baseURL: String { wrapped.baseURL }
-    var path: String { wrapped.path }
-    var method: HTTPMethod { wrapped.method }
-    var queryItems: [URLQueryItem]? { wrapped.queryItems }
-    var authorization: AuthorizationType { wrapped.authorization }
-    var body: Data? { encodedBody }
-
-    var headers: [String: String]? {
-        var headers = wrapped.headers ?? [:]
-        let hasContentType = headers.keys.contains { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }
-        if !hasContentType {
-            headers["Content-Type"] = "application/json"
-        }
-        return headers
     }
 }

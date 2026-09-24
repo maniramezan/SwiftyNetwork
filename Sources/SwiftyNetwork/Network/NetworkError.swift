@@ -109,16 +109,21 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// directly (``NetworkClient`` and ``RemoteDataCache``), so transport
     /// failures are classified identically everywhere in the package.
     ///
+    /// Connectivity-loss codes (a dropped connection, cellular data disabled,
+    /// roaming off) map to ``noInternetConnection`` so they are classified as
+    /// transient and retried by ``MutationQueue``. Other codes keep the original
+    /// `URLError` in ``underlying(_:)`` so callers can still inspect `code`.
+    ///
     /// - Parameter error: The transport-level error to map.
     /// - Returns: The corresponding ``NetworkError`` case.
     static func mapURLError(_ error: URLError) -> NetworkError {
         switch error.code {
-        case .notConnectedToInternet:
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
             return .noInternetConnection
         case .timedOut:
             return .timeout
         default:
-            return .underlying(AnySendableError(error))
+            return .underlying(error)
         }
     }
 }
