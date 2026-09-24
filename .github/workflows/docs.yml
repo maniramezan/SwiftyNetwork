@@ -69,6 +69,24 @@ jobs:
             --coverage-summary-level brief \
             --warnings-as-errors
 
+      - name: Validate SwiftyNetworkTesting documentation
+        run: |
+          set -euo pipefail
+
+          rm -rf .build/docc-testing-symbol-graphs .build/docc-testing-site
+          mkdir -p .build/docc-testing-symbol-graphs
+          # Includes SwiftyNetworkTesting@SwiftyNetwork.symbols.json for extensions on SwiftyNetwork types.
+          cp .build/*/symbolgraph/SwiftyNetworkTesting*.symbols.json .build/docc-testing-symbol-graphs/
+
+          xcrun docc convert \
+            Sources/SwiftyNetworkTesting/SwiftyNetworkTesting.docc \
+            --additional-symbol-graph-dir .build/docc-testing-symbol-graphs \
+            --output-dir .build/docc-testing-site \
+            --fallback-display-name SwiftyNetworkTesting \
+            --fallback-bundle-identifier com.manman.SwiftyNetworkTesting \
+            --fallback-default-module-kind library \
+            --warnings-as-errors
+
       - name: Add root redirect to documentation
         run: |
           cat > .build/docc-site/index.html <<'EOF'
