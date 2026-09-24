@@ -11,6 +11,32 @@
   and invalidated pending fetches on explicit writes and removals. Regression tests
   use gates and queue admission checks to force suspended commits/promotions.
 
+## Implemented in the components review
+
+- `NetworkError.mapURLError` maps connection-lost, cellular-data-disabled, and
+  roaming-off codes to `.noInternetConnection`, so `MutationQueue` retries them;
+  other `URLError`s stay inspectable inside `.underlying`.
+- `AuthorizationProvider.refreshAuthorization(rejecting:)` (defaulted) lets
+  `OAuthAuthorizationProvider` skip refreshing a token another request already
+  replaced, which avoids consuming rotating refresh tokens twice. Added
+  `updateAccessToken(_:)`.
+- `MutationRetryPolicy.delay` now honors `maxDelay` after jitter.
+- `NetworkMonitor` applies path updates in order through one stream and registers
+  `updates` continuations synchronously (no leaked continuations; newest-only buffering).
+- `NetworkClient` reports cancellation during the auth-retry delay to instrumentation.
+- `InMemoryCache` uses the new O(1) `LRUStorage`, with deterministic eviction and negative sizes clamped.
+- `Logger` builds messages lazily and reuses one `os.Logger` per category.
+- SSL pinning skips SPKI reconstruction when a policy has no public-key pins.
+- Split `NetworkClient` helpers into `HTTPStatusValidator`, `RequestTrace`,
+  `EncodedBodyEndpoint`/`HTTPHeaders`, and `AnySendableError`; `MutationRequest`
+  shares the Content-Type helper.
+- Added the `SwiftyNetworkTesting` product (`MockAPIClient`, `RecordedRequest`,
+  `MutationRetryPolicy.immediate()`), `CacheKey` string literals, a public
+  `MutationQueue.MutationEvent` initializer, and repo agent skills in `.claude/skills/`.
+
+These changes were authored without a local Swift toolchain (the sandbox could
+not download one), so their only validation is the PR's GitHub Actions run.
+
 ## Priority follow-ups
 
 These findings come from source inspection; they are not claims of a complete
@@ -21,7 +47,10 @@ security audit or measured performance gains.
 | High | Credentialed requests accept arbitrary endpoint hosts and URLSession redirects; pinning applies only to listed hosts. | Design an opt-in allowed-origin and redirect policy covering custom API-key headers, scheme downgrade, and injected sessions. Test with a local redirect server. |
 | Medium | GraphQL error bodies and headers cannot always be recovered after HTTP mapping. | Add a raw response abstraction preserving status, headers, and data; layer typed decoding on it. Use that boundary for GraphQL errors, Retry-After, ETags, and content-type validation. Preserve current typed API behavior. |
 | Medium | Synchronous JSON encoding/decoding runs on the client actor. | Benchmark concurrent large payloads before moving decoding to a separate executor or introducing coder factories. |
-| Medium | LRU eviction scans all entries and relies on Date ordering; entry count does not bound bytes in `RemoteDataCache`. | Benchmark realistic cache sizes; consider a sequence-based access order, O(1) LRU structure, and optional byte-cost limits based on evidence. |
+| Medium | Entry count does not bound bytes in `RemoteDataCache` (LRU itself is now O(1) via `LRUStorage`). | Add an optional cost function / byte limit to `InMemoryCache` backed by `LRUStorage`, evicting until under budget. |
+| Medium | `MutationQueue` has no way to cancel a pending key or clear everything (for example on logout, when requests carry credentials). | Add `cancel(key:)` / `cancelAll()` with per-worker generation IDs so a stale worker cannot touch store or status after cancellation; test with `Gate`s. |
+| Low | `RemoteDataCache` maps every non-2xx status to `serverError`, while `NetworkClient` maps 403/404/408 to specific cases. | Decide on one mapping; switching `RemoteDataCache` to `HTTPStatusValidator` changes documented behavior, so ship it with migration notes. |
+| Low | `SwiftyNetworkTesting` has no DocC catalog, and the Docs workflow only publishes the `SwiftyNetwork` symbol graph. | Add a catalog and include the second symbol graph, or document the module in README only. |
 | Medium | Repositories read values and timestamps separately; concurrent requests are not coalesced at the repository boundary. | Explore atomic cache-entry reads and explicit repository fetch sharing without conflating cache policies or users. |
 | Medium | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording. | Document ownership and prohibit concurrent external coder reconfiguration; evaluate factory-based configuration in an API proposal. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
