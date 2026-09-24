@@ -204,7 +204,8 @@ public actor MutationQueue {
         // The task can't start running `process` until this actor-isolated
         // method returns, so the worker is registered before it runs.
         let task = Task { [weak self] in
-            await self?.process(key: key, workerID: id)
+            guard let self else { return }
+            await self.process(key: key, workerID: id)
         }
         workerByKey[key] = Worker(id: id, task: task)
     }
