@@ -75,37 +75,67 @@ enum Logger {
         _level.withLock { $0 = newLevel }
     }
 
-    /// Returns an ``os.Logger`` for the given category. Cheap to call repeatedly.
+    /// Returns the cached ``os.Logger`` for the given category.
     private static func osLogger(for category: Category) -> os.Logger {
-        os.Logger(subsystem: subsystem, category: category.rawValue)
+        switch category {
+        case .network: return OSLoggers.network
+        case .cache: return OSLoggers.cache
+        case .auth: return OSLoggers.auth
+        case .repository: return OSLoggers.repository
+        case .security: return OSLoggers.security
+        case .mutation: return OSLoggers.mutation
+        }
+    }
+
+    /// One lazily created ``os.Logger`` per category, so emitting a message
+    /// doesn't allocate a new logger each time.
+    private enum OSLoggers {
+        static let network = make(.network)
+        static let cache = make(.cache)
+        static let auth = make(.auth)
+        static let repository = make(.repository)
+        static let security = make(.security)
+        static let mutation = make(.mutation)
+
+        private static func make(_ category: Category) -> os.Logger {
+            os.Logger(subsystem: Logger.subsystem, category: category.rawValue)
+        }
     }
 
     // MARK: - Emit
 
-    static func debug(_ message: String, category: Category = .network) {
+    // Messages are `@autoclosure`s so interpolated strings are only built when
+    // the level is enabled; call sites stay `Logger.debug("... \(value)")`.
+
+    static func debug(_ message: @autoclosure () -> String, category: Category = .network) {
         guard level >= .debug else { return }
+        let message = message()
         osLogger(for: category).debug("\(message, privacy: .public)")
     }
 
-    static func info(_ message: String, category: Category = .network) {
+    static func info(_ message: @autoclosure () -> String, category: Category = .network) {
         guard level >= .info else { return }
+        let message = message()
         osLogger(for: category).info("\(message, privacy: .public)")
     }
 
-    static func warning(_ message: String, category: Category = .network) {
+    static func warning(_ message: @autoclosure () -> String, category: Category = .network) {
         guard level >= .warning else { return }
+        let message = message()
         osLogger(for: category).warning("\(message, privacy: .public)")
     }
 
     static func error(
-        _ message: String,
+        _ message: @autoclosure () -> String,
         error: (any Error)? = nil,
         category: Category = .network
     ) {
         guard level >= .error else { return }
+        let message = message()
         if let error {
+            let errorDescription = String(describing: error)
             osLogger(for: category).error(
-                "\(message, privacy: .public) — \(String(describing: error), privacy: .private)")
+                "\(message, privacy: .public) — \(errorDescription, privacy: .private)")
         } else {
             osLogger(for: category).error("\(message, privacy: .public)")
         }
@@ -114,8 +144,9 @@ enum Logger {
     // MARK: - URL Helpers
 
     /// Logs a URL with private sanitization so query strings don't leak in the unified log.
-    static func debugURL(_ message: String, url: URL, category: Category = .network) {
+    static func debugURL(_ message: @autoclosure () -> String, url: URL, category: Category = .network) {
         guard level >= .debug else { return }
+        let message = message()
         osLogger(for: category).debug("\(message, privacy: .public) \(url.absoluteString, privacy: .private)")
     }
 }
