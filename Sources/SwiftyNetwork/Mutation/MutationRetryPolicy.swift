@@ -24,7 +24,7 @@ public struct MutationRetryPolicy: Sendable {
     public var baseDelay: TimeInterval
 
     /// The upper bound on delay between retries, in seconds, regardless of
-    /// how many attempts have elapsed.
+    /// how many attempts have elapsed or how jitter scales the delay.
     public var maxDelay: TimeInterval
 
     /// The multiplicative jitter range applied to the computed delay, to
@@ -98,6 +98,7 @@ public struct MutationRetryPolicy: Sendable {
         let capped = min(uncapped, maxDelay)
         let jitterSpan = jitterRange.upperBound - jitterRange.lowerBound
         let multiplier = jitterRange.lowerBound + jitterGenerator() * jitterSpan
-        return capped * multiplier
+        // Cap after jitter too, so an upward jitter never exceeds `maxDelay`.
+        return min(max(0, capped * multiplier), maxDelay)
     }
 }
