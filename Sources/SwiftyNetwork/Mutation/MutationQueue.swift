@@ -38,8 +38,20 @@ public actor MutationQueue {
 
     /// A status change for a specific mutation key, as emitted by ``events()``.
     public struct MutationEvent: Sendable, Equatable {
+        /// The logical mutation whose status changed.
         public let key: MutationKey
+        /// The new status for ``key``.
         public let status: MutationStatus
+
+        /// Creates an event, for example to drive UI previews or test doubles.
+        ///
+        /// - Parameters:
+        ///   - key: The logical mutation whose status changed.
+        ///   - status: The new status.
+        public init(key: MutationKey, status: MutationStatus) {
+            self.key = key
+            self.status = status
+        }
     }
 
     private let client: any APIClient

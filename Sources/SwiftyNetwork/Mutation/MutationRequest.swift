@@ -92,11 +92,7 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         encoder: JSONEncoder = JSONEncoder()
     ) throws {
         let encodedBody = try encoder.encode(encodableBody)
-        var headers = endpoint.headers ?? [:]
-        let hasContentType = headers.keys.contains { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }
-        if !hasContentType {
-            headers["Content-Type"] = "application/json"
-        }
+        let headers = HTTPHeaders.addingJSONContentTypeIfMissing(to: endpoint.headers)
         self.init(
             baseURL: endpoint.baseURL,
             path: endpoint.path,

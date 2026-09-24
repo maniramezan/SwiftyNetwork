@@ -41,8 +41,9 @@ public actor NetworkMonitor {
     public static let shared = NetworkMonitor()
 
     private var monitor: NWPathMonitor?
+    private var pathUpdates: AsyncStream<NetworkReachability>.Continuation?
+    private var pathUpdatesTask: Task<Void, Never>?
     private var currentStatus: NetworkReachability = .unknown
-    private var isMonitoring = false
     private var continuations: [UUID: AsyncStream<NetworkReachability>.Continuation] = [:]
 
     /// Creates a new network monitor. Use ``shared`` unless multiple independent
@@ -52,7 +53,8 @@ public actor NetworkMonitor {
 
     /// Begins observing network path changes.
     ///
-    /// Subsequent calls are no-ops while monitoring is active.
+    /// Subsequent calls are no-ops while monitoring is active. Path changes are
+    /// applied in the order the system reports them.
     ///
     /// Example:
     /// ```swift
@@ -60,19 +62,24 @@ public actor NetworkMonitor {
     /// let reachable = await NetworkMonitor.shared.isReachable
     /// ```
     public func startMonitoring() {
-        guard !isMonitoring else { return }
+        guard monitor == nil else { return }
 
+        // A single stream + consumer task keeps updates ordered; spawning a
+        // task per callback would let a stale status overwrite a newer one.
+        let (statuses, continuation) = AsyncStream.makeStream(of: NetworkReachability.self)
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            let reachability = NetworkReachability(path.status)
-            Task { [weak self] in
-                await self?.update(reachability)
+        monitor.pathUpdateHandler = { @Sendable path in
+            continuation.yield(NetworkReachability(path.status))
+        }
+        pathUpdatesTask = Task { [weak self] in
+            for await status in statuses {
+                guard let self else { return }
+                await self.update(status)
             }
         }
-        let queue = DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue")
-        monitor.start(queue: queue)
+        monitor.start(queue: DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue"))
         self.monitor = monitor
-        isMonitoring = true
+        pathUpdates = continuation
     }
 
     /// Stops observing network path changes and finishes any active update streams.
@@ -82,10 +89,13 @@ public actor NetworkMonitor {
     /// await NetworkMonitor.shared.stopMonitoring()
     /// ```
     public func stopMonitoring() {
-        guard isMonitoring else { return }
-        monitor?.cancel()
-        monitor = nil
-        isMonitoring = false
+        guard let monitor else { return }
+        monitor.cancel()
+        self.monitor = nil
+        pathUpdates?.finish()
+        pathUpdates = nil
+        pathUpdatesTask?.cancel()
+        pathUpdatesTask = nil
         for continuation in continuations.values {
             continuation.finish()
         }
@@ -109,11 +119,12 @@ public actor NetworkMonitor {
 
     /// An async stream of reachability updates.
     ///
-    /// Call this once per consumer; each call returns an independent stream.
+    /// Call this once per consumer; each call returns an independent stream
+    /// that starts with the current status. A slow consumer only sees the most
+    /// recent status rather than a backlog of stale ones.
     /// The stream finishes when ``stopMonitoring()`` is called or when the
     /// consumer cancels iteration. A stream created while monitoring is stopped
-    /// (including one created concurrently with ``stopMonitoring()``) stays idle
-    /// and resumes delivering values once monitoring starts again.
+    /// stays idle and resumes delivering values once monitoring starts again.
     ///
     /// Example:
     /// ```swift
@@ -123,27 +134,25 @@ public actor NetworkMonitor {
     /// }
     /// ```
     public var updates: AsyncStream<NetworkReachability> {
-        AsyncStream { continuation in
-            let id = UUID()
-            // The continuation has to be registered on the actor.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: NetworkReachability.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        let id = UUID()
+        continuation.onTermination = { [weak self] _ in
             Task { [weak self] in
-                await self?.register(continuation: continuation, id: id)
-            }
-            continuation.onTermination = { [weak self] _ in
-                Task { [weak self] in
-                    await self?.unregister(id: id)
-                }
+                await self?.unregister(id: id)
             }
         }
-    }
-
-    // MARK: - Private
-
-    private func register(continuation: AsyncStream<NetworkReachability>.Continuation, id: UUID) {
+        // Registered synchronously on the actor, so termination can never
+        // run before registration and leave a stale continuation behind.
         continuations[id] = continuation
         // Emit current status immediately so consumers don't wait for the next change.
         continuation.yield(currentStatus)
+        return stream
     }
+
+    // MARK: - Private
 
     private func unregister(id: UUID) {
         continuations.removeValue(forKey: id)
