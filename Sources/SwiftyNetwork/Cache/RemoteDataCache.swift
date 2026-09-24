@@ -54,8 +54,11 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
     /// - Parameter url: The URL to fetch bytes from.
     /// - Returns: The cached or freshly fetched response body.
     /// - Throws: ``NetworkError/invalidResponse`` if the server response
-    ///   isn't an HTTP response; ``NetworkError/serverError(statusCode:data:)``
-    ///   for a non-2xx status; ``NetworkError/timeout``,
+    ///   isn't an HTTP response; for a non-2xx status, the same mapping as
+    ///   ``NetworkClient``: ``NetworkError/unauthorized`` (401),
+    ///   ``NetworkError/forbidden`` (403), ``NetworkError/notFound`` (404),
+    ///   ``NetworkError/timeout`` (408), otherwise
+    ///   ``NetworkError/serverError(statusCode:data:)``; ``NetworkError/timeout``,
     ///   ``NetworkError/noInternetConnection``, or ``NetworkError/underlying(_:)``
     ///   for transport failures.
     public func data(for url: URL) async throws -> Data {
@@ -99,9 +102,7 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw NetworkError.serverError(statusCode: httpResponse.statusCode, data: data)
-        }
+        try HTTPStatusValidator.validate(statusCode: httpResponse.statusCode, data: data)
         return data
     }
 }
