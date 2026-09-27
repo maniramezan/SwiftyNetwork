@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// Governs whether and how long ``MutationQueue`` waits before retrying a
 /// failed mutation.
@@ -93,11 +94,18 @@ public struct MutationRetryPolicy: Sendable {
         forAttempt attempt: Int,
         jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
     ) -> TimeInterval {
-        let exponent = Double(max(0, attempt - 1))
-        let uncapped = baseDelay * pow(2, exponent)
-        let capped = min(uncapped, maxDelay)
-        let jitterSpan = jitterRange.upperBound - jitterRange.lowerBound
-        let multiplier = jitterRange.lowerBound + jitterGenerator() * jitterSpan
-        return capped * multiplier
+        // Negative multipliers can't produce a meaningful delay; clamp so the
+        // shared backoff's non-negative jitter requirement always holds.
+        let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
+        return withoutActuallyEscaping(jitterGenerator) { jitterSource in
+            RetryBackoff.exponential(
+                baseDelay: .seconds(baseDelay),
+                maxDelay: .seconds(maxDelay),
+                jitter: jitter,
+                jitterSource: jitterSource
+            )
+            .delay(forRetry: attempt)
+            .timeInterval
+        }
     }
 }

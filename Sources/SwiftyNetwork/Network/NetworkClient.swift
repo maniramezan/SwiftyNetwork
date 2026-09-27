@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// A thread-safe network client that handles HTTP requests with auth refresh on 401.
 ///
@@ -342,7 +343,11 @@ public actor NetworkClient: NetworkDataSource {
             Logger.debug("Successfully decoded response as \(T.self)")
             return decoded
         } catch {
-            Logger.error("Failed to decode response", error: error)
+            if let decodingError = error as? DecodingError {
+                // Debug-only: coding paths can include dictionary keys taken from the payload.
+                Logger.debug("Decoding failure detail: \(decodingError.debugSummary)")
+            }
+            Logger.error("Failed to decode response as \(T.self)", error: error)
             throw NetworkError.decodingFailed(underlying: AnySendableError(error))
         }
     }
@@ -417,21 +422,6 @@ public actor NetworkClient: NetworkDataSource {
 }
 
 // MARK: - Internal Helpers
-
-/// Wraps any `Error` so it can be carried as `any Error & Sendable` in
-/// ``NetworkError`` cases without requiring callers to declare Sendable
-/// conformance on their own error types.
-struct AnySendableError: Error, Sendable, CustomStringConvertible {
-    let description: String
-    let localizedDescriptionValue: String
-
-    init(_ error: any Error) {
-        self.description = String(describing: error)
-        self.localizedDescriptionValue = error.localizedDescription
-    }
-
-    var localizedDescription: String { localizedDescriptionValue }
-}
 
 /// Internal wrapper that overrides an endpoint's body with pre-encoded data.
 ///

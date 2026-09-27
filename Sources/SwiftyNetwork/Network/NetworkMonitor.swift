@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SwiftCommons
 
 /// Reachability status reported by ``NetworkMonitor``.
 public enum NetworkReachability: Sendable, Equatable {
@@ -43,7 +44,8 @@ public actor NetworkMonitor {
     private var monitor: NWPathMonitor?
     private var currentStatus: NetworkReachability = .unknown
     private var isMonitoring = false
-    private var continuations: [UUID: AsyncStream<NetworkReachability>.Continuation] = [:]
+    /// Fans status changes out to every ``updates`` stream, replaying the latest value on subscribe.
+    private var broadcaster = AsyncBroadcaster<NetworkReachability>(initialValue: .unknown)
 
     /// Creates a new network monitor. Use ``shared`` unless multiple independent
     /// monitors are needed.
@@ -86,10 +88,9 @@ public actor NetworkMonitor {
         monitor?.cancel()
         monitor = nil
         isMonitoring = false
-        for continuation in continuations.values {
-            continuation.finish()
-        }
-        continuations.removeAll()
+        broadcaster.finish()
+        // Streams created after this point wait on a fresh broadcaster until monitoring restarts.
+        broadcaster = AsyncBroadcaster(initialValue: currentStatus)
     }
 
     /// The most recently reported reachability status.
@@ -109,11 +110,12 @@ public actor NetworkMonitor {
 
     /// An async stream of reachability updates.
     ///
-    /// Call this once per consumer; each call returns an independent stream.
-    /// The stream finishes when ``stopMonitoring()`` is called or when the
-    /// consumer cancels iteration. A stream created while monitoring is stopped
-    /// (including one created concurrently with ``stopMonitoring()``) stays idle
-    /// and resumes delivering values once monitoring starts again.
+    /// Call this once per consumer; each call returns an independent stream
+    /// that immediately delivers the current ``status``. The stream finishes
+    /// when ``stopMonitoring()`` is called or when the consumer cancels
+    /// iteration. A stream created while monitoring is stopped delivers the
+    /// last known status, then stays idle and resumes delivering values once
+    /// monitoring starts again.
     ///
     /// Example:
     /// ```swift
@@ -123,38 +125,15 @@ public actor NetworkMonitor {
     /// }
     /// ```
     public var updates: AsyncStream<NetworkReachability> {
-        AsyncStream { continuation in
-            let id = UUID()
-            // The continuation has to be registered on the actor.
-            Task { [weak self] in
-                await self?.register(continuation: continuation, id: id)
-            }
-            continuation.onTermination = { [weak self] _ in
-                Task { [weak self] in
-                    await self?.unregister(id: id)
-                }
-            }
-        }
+        broadcaster.makeStream()
     }
 
     // MARK: - Private
-
-    private func register(continuation: AsyncStream<NetworkReachability>.Continuation, id: UUID) {
-        continuations[id] = continuation
-        // Emit current status immediately so consumers don't wait for the next change.
-        continuation.yield(currentStatus)
-    }
-
-    private func unregister(id: UUID) {
-        continuations.removeValue(forKey: id)
-    }
 
     private func update(_ newStatus: NetworkReachability) {
         guard newStatus != currentStatus else { return }
         currentStatus = newStatus
         Logger.info("Network reachability changed to \(newStatus)", category: .network)
-        for continuation in continuations.values {
-            continuation.yield(newStatus)
-        }
+        broadcaster.yield(newStatus)
     }
 }

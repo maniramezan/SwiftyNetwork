@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// A fire-and-forget queue for "forgivable" mutations, with background retry,
 /// pluggable persistence, and coalescing by key.
@@ -48,7 +49,7 @@ public actor MutationQueue {
 
     private var latestStatusByKey: [MutationKey: MutationStatus] = [:]
     private var processingTaskByKey: [MutationKey: Task<Void, Never>] = [:]
-    private var eventContinuations: [UUID: AsyncStream<MutationEvent>.Continuation] = [:]
+    private let eventBroadcaster = AsyncBroadcaster<MutationEvent>()
 
     /// Creates a mutation queue.
     ///
@@ -117,14 +118,7 @@ public actor MutationQueue {
     /// a mutation's ``MutationStatus/pending`` state. The stream never
     /// finishes on its own -- cancel the consuming task when you're done.
     public func events() -> AsyncStream<MutationEvent> {
-        let id = UUID()
-        let (stream, continuation) = AsyncStream<MutationEvent>.makeStream()
-        eventContinuations[id] = continuation
-        continuation.onTermination = { [weak self] _ in
-            guard let self else { return }
-            Task { await self.removeContinuation(id) }
-        }
-        return stream
+        eventBroadcaster.makeStream()
     }
 
     // MARK: - Processing
@@ -196,13 +190,6 @@ public actor MutationQueue {
 
     private func setStatus(_ status: MutationStatus, for key: MutationKey) {
         latestStatusByKey[key] = status
-        let event = MutationEvent(key: key, status: status)
-        for continuation in eventContinuations.values {
-            continuation.yield(event)
-        }
-    }
-
-    private func removeContinuation(_ id: UUID) {
-        eventContinuations.removeValue(forKey: id)
+        eventBroadcaster.yield(MutationEvent(key: key, status: status))
     }
 }

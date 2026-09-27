@@ -132,3 +132,18 @@ func testMapURLErrorClassifiesCodes() {
     #expect(NetworkError.mapURLError(URLError(.timedOut)).classification == .timeout)
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
+
+@Test("Wrapped underlying errors keep their localized description")
+func testUnderlyingErrorKeepsLocalizedDescription() {
+    let urlError = URLError(.cannotFindHost)
+    let error = NetworkError.mapURLError(urlError)
+
+    // Reading through `any Error` must reach the original message, not a
+    // generic "The operation couldn't be completed" bridge of the wrapper.
+    #expect(error.errorDescription?.contains(urlError.localizedDescription) == true)
+    if case .underlying(let underlying) = error {
+        #expect(underlying.localizedDescription == urlError.localizedDescription)
+    } else {
+        Issue.record("Expected .underlying, got \(error)")
+    }
+}
