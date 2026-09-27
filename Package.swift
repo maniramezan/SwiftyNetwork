@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         // No traits: SwiftyNetwork only uses the concurrency, logging, and error
         // helpers, so it opts out of SwiftCommons' SwiftData-backed APIs.
-        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.11.0", traits: [])
+        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.12.0", traits: [])
     ],
     targets: [
         .target(
