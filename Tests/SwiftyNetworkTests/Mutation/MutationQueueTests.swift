@@ -395,6 +395,34 @@ struct MutationQueueTests {
         }
     }
 
+    @Test("Resume waits for cancellation before reading persisted mutations", arguments: [true, false])
+    func resumeWaitsForCancellation(cancelAll: Bool) async {
+        let store = CancellationGatedStore(request: makeRequest())
+        let client = FakeAPIClient(outcomes: [])
+        let queue = MutationQueue(client: client, store: store)
+        let cancellation = Task {
+            if cancelAll {
+                await queue.cancelAll()
+            } else {
+                await queue.cancel("pending")
+            }
+        }
+        await store.loadStarted.wait()
+        let resume = Task { await queue.resumePendingMutations() }
+        while await queue.operations.queuedOperationCount == 0 { await Task.yield() }
+        await store.finishLoad.open()
+        await cancellation.value
+        await resume.value
+
+        #expect(await client.callCount == 0)
+        #expect(await store.allKeys().isEmpty)
+        guard case .failed(let reason) = await queue.status(for: "pending") else {
+            Issue.record("Expected cancellation to remain the final status")
+            return
+        }
+        #expect(reason.isCancellation)
+    }
+
     @Test("Cancelling a key with nothing pending is a no-op")
     func cancelUnknownKeyIsNoOp() async {
         let queue = MutationQueue(client: FakeAPIClient(outcomes: []), store: InMemoryMutationStore())
@@ -431,4 +459,31 @@ private actor RoutingAPIClient: APIClient {
         }
         return try await slow.request(endpoint, responseType: responseType)
     }
+}
+
+/// Suspends cancellation before its removal, leaving a request visible to an ungated resume.
+private actor CancellationGatedStore: MutationStore {
+    let loadStarted = Gate()
+    let finishLoad = Gate()
+    private var request: MutationRequest?
+
+    init(request: MutationRequest) { self.request = request }
+
+    func save(_ request: MutationRequest, for key: MutationKey) { self.request = request }
+
+    func load(for key: MutationKey) async -> MutationRequest? {
+        await loadStarted.open()
+        await finishLoad.wait()
+        return request
+    }
+
+    func remove(for key: MutationKey) { request = nil }
+
+    func removeIfCurrent(_ request: MutationRequest, for key: MutationKey) -> Bool {
+        guard self.request == request else { return false }
+        self.request = nil
+        return true
+    }
+
+    func allKeys() -> [MutationKey] { request == nil ? [] : ["pending"] }
 }
