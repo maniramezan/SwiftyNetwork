@@ -69,9 +69,9 @@ public actor MutationQueue {
 
     private var latestStatusByKey: [MutationKey: MutationStatus] = [:]
     private var workerByKey: [MutationKey: Worker] = [:]
-    /// Serializes enqueue and cancel so a cancel can never remove a request
-    /// saved by an enqueue that interleaved with it (or vice versa).
-    private let operations = CacheOperationGate()
+    /// Serializes enqueue, cancel, and resume across storage suspension points.
+    /// Internal visibility lets regression tests observe gate admission.
+    let operations = CacheOperationGate()
     private let eventBroadcaster = AsyncBroadcaster<MutationEvent>()
 
     /// Creates a mutation queue.
@@ -172,6 +172,10 @@ public actor MutationQueue {
     /// call unconditionally, including with ``InMemoryMutationStore``, which
     /// is simply empty on a fresh launch).
     public func resumePendingMutations() async {
+        await operations.run { await self.performResumePendingMutations() }
+    }
+
+    private func performResumePendingMutations() async {
         let keys = await store.allKeys()
         Logger.info("Resuming \(keys.count) pending mutation(s) from the store", category: .mutation)
         for key in keys {

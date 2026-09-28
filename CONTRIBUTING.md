@@ -14,8 +14,8 @@ Thank you for your interest in contributing to SwiftyNetwork! We welcome contrib
 ## Development Setup
 
 ### Requirements
-- Swift 6.0+
-- Xcode 16.0+ (for iOS/macOS development)
+- Swift 6.2+
+- Xcode with Swift 6.2 or newer (for iOS/macOS development)
 - macOS 14.0+ (package minimum; your Xcode version may require a newer macOS)
 
 ### Building the Project

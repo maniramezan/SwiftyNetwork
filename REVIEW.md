@@ -37,7 +37,7 @@
 These changes were authored without a local Swift toolchain (the sandbox could
 not download one), so their only validation is the PR's GitHub Actions run.
 
-## Follow-ups with open pull requests
+## Completed follow-ups
 
 | Finding | Pull request |
 | --- | --- |
@@ -62,8 +62,8 @@ security audit or measured performance gains.
 
 ## Evolution constraints
 
-Keep Swift 6.0 and the current deployment targets until a concrete requirement
-justifies a migration. Prefer additive protocol conveniences and shared internal
+SwiftCommons adoption requires Swift 6.2 tooling. Keep the current deployment
+targets unless a concrete requirement justifies a migration. Prefer additive protocol conveniences and shared internal
 primitives. Avoid typed throws while injected transports can throw arbitrary
 errors. Do not add a GraphQL runtime dependency solely to transport JSON; schema
 code generation and subscription support merit separate design proposals.

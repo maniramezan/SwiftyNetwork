@@ -84,6 +84,7 @@ extension AuthorizationProvider {
 /// ```
 public actor OAuthAuthorizationProvider: AuthorizationProvider {
     private var accessToken: String
+    private var credentialGeneration = UUID()
     private let refreshTokenHandler: @Sendable () async -> String?
     private var inFlightRefresh: Task<Bool, Never>?
 
@@ -111,14 +112,16 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
     /// If a refresh is already in flight, this awaits its result rather than
     /// invoking the refresh handler again.
     ///
-    /// - Returns: `true` if a new token was stored; `false` otherwise.
+    /// - Returns: `true` if a new token was stored or an explicit token update
+    ///   superseded this refresh; `false` otherwise.
     public func refreshAuthorizationIfNeeded() async -> Bool {
         if let existing = inFlightRefresh {
             return await existing.value
         }
 
+        let generation = credentialGeneration
         let task = Task<Bool, Never> { [weak self] in
-            await self?.performRefresh() ?? false
+            await self?.performRefresh(generation: generation) ?? false
         }
         inFlightRefresh = task
 
@@ -136,7 +139,7 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
     /// - Parameter rejected: The authorization the server answered with `401`.
     /// - Returns: `true` if a token newer than `rejected` is available.
     public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
-        if inFlightRefresh == nil, rejected != .bearer(token: accessToken) {
+        if rejected != .bearer(token: accessToken) {
             Logger.debug("Rejected token was already replaced; skipping refresh", category: .auth)
             return true
         }
@@ -144,16 +147,20 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
     }
 
     /// Replaces the stored access token, for example after sign-in or when
-    /// the app obtains a token outside the refresh handler.
+    /// the app obtains a token outside the refresh handler. An older in-flight
+    /// refresh cannot overwrite this token when its handler completes.
     ///
     /// - Parameter token: The new access token to send with subsequent requests.
     public func updateAccessToken(_ token: String) {
         accessToken = token
+        credentialGeneration = UUID()
     }
 
     /// Runs the refresh handler and applies the new token if one was returned.
-    private func performRefresh() async -> Bool {
+    private func performRefresh(generation: UUID) async -> Bool {
         let newToken = await refreshTokenHandler()
+        // Explicit token updates supersede both successful and failed refresh results.
+        guard generation == credentialGeneration else { return true }
         if let newToken {
             accessToken = newToken
             return true
