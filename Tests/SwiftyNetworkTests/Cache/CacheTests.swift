@@ -508,3 +508,110 @@ func testAnyCacheRemoveAll() async {
     #expect(await anyCache.value(forKey: CacheKey("a")) == nil)
     #expect(await anyCache.value(forKey: CacheKey("b")) == nil)
 }
+
+@Test("InMemoryCache evicts by access order, not insertion order")
+func inMemoryCacheEvictsByAccessOrder() async {
+    let cache = InMemoryCache<String>(maxSize: 2)
+    await cache.setValue("value1", forKey: CacheKey("key1"))
+    await cache.setValue("value2", forKey: CacheKey("key2"))
+    // Touch key1 so key2 becomes the least recently used entry.
+    _ = await cache.value(forKey: CacheKey("key1"))
+    await cache.setValue("value3", forKey: CacheKey("key3"))
+
+    #expect(await cache.value(forKey: CacheKey("key1")) == "value1")
+    #expect(await cache.value(forKey: CacheKey("key2")) == nil)
+    #expect(await cache.value(forKey: CacheKey("key3")) == "value3")
+}
+
+@Test("InMemoryCache treats a negative maxSize as zero")
+func inMemoryCacheNegativeMaxSize() async {
+    let cache = InMemoryCache<String>(maxSize: -1)
+    await cache.setValue("value", forKey: CacheKey("key"))
+
+    #expect(await cache.count() == 0)
+}
+
+@Test("CacheKey supports string literals and describes itself by raw value")
+func cacheKeyStringLiteral() {
+    let key: CacheKey = "user:123:profile"
+
+    #expect(key == CacheKey("user:123:profile"))
+    #expect(key.description == "user:123:profile")
+}
+
+// MARK: - Cost Limits
+
+@Test("InMemoryCache maxBytes evicts least recently used entries until under budget")
+func inMemoryCacheMaxBytesEvictsLRU() async {
+    let cache = InMemoryCache<Data>(maxBytes: 10)
+    await cache.setValue(Data(count: 4), forKey: "a")
+    await cache.setValue(Data(count: 4), forKey: "b")
+    _ = await cache.value(forKey: "a")  // "b" is now least recently used.
+    await cache.setValue(Data(count: 4), forKey: "c")
+
+    #expect(await cache.value(forKey: "b") == nil)
+    #expect(await cache.value(forKey: "a") != nil)
+    #expect(await cache.value(forKey: "c") != nil)
+    #expect(await cache.totalCost() == 8)
+}
+
+@Test("InMemoryCache replacing a value updates the total cost")
+func inMemoryCacheReplaceUpdatesCost() async {
+    let cache = InMemoryCache<Data>(maxBytes: 100)
+    await cache.setValue(Data(count: 30), forKey: "a")
+    await cache.setValue(Data(count: 10), forKey: "a")
+
+    #expect(await cache.totalCost() == 10)
+    #expect(await cache.count() == 1)
+}
+
+@Test("InMemoryCache cost accounting does not overflow at Int.max")
+func inMemoryCacheCostDoesNotOverflow() async {
+    let cache = InMemoryCache<Int>(maxCost: Int.max) { $0 }
+    await cache.setValue(Int.max, forKey: "large")
+    await cache.setValue(1, forKey: "small")
+
+    #expect(await cache.value(forKey: "large") == nil)
+    #expect(await cache.value(forKey: "small") == 1)
+    #expect(await cache.totalCost() == 1)
+}
+
+@Test("InMemoryCache evicts a single value costlier than the whole budget")
+func inMemoryCacheEvictsOversizedValue() async {
+    let cache = InMemoryCache<Data>(maxBytes: 10)
+    await cache.setValue(Data(count: 3), forKey: "small")
+    await cache.setValue(Data(count: 11), forKey: "huge")
+
+    #expect(await cache.value(forKey: "huge") == nil)
+    #expect(await cache.value(forKey: "small") == nil)
+    #expect(await cache.totalCost() == 0)
+}
+
+@Test("InMemoryCache removals release their cost")
+func inMemoryCacheRemovalsReleaseCost() async {
+    let cache = InMemoryCache<String>(maxCost: 100) { $0.count }
+    await cache.setValue("12345", forKey: "a")
+    await cache.setValue("123", forKey: "b", timestamp: Date().addingTimeInterval(-600))
+    await cache.setValue("1", forKey: "c")
+    #expect(await cache.totalCost() == 9)
+
+    await cache.removeValue(forKey: "a")
+    #expect(await cache.totalCost() == 4)
+
+    await cache.removeExpiredEntries(maxAge: 60)
+    #expect(await cache.totalCost() == 1)
+
+    await cache.removeAll()
+    #expect(await cache.totalCost() == 0)
+}
+
+@Test("InMemoryCache applies entry-count and cost limits together")
+func inMemoryCacheCountAndCostLimits() async {
+    let cache = InMemoryCache<Data>(maxSize: 2, maxBytes: 100)
+    await cache.setValue(Data(count: 1), forKey: "a")
+    await cache.setValue(Data(count: 1), forKey: "b")
+    await cache.setValue(Data(count: 1), forKey: "c")
+
+    #expect(await cache.count() == 2)
+    #expect(await cache.value(forKey: "a") == nil)
+}

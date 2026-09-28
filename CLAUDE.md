@@ -12,18 +12,23 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Skills
 
-Load these when their domain applies:
+Repo skills live in [.claude/skills/](.claude/skills); Claude Code discovers them automatically:
 
 | Skill | When to Load |
 |---|---|
-| `swift-concurrency` | Modifying actors, async functions, or Sendable types |
-| `swift-testing-expert` | Writing or reviewing tests |
-| `swift-concurrency-pro` | Reviewing concurrency correctness |
-| `swift-testing-pro` | Reviewing test quality |
+| `add-component` | Adding a new public type, file, or library product |
+| `write-tests` | Writing or reviewing tests; choosing between TestURLProtocol, MockAPIClient, FakeAPIClient |
+| `concurrency-review` | Modifying actors, `Task {}`, `AsyncStream`, cache/mutation ordering |
+| `pre-push-check` | Before every commit/push (includes the no-toolchain fallback) |
+
+If your environment also provides the general `swift-concurrency`, `swift-concurrency-pro`,
+`swift-testing-expert`, or `swift-testing-pro` skills, use them alongside the repo skills; the repo
+skills win where they conflict.
 
 ## Session Start
 
 1. Verify `.claude/settings.local.json` is in `.gitignore`
-2. `swift build` -- confirm clean compilation
+2. `swift build` -- confirm clean compilation (if `swift` is unavailable, follow the
+   no-toolchain section of `pre-push-check` and say so in your summary)
 3. `swift test` -- confirm passing before and after changes
 4. `swift format lint --strict -r -p Sources Tests` -- confirm before committing
