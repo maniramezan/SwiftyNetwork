@@ -9,12 +9,16 @@ let package = Package(
     products: [
         .library(
             name: "SwiftyNetwork",
-            targets: ["SwiftyNetwork"])
+            targets: ["SwiftyNetwork"]),
+        // Test doubles for apps that depend on SwiftyNetwork. Link it only from test targets and previews.
+        .library(
+            name: "SwiftyNetworkTesting",
+            targets: ["SwiftyNetworkTesting"]),
     ],
     dependencies: [
-        // No traits: SwiftyNetwork only uses the concurrency, logging, and error
+        // No traits: SwiftyNetwork only uses the string, duration, concurrency, logging, and error
         // helpers, so it opts out of SwiftCommons' SwiftData-backed APIs.
-        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.12.0", traits: [])
+        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.13.0", traits: [])
     ],
     targets: [
         .target(
@@ -24,9 +28,13 @@ let package = Package(
             ],
             resources: [.process("SwiftyNetwork.docc")]
         ),
+        .target(
+            name: "SwiftyNetworkTesting",
+            dependencies: ["SwiftyNetwork"]
+        ),
         .testTarget(
             name: "SwiftyNetworkTests",
-            dependencies: ["SwiftyNetwork"]
+            dependencies: ["SwiftyNetwork", "SwiftyNetworkTesting"]
         ),
     ],
     swiftLanguageModes: [.v6]

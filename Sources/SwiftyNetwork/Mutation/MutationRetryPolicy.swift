@@ -25,7 +25,7 @@ public struct MutationRetryPolicy: Sendable {
     public var baseDelay: TimeInterval
 
     /// The upper bound on delay between retries, in seconds, regardless of
-    /// how many attempts have elapsed.
+    /// how many attempts have elapsed or how jitter scales the delay.
     public var maxDelay: TimeInterval
 
     /// The multiplicative jitter range applied to the computed delay, to
@@ -98,7 +98,7 @@ public struct MutationRetryPolicy: Sendable {
         // shared backoff's non-negative jitter requirement always holds.
         let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
         return withoutActuallyEscaping(jitterGenerator) { jitterSource in
-            RetryBackoff.exponential(
+            let delay = RetryBackoff.exponential(
                 baseDelay: .seconds(baseDelay),
                 maxDelay: .seconds(maxDelay),
                 jitter: jitter,
@@ -106,6 +106,8 @@ public struct MutationRetryPolicy: Sendable {
             )
             .delay(forRetry: attempt)
             .timeInterval
+            // Preserve the queue's hard cap after jitter as well as before it.
+            return min(max(0, delay), maxDelay)
         }
     }
 }

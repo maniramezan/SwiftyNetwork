@@ -42,10 +42,12 @@ public actor NetworkMonitor {
     public static let shared = NetworkMonitor()
 
     private var monitor: NWPathMonitor?
+    private var pathUpdates: AsyncStream<NetworkReachability>.Continuation?
+    private var pathUpdatesTask: Task<Void, Never>?
     private var currentStatus: NetworkReachability = .unknown
-    private var isMonitoring = false
-    /// Fans status changes out to every ``updates`` stream, replaying the latest value on subscribe.
-    private var broadcaster = AsyncBroadcaster<NetworkReachability>(initialValue: .unknown)
+    private var broadcaster = AsyncBroadcaster<NetworkReachability>(
+        initialValue: .unknown, bufferingPolicy: .bufferingNewest(1)
+    )
 
     /// Creates a new network monitor. Use ``shared`` unless multiple independent
     /// monitors are needed.
@@ -54,7 +56,8 @@ public actor NetworkMonitor {
 
     /// Begins observing network path changes.
     ///
-    /// Subsequent calls are no-ops while monitoring is active.
+    /// Subsequent calls are no-ops while monitoring is active. Path changes are
+    /// applied in the order the system reports them.
     ///
     /// Example:
     /// ```swift
@@ -62,19 +65,24 @@ public actor NetworkMonitor {
     /// let reachable = await NetworkMonitor.shared.isReachable
     /// ```
     public func startMonitoring() {
-        guard !isMonitoring else { return }
+        guard monitor == nil else { return }
 
+        // A single stream + consumer task keeps updates ordered; spawning a
+        // task per callback would let a stale status overwrite a newer one.
+        let (statuses, continuation) = AsyncStream.makeStream(of: NetworkReachability.self)
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            let reachability = NetworkReachability(path.status)
-            Task { [weak self] in
-                await self?.update(reachability)
+        monitor.pathUpdateHandler = { @Sendable path in
+            continuation.yield(NetworkReachability(path.status))
+        }
+        pathUpdatesTask = Task { [weak self] in
+            for await status in statuses {
+                guard let self else { return }
+                await self.update(status)
             }
         }
-        let queue = DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue")
-        monitor.start(queue: queue)
+        monitor.start(queue: DispatchQueue(label: "SwiftyNetwork.NetworkMonitorQueue"))
         self.monitor = monitor
-        isMonitoring = true
+        pathUpdates = continuation
     }
 
     /// Stops observing network path changes and finishes any active update streams.
@@ -84,13 +92,15 @@ public actor NetworkMonitor {
     /// await NetworkMonitor.shared.stopMonitoring()
     /// ```
     public func stopMonitoring() {
-        guard isMonitoring else { return }
-        monitor?.cancel()
-        monitor = nil
-        isMonitoring = false
+        guard let monitor else { return }
+        monitor.cancel()
+        self.monitor = nil
+        pathUpdates?.finish()
+        pathUpdates = nil
+        pathUpdatesTask?.cancel()
+        pathUpdatesTask = nil
         broadcaster.finish()
-        // Streams created after this point wait on a fresh broadcaster until monitoring restarts.
-        broadcaster = AsyncBroadcaster(initialValue: currentStatus)
+        broadcaster = AsyncBroadcaster(initialValue: currentStatus, bufferingPolicy: .bufferingNewest(1))
     }
 
     /// The most recently reported reachability status.
@@ -111,11 +121,11 @@ public actor NetworkMonitor {
     /// An async stream of reachability updates.
     ///
     /// Call this once per consumer; each call returns an independent stream
-    /// that immediately delivers the current ``status``. The stream finishes
-    /// when ``stopMonitoring()`` is called or when the consumer cancels
-    /// iteration. A stream created while monitoring is stopped delivers the
-    /// last known status, then stays idle and resumes delivering values once
-    /// monitoring starts again.
+    /// that starts with the current status. A slow consumer only sees the most
+    /// recent status rather than a backlog of stale ones.
+    /// The stream finishes when ``stopMonitoring()`` is called or when the
+    /// consumer cancels iteration. A stream created while monitoring is stopped
+    /// stays idle and resumes delivering values once monitoring starts again.
     ///
     /// Example:
     /// ```swift

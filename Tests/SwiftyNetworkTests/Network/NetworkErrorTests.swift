@@ -133,17 +133,36 @@ func testMapURLErrorClassifiesCodes() {
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
 
-@Test("Wrapped underlying errors keep their localized description")
+@Test("Underlying URL errors keep their localized description")
 func testUnderlyingErrorKeepsLocalizedDescription() {
     let urlError = URLError(.cannotFindHost)
     let error = NetworkError.mapURLError(urlError)
 
-    // Reading through `any Error` must reach the original message, not a
-    // generic "The operation couldn't be completed" bridge of the wrapper.
+    // Reading through `any Error` must preserve the original localized message.
     #expect(error.errorDescription?.contains(urlError.localizedDescription) == true)
     if case .underlying(let underlying) = error {
         #expect(underlying.localizedDescription == urlError.localizedDescription)
     } else {
         Issue.record("Expected .underlying, got \(error)")
     }
+}
+
+@Test("mapURLError treats connectivity-loss codes as no connection")
+func testMapURLErrorTreatsConnectivityLossAsNoConnection() {
+    let codes: [URLError.Code] = [.networkConnectionLost, .dataNotAllowed, .internationalRoamingOff]
+    for code in codes {
+        let mapped = NetworkError.mapURLError(URLError(code))
+        #expect(mapped.classification == .noConnection)
+        #expect(mapped.isTransient)
+    }
+}
+
+@Test("mapURLError preserves the original URLError for unmapped codes")
+func testMapURLErrorPreservesUnderlyingURLError() throws {
+    guard case .underlying(let underlying) = NetworkError.mapURLError(URLError(.cannotFindHost)) else {
+        Issue.record("Expected .underlying")
+        return
+    }
+    let urlError = try #require(underlying as? URLError)
+    #expect(urlError.code == .cannotFindHost)
 }
