@@ -131,13 +131,7 @@ public actor NetworkClient: NetworkDataSource {
         responseType: T.Type
     ) async throws -> T {
         let configuration = self.configuration
-        let encodedBody: Data
-        do {
-            encodedBody = try configuration.encoder.encode(body)
-        } catch {
-            Logger.error("Failed to encode request body", error: error)
-            throw NetworkError.encodingFailed(underlying: AnySendableError(error))
-        }
+        let encodedBody = try await Self.encodeBody(body, encoder: configuration.encoder)
 
         let wrapped = EncodedBodyEndpoint(wrapped: endpoint, encodedBody: encodedBody)
         return try await performRequest(
@@ -208,7 +202,11 @@ public actor NetworkClient: NetworkDataSource {
 
         do {
             try HTTPStatusValidator.validate(statusCode: httpResponse.statusCode, data: data)
-            let decoded = try decodeResponse(data: data, responseType: responseType, configuration: configuration)
+            let decoded = try await Self.decodeResponse(
+                data: data,
+                responseType: responseType,
+                decoder: configuration.decoder
+            )
             await trace.completed(statusCode: httpResponse.statusCode)
             return decoded
         } catch let error as NetworkError {
@@ -257,11 +255,29 @@ public actor NetworkClient: NetworkDataSource {
         return nil
     }
 
-    private func decodeResponse<T: Decodable & Sendable>(
+    /// Encodes off the client actor, for the same reason as ``decodeResponse(data:responseType:decoder:)``.
+    private static func encodeBody<Body: Encodable & Sendable>(
+        _ body: Body,
+        encoder: JSONEncoder
+    ) async throws -> Data {
+        do {
+            return try encoder.encode(body)
+        } catch {
+            Logger.error("Failed to encode request body", error: error)
+            throw NetworkError.encodingFailed(underlying: AnySendableError(error))
+        }
+    }
+
+    /// Decodes off the client actor.
+    ///
+    /// A `static` async function is nonisolated, so it runs on the global
+    /// concurrent executor. Large payloads therefore don't block other
+    /// requests on this client from starting or finishing while they decode.
+    private static func decodeResponse<T: Decodable & Sendable>(
         data: Data,
         responseType: T.Type,
-        configuration: NetworkClientConfiguration
-    ) throws -> T {
+        decoder: JSONDecoder
+    ) async throws -> T {
         if data.isEmpty, responseType == EmptyResponse.self {
             guard let emptyResponse = EmptyResponse() as? T else {
                 throw NetworkError.invalidData
@@ -270,7 +286,7 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         do {
-            let decoded = try configuration.decoder.decode(T.self, from: data)
+            let decoded = try decoder.decode(T.self, from: data)
             Logger.debug("Successfully decoded response as \(T.self)")
             return decoded
         } catch {
