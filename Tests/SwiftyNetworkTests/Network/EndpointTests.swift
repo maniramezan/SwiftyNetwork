@@ -96,3 +96,13 @@ func testEndpointRepeatedLeadingSlashes() throws {
         baseURL: "https://api.example.com/base///", path: "///items", queryItems: nil)
     #expect(url.absoluteString == "https://api.example.com/base/items")
 }
+
+@Test("Endpoint normalization preserves empty paths and collapses slash-only paths")
+func testEndpointEmptyAndSlashOnlyPaths() throws {
+    let empty = try EndpointURLBuilder.url(
+        baseURL: "https://api.example.com/base///", path: "", queryItems: nil)
+    #expect(empty.absoluteString == "https://api.example.com/base")
+    let slashes = try EndpointURLBuilder.url(
+        baseURL: "https://api.example.com/base///", path: "///", queryItems: nil)
+    #expect(slashes.absoluteString == "https://api.example.com/base/")
+}

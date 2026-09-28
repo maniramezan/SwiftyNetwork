@@ -1,6 +1,6 @@
 # ``SwiftyNetwork``
 
-A zero-dependency Swift networking library built for Swift 6 strict concurrency.
+A Swift networking library built for Swift 6 strict concurrency.
 
 ## Overview
 

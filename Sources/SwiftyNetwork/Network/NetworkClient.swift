@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// A thread-safe network client that handles HTTP requests with auth refresh on 401.
 ///
@@ -290,7 +291,11 @@ public actor NetworkClient: NetworkDataSource {
             Logger.debug("Successfully decoded response as \(T.self)")
             return decoded
         } catch {
-            Logger.error("Failed to decode response", error: error)
+            if let decodingError = error as? DecodingError {
+                // Debug-only: coding paths can include dictionary keys taken from the payload.
+                Logger.debug("Decoding failure detail: \(decodingError.debugSummary)")
+            }
+            Logger.error("Failed to decode response as \(T.self)", error: error)
             throw NetworkError.decodingFailed(underlying: AnySendableError(error))
         }
     }

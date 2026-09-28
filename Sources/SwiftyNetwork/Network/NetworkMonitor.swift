@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SwiftCommons
 
 /// Reachability status reported by ``NetworkMonitor``.
 public enum NetworkReachability: Sendable, Equatable {
@@ -44,7 +45,9 @@ public actor NetworkMonitor {
     private var pathUpdates: AsyncStream<NetworkReachability>.Continuation?
     private var pathUpdatesTask: Task<Void, Never>?
     private var currentStatus: NetworkReachability = .unknown
-    private var continuations: [UUID: AsyncStream<NetworkReachability>.Continuation] = [:]
+    private var broadcaster = AsyncBroadcaster<NetworkReachability>(
+        initialValue: .unknown, bufferingPolicy: .bufferingNewest(1)
+    )
 
     /// Creates a new network monitor. Use ``shared`` unless multiple independent
     /// monitors are needed.
@@ -96,10 +99,8 @@ public actor NetworkMonitor {
         pathUpdates = nil
         pathUpdatesTask?.cancel()
         pathUpdatesTask = nil
-        for continuation in continuations.values {
-            continuation.finish()
-        }
-        continuations.removeAll()
+        broadcaster.finish()
+        broadcaster = AsyncBroadcaster(initialValue: currentStatus, bufferingPolicy: .bufferingNewest(1))
     }
 
     /// The most recently reported reachability status.
@@ -134,36 +135,15 @@ public actor NetworkMonitor {
     /// }
     /// ```
     public var updates: AsyncStream<NetworkReachability> {
-        let (stream, continuation) = AsyncStream.makeStream(
-            of: NetworkReachability.self,
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        let id = UUID()
-        continuation.onTermination = { [weak self] _ in
-            Task { [weak self] in
-                await self?.unregister(id: id)
-            }
-        }
-        // Registered synchronously on the actor, so termination can never
-        // run before registration and leave a stale continuation behind.
-        continuations[id] = continuation
-        // Emit current status immediately so consumers don't wait for the next change.
-        continuation.yield(currentStatus)
-        return stream
+        broadcaster.makeStream()
     }
 
     // MARK: - Private
-
-    private func unregister(id: UUID) {
-        continuations.removeValue(forKey: id)
-    }
 
     private func update(_ newStatus: NetworkReachability) {
         guard newStatus != currentStatus else { return }
         currentStatus = newStatus
         Logger.info("Network reachability changed to \(newStatus)", category: .network)
-        for continuation in continuations.values {
-            continuation.yield(newStatus)
-        }
+        broadcaster.yield(newStatus)
     }
 }
