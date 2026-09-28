@@ -27,6 +27,15 @@ func testCacheKeyEndpointEscaping() {
     #expect(equalsInKey != CacheKey.endpoint("/search", parameters: ["q": "red=asc"]))
 }
 
+@Test("CacheKey encodes raw Unicode and reserved characters with Foundation")
+func testCacheKeyEndpointUnicodeEscaping() {
+    let key = CacheKey.endpoint("/search", parameters: ["q": "é🙂 +/%20"])
+    #expect(key.rawValue == "/search?q=%C3%A9%F0%9F%99%82%20%2B%2F%2520")
+    let unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    #expect(CacheKey.endpoint("/search", parameters: ["q": unreserved]).rawValue == "/search?q=\(unreserved)")
+    #expect(CacheKey.endpoint("/search", parameters: ["q": ""]).rawValue == "/search?q=")
+}
+
 @Test("CacheKey endpoint without parameters")
 func testCacheKeyEndpointWithoutParams() {
     let key = CacheKey.endpoint("/users", parameters: [:])

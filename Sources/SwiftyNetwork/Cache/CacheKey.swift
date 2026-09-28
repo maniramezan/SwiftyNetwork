@@ -60,6 +60,11 @@ public struct CacheKey: Hashable, Sendable {
 // MARK: - Convenience Extensions
 
 extension CacheKey {
+    // RFC 3986 unreserved characters; query separators must be escaped in each value.
+    private static let unreservedCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
     /// Creates a cache key for user-specific data.
     ///
     /// Example:
@@ -99,19 +104,10 @@ extension CacheKey {
     }
 
     private static func escape(_ component: String) -> String {
-        let hex = Array("0123456789ABCDEF".utf8)
-        var encoded: [UInt8] = []
-        encoded.reserveCapacity(component.utf8.count)
-        for byte in component.utf8 {
-            switch byte {
-            case 65...90, 97...122, 48...57, 45, 46, 95, 126:
-                encoded.append(byte)
-            default:
-                encoded.append(37)
-                encoded.append(hex[Int(byte >> 4)])
-                encoded.append(hex[Int(byte & 0x0F)])
-            }
+        // Swift strings contain valid Unicode, so Foundation can always encode them as UTF-8.
+        guard let encoded = component.addingPercentEncoding(withAllowedCharacters: unreservedCharacters) else {
+            preconditionFailure("Unable to percent-encode a valid Swift string")
         }
-        return String(decoding: encoded, as: UTF8.self)
+        return encoded
     }
 }
