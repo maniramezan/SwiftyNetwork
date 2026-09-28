@@ -115,6 +115,7 @@ struct NetworkClientIntegrationTests {
         #expect(response == user)
         let refreshCalls = await provider.refreshCallCount
         #expect(refreshCalls == 1)
+        #expect(await provider.rejectedAuthorizations == [.bearer(token: "expired")])
         let count = await client.attemptCount()
         #expect(count == 2)
     }

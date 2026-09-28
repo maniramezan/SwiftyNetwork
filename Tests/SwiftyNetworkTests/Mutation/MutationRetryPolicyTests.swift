@@ -32,6 +32,14 @@ struct MutationRetryPolicyTests {
         #expect(policy.delay(forAttempt: 1, jitterGenerator: { 0.5 }) == 10)
     }
 
+    @Test("Upward jitter never pushes the delay past maxDelay")
+    func jitterNeverExceedsMaxDelay() {
+        let policy = MutationRetryPolicy(maxAttempts: 20, baseDelay: 1, maxDelay: 10, jitterRange: 0.5...1.5)
+
+        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 1 }) == 10)
+        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 0 }) == 5)
+    }
+
     @Test("Default policy retries timeouts, missing connectivity, invalid responses, and 5xx errors")
     func defaultRetriesTransientErrors() {
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.timeout))

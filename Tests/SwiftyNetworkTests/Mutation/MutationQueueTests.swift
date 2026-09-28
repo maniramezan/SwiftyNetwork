@@ -322,6 +322,93 @@ struct MutationQueueTests {
 
         #expect(await queue.status(for: "unknown") == nil)
     }
+
+    // MARK: - Cancellation
+
+    @Test("Cancelling an in-flight mutation reports a cancellation and ignores its late result")
+    func cancelInFlightMutation() async throws {
+        let firstCall = Gate()
+        let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
+        let store = InMemoryMutationStore()
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
+        let key: MutationKey = "like:video:42"
+
+        await queue.enqueue(makeRequest(liked: true), key: key)
+        while await fake.callCount == 0 { await Task.yield() }
+
+        await queue.cancel(key)
+
+        let cancelled = await queue.status(for: key)
+        guard case .failed(let reason) = cancelled else {
+            Issue.record("Expected a cancellation failure, got \(String(describing: cancelled))")
+            return
+        }
+        #expect(reason.isCancellation)
+        #expect(await store.load(for: key) == nil)
+
+        // Let the stale call finish; it must not publish success over the cancellation.
+        await firstCall.open()
+        let otherEvents = await queue.events()
+        await queue.enqueue(makeRequest(path: "/videos/7/like"), key: "like:video:7")
+        _ = await firstEvent(in: otherEvents) { $0.key == "like:video:7" && $0.status == .succeeded }
+
+        #expect(await queue.status(for: key) == cancelled)
+    }
+
+    @Test("A key can be enqueued again right after it is cancelled")
+    func enqueueAfterCancel() async {
+        let firstCall = Gate()
+        let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
+        let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
+        let stream = await queue.events()
+        let key: MutationKey = "like:video:42"
+        let unliked = makeRequest(liked: false)
+
+        await queue.enqueue(makeRequest(liked: true), key: key)
+        while await fake.callCount == 0 { await Task.yield() }
+        await queue.cancel(key)
+
+        async let succeeded = firstEvent(in: stream) { $0.key == key && $0.status == .succeeded }
+        await queue.enqueue(unliked, key: key)
+        #expect(await succeeded != nil)
+        #expect(await fake.recordedRequests.last?.body == unliked.body)
+
+        await firstCall.open()
+    }
+
+    @Test("cancelAll clears persisted mutations and reports each one as cancelled")
+    func cancelAllClearsStore() async {
+        let store = InMemoryMutationStore()
+        await store.save(makeRequest(), for: "like:video:1")
+        await store.save(makeRequest(), for: "like:video:2")
+        let queue = MutationQueue(client: FakeAPIClient(outcomes: []), store: store, retryPolicy: Self.noDelayPolicy)
+
+        await queue.cancelAll()
+
+        #expect(await store.allKeys().isEmpty)
+        for key: MutationKey in ["like:video:1", "like:video:2"] {
+            guard case .failed(let reason) = await queue.status(for: key) else {
+                Issue.record("Expected \(key) to be cancelled")
+                continue
+            }
+            #expect(reason.isCancellation)
+        }
+    }
+
+    @Test("Cancelling a key with nothing pending is a no-op")
+    func cancelUnknownKeyIsNoOp() async {
+        let queue = MutationQueue(client: FakeAPIClient(outcomes: []), store: InMemoryMutationStore())
+
+        await queue.cancel("never-enqueued")
+
+        #expect(await queue.status(for: "never-enqueued") == nil)
+    }
+
+    @Test("MutationFailureReason flags cancellation only for CancellationError")
+    func failureReasonFlagsCancellation() {
+        #expect(MutationFailureReason(CancellationError()).isCancellation)
+        #expect(!MutationFailureReason(NetworkError.timeout).isCancellation)
+    }
 }
 
 /// Dispatches to one of two fakes by endpoint path, used to prove two

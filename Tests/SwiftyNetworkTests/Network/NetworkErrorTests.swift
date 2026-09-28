@@ -132,3 +132,23 @@ func testMapURLErrorClassifiesCodes() {
     #expect(NetworkError.mapURLError(URLError(.timedOut)).classification == .timeout)
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
+
+@Test("mapURLError treats connectivity-loss codes as no connection")
+func testMapURLErrorTreatsConnectivityLossAsNoConnection() {
+    let codes: [URLError.Code] = [.networkConnectionLost, .dataNotAllowed, .internationalRoamingOff]
+    for code in codes {
+        let mapped = NetworkError.mapURLError(URLError(code))
+        #expect(mapped.classification == .noConnection)
+        #expect(mapped.isTransient)
+    }
+}
+
+@Test("mapURLError preserves the original URLError for unmapped codes")
+func testMapURLErrorPreservesUnderlyingURLError() throws {
+    guard case .underlying(let underlying) = NetworkError.mapURLError(URLError(.cannotFindHost)) else {
+        Issue.record("Expected .underlying")
+        return
+    }
+    let urlError = try #require(underlying as? URLError)
+    #expect(urlError.code == .cannotFindHost)
+}

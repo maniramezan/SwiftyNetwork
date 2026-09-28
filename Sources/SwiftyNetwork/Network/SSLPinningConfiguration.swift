@@ -213,7 +213,12 @@ enum SSLPinningTrustEvaluator {
 
         let certificateChain = certificates(from: trust)
         let certificates = certificateChain.map { SecCertificateCopyData($0) as Data }
-        let publicKeys = publicKeyData(from: certificateChain)
+        // SPKI reconstruction is the costly step; skip it unless a public-key pin needs it.
+        let needsPublicKeys = policy.pins.contains { pin in
+            if case .publicKeySHA256 = pin { return true }
+            return false
+        }
+        let publicKeys = needsPublicKeys ? publicKeyData(from: certificateChain) : []
         return SSLPinningValidator.matches(pins: policy.pins, certificateData: certificates, publicKeyData: publicKeys)
     }
 

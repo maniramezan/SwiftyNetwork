@@ -78,4 +78,53 @@ struct OAuthAuthorizationProviderTests {
         let auth = await provider.currentAuthorization()
         #expect(auth == .bearer(token: "new-token"))
     }
+
+    @Test("A 401 for an already-replaced token reuses the new token without refreshing again")
+    func refreshSkippedWhenRejectedTokenIsStale() async {
+        actor Counter {
+            private(set) var count = 0
+            func next() -> Int {
+                count += 1
+                return count
+            }
+        }
+        let counter = Counter()
+        let provider = OAuthAuthorizationProvider(initialAccessToken: "token-0") {
+            let next = await counter.next()
+            return "token-\(next)"
+        }
+
+        // The first 401 for token-0 refreshes to token-1.
+        #expect(await provider.refreshAuthorization(rejecting: .bearer(token: "token-0")))
+        // A late 401 for the same stale token must not consume another refresh.
+        #expect(await provider.refreshAuthorization(rejecting: .bearer(token: "token-0")))
+
+        #expect(await counter.count == 1)
+        #expect(await provider.currentAuthorization() == .bearer(token: "token-1"))
+    }
+
+    @Test("A 401 for the current token triggers a refresh")
+    func refreshRunsWhenRejectedTokenIsCurrent() async {
+        let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") { "new-token" }
+
+        #expect(await provider.refreshAuthorization(rejecting: .bearer(token: "old-token")))
+        #expect(await provider.currentAuthorization() == .bearer(token: "new-token"))
+    }
+
+    @Test("updateAccessToken replaces the token used for subsequent requests")
+    func updateAccessTokenReplacesToken() async {
+        let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") { nil }
+
+        await provider.updateAccessToken("signed-in-token")
+
+        #expect(await provider.currentAuthorization() == .bearer(token: "signed-in-token"))
+    }
+
+    @Test("Default refreshAuthorization(rejecting:) delegates to refreshAuthorizationIfNeeded")
+    func defaultRejectingRefreshDelegates() async {
+        let provider = TestAuthorizationProvider(current: .bearer(token: "a"), refreshResult: true)
+
+        #expect(await provider.refreshAuthorization(rejecting: .bearer(token: "stale")))
+        #expect(await provider.refreshCallCount == 1)
+    }
 }
