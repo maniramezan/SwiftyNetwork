@@ -75,6 +75,11 @@ public struct CacheKey: Hashable, Sendable, ExpressibleByStringLiteral, CustomSt
 // MARK: - Convenience Extensions
 
 extension CacheKey {
+    // RFC 3986 unreserved characters; query separators must be escaped in each value.
+    private static let unreservedCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
     /// Creates a cache key for user-specific data.
     ///
     /// Example:
@@ -93,7 +98,9 @@ extension CacheKey {
     /// Creates a cache key for API endpoint data.
     ///
     /// Parameters are sorted by key so equivalent dictionaries produce stable
-    /// cache keys regardless of dictionary iteration order.
+    /// cache keys regardless of dictionary iteration order. Keys and values use
+    /// percent encoding so their `&`, `=`, and `?` characters cannot collide
+    /// with the separators in the resulting cache key.
     ///
     /// Example:
     /// ```swift
@@ -106,8 +113,16 @@ extension CacheKey {
     /// - Returns: A cache key for the API endpoint.
     public static func endpoint(_ endpoint: String, parameters: [String: String] = [:]) -> CacheKey {
         let sortedParams = parameters.sorted { $0.key < $1.key }
-        let paramString = sortedParams.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
+        let paramString = sortedParams.map { "\(escape($0.key))=\(escape($0.value))" }.joined(separator: "&")
         let fullKey = paramString.isEmpty ? endpoint : "\(endpoint)?\(paramString)"
         return CacheKey(fullKey)
+    }
+
+    private static func escape(_ component: String) -> String {
+        // Swift strings contain valid Unicode, so Foundation can always encode them as UTF-8.
+        guard let encoded = component.addingPercentEncoding(withAllowedCharacters: unreservedCharacters) else {
+            preconditionFailure("Unable to percent-encode a valid Swift string")
+        }
+        return encoded
     }
 }
