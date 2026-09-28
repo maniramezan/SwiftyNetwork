@@ -1,8 +1,8 @@
 # SwiftyNetwork architecture
 
-The package targets Swift 6 language mode, iOS 17+, and macOS 14+, with no
-external dependencies. It has no package-wide main-actor default isolation or
-upcoming-feature flags. `Package.swift` is the source of truth.
+The package uses Swift 6.2 tooling and Swift 6 language mode, iOS 17+, and macOS 14+,
+with SwiftCommons for shared utilities (default traits disabled). It has no
+package-wide main-actor default isolation or upcoming-feature flags. `Package.swift` is the source of truth.
 
 ## Modules and boundaries
 
@@ -23,8 +23,12 @@ Internal building blocks are kept in their own files so they can be reused and
 tested directly: `HTTPStatusValidator` (status → `NetworkError`), `RequestTrace`
 (one instrumentation event per pipeline exit), `EncodedBodyEndpoint`/`HTTPHeaders`
 (JSON body + Content-Type defaulting shared with `MutationRequest`),
-`AnySendableError`, `LRUStorage` (O(1) LRU used by `InMemoryCache`), and
+`LRUStorage` (O(1) LRU used by `InMemoryCache`), and
 `CacheOperationGate` (FIFO ordering for compound cache operations).
+
+SwiftCommons supplies `AnySendableError`, `AsyncBroadcaster`, `RetryBackoff`,
+`LibraryLogger`, suffix trimming, and duration conversion. Swift’s standard
+prefix trimming and SwiftCommons’ suffix trimming normalize endpoint paths.
 
 ## Request pipeline
 

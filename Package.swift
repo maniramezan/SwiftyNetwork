@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -15,9 +15,17 @@ let package = Package(
             name: "SwiftyNetworkTesting",
             targets: ["SwiftyNetworkTesting"]),
     ],
+    dependencies: [
+        // No traits: SwiftyNetwork only uses the string, duration, concurrency, logging, and error
+        // helpers, so it opts out of SwiftCommons' SwiftData-backed APIs.
+        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.13.0", traits: [])
+    ],
     targets: [
         .target(
             name: "SwiftyNetwork",
+            dependencies: [
+                .product(name: "SwiftCommons", package: "SwiftCommons")
+            ],
             resources: [.process("SwiftyNetwork.docc")]
         ),
         .target(

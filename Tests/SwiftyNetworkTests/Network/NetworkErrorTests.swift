@@ -133,6 +133,20 @@ func testMapURLErrorClassifiesCodes() {
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
 
+@Test("Underlying URL errors keep their localized description")
+func testUnderlyingErrorKeepsLocalizedDescription() {
+    let urlError = URLError(.cannotFindHost)
+    let error = NetworkError.mapURLError(urlError)
+
+    // Reading through `any Error` must preserve the original localized message.
+    #expect(error.errorDescription?.contains(urlError.localizedDescription) == true)
+    if case .underlying(let underlying) = error {
+        #expect(underlying.localizedDescription == urlError.localizedDescription)
+    } else {
+        Issue.record("Expected .underlying, got \(error)")
+    }
+}
+
 @Test("mapURLError treats connectivity-loss codes as no connection")
 func testMapURLErrorTreatsConnectivityLossAsNoConnection() {
     let codes: [URLError.Code] = [.networkConnectionLost, .dataNotAllowed, .internationalRoamingOff]

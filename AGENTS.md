@@ -6,7 +6,7 @@
 
 ## Overview
 
-SwiftyNetwork is a zero-dependency Swift networking library built for Swift 6 strict concurrency. It provides type-safe endpoint definitions, an actor-based HTTP client with retry and auth refresh, a flexible caching system, and a repository pattern for coordinating network and local data.
+SwiftyNetwork is a Swift networking library, depending only on [SwiftCommons](https://github.com/maniramezan/SwiftCommons) (with `traits: []`), built for Swift 6 strict concurrency. It provides type-safe endpoint definitions, an actor-based HTTP client with retry and auth refresh, a flexible caching system, and a repository pattern for coordinating network and local data.
 
 **Key types to know:**
 - `NetworkEndpoint` -- protocol defining API requests (the primary endpoint protocol)
@@ -20,7 +20,7 @@ SwiftyNetwork is a zero-dependency Swift networking library built for Swift 6 st
 
 ```
 Sources/SwiftyNetwork/
-├── Logger.swift                     # Internal logging (os.Logger, privacy-aware, lazy messages)
+├── Logger.swift              # Internal logging (SwiftCommons LibraryLogger, privacy-aware)
 ├── Network/
 │   ├── NetworkEndpoint.swift        # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
 │   ├── APIClient.swift              # APIClient / NetworkDataSource protocols + no-body convenience
@@ -29,7 +29,6 @@ Sources/SwiftyNetwork/
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
 │   ├── RequestTrace.swift           # Internal: per-attempt instrumentation reporting
 │   ├── EncodedBodyEndpoint.swift    # Internal: body-override wrapper + HTTPHeaders helpers
-│   ├── AnySendableError.swift       # Internal: Sendable wrapper for foreign errors
 │   ├── HTTPMethod.swift             # HTTP verb enum
 │   ├── EmptyResponse.swift          # Decodable for bodiless responses
 │   ├── AuthorizationType.swift      # Auth header strategies (Codable)
@@ -108,6 +107,10 @@ swift package generate-documentation \
 - Prefer structured concurrency (`async let`, `TaskGroup`) over unstructured `Task {}`
 - Never use GCD, `NSLock`, or completion handlers in new code
 - `@unchecked Sendable` requires a documented safety invariant
+- Reuse SwiftCommons primitives instead of adding local copies: `AsyncBroadcaster` for multi-consumer
+  `AsyncStream`s, `RetryBackoff` for backoff math, `AnySendableError` for boxing errors in
+  `NetworkError`, `LibraryLogger` (via the internal `Logger`), `DecodingError.debugSummary`,
+  `Duration.timeInterval`, and `trimmingSuffix(while:)`. Use Swift’s built-in prefix trimming.
 
 ### Naming
 
@@ -264,7 +267,7 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - Never commit API keys, tokens, credentials, or production URLs
 - Inject auth via `AuthorizationProvider` -- never hardcode tokens
 - Scrub sensitive headers before logging
-- `Logger` marks URLs and underlying errors private; redact sensitive values before exporting diagnostics
+- `Logger` marks URLs and underlying error descriptions private (error type/domain/code stay public); redact sensitive values before exporting diagnostics
 - Validate URLs (scheme + host) in endpoints
 - `MutationRequest` can carry secrets via its captured `AuthorizationType` (bearer tokens, API
   keys); a durable `MutationStore` implementation is responsible for encrypting persisted

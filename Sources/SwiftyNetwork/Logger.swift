@@ -1,5 +1,5 @@
 import Foundation
-import os
+import SwiftCommons
 
 // MARK: - Public Log Level
 
@@ -39,19 +39,46 @@ public enum LogLevel: Int, Sendable, Comparable {
     }
 }
 
+// MARK: - Level Bridging
+
+extension LogLevel {
+    /// The equivalent ``LibraryLogger/Level`` used by the underlying logger.
+    var libraryLevel: LibraryLogger.Level {
+        switch self {
+        case .off: .off
+        case .error: .error
+        case .warning: .warning
+        case .info: .info
+        case .debug: .debug
+        }
+    }
+
+    init(_ level: LibraryLogger.Level) {
+        switch level {
+        case .off: self = .off
+        case .error: self = .error
+        case .warning: self = .warning
+        case .info: self = .info
+        case .debug: self = .debug
+        }
+    }
+}
+
 // MARK: - Internal Logger
 
-/// Internal logging facade that bridges SwiftyNetwork to ``os.Logger``.
+/// Internal logging facade that routes SwiftyNetwork messages through
+/// SwiftCommons' ``LibraryLogger``.
 ///
-/// All log calls are routed through ``os.Logger`` for structured, privacy-aware
-/// system logging. The active level is process-wide and can be changed via
+/// Messages are public and only built when their level is enabled; attached
+/// errors log their type, domain, and code publicly and their description
+/// privately. The active level is process-wide and can be changed via
 /// ``NetworkClientConfiguration/logLevel`` or ``Logger/setLevel(_:)``.
 enum Logger {
-    /// Subsystem identifier used for ``os.Logger`` instances.
+    /// Subsystem identifier used for unified logging.
     static let subsystem = "SwiftyNetwork"
 
     /// Categories used to group related log statements in Console.app.
-    enum Category: String {
+    enum Category: String, CaseIterable {
         case network
         case cache
         case auth
@@ -60,69 +87,40 @@ enum Logger {
         case mutation
     }
 
-    /// Atomic storage for the active log level.
-    private static let _level = OSAllocatedUnfairLock<LogLevel>(initialState: .warning)
+    private static let library = LibraryLogger(subsystem: subsystem, defaultLevel: .warning)
+
+    private static let handles: [Category: LibraryLogger.Category] = Dictionary(
+        uniqueKeysWithValues: Category.allCases.map { ($0, library.category($0.rawValue)) }
+    )
 
     /// The current log level. Defaults to ``LogLevel/warning``.
     static var level: LogLevel {
-        _level.withLock { $0 }
+        LogLevel(library.level)
     }
 
     /// Updates the active log level for the entire package.
     ///
     /// - Parameter newLevel: The new log level to apply.
     static func setLevel(_ newLevel: LogLevel) {
-        _level.withLock { $0 = newLevel }
+        library.setLevel(newLevel.libraryLevel)
     }
 
-    /// Returns the cached ``os.Logger`` for the given category.
-    private static func osLogger(for category: Category) -> os.Logger {
-        switch category {
-        case .network: return OSLoggers.network
-        case .cache: return OSLoggers.cache
-        case .auth: return OSLoggers.auth
-        case .repository: return OSLoggers.repository
-        case .security: return OSLoggers.security
-        case .mutation: return OSLoggers.mutation
-        }
-    }
-
-    /// One lazily created ``os.Logger`` per category, so emitting a message
-    /// doesn't allocate a new logger each time.
-    private enum OSLoggers {
-        static let network = make(.network)
-        static let cache = make(.cache)
-        static let auth = make(.auth)
-        static let repository = make(.repository)
-        static let security = make(.security)
-        static let mutation = make(.mutation)
-
-        private static func make(_ category: Category) -> os.Logger {
-            os.Logger(subsystem: Logger.subsystem, category: category.rawValue)
-        }
+    private static func handle(for category: Category) -> LibraryLogger.Category {
+        handles[category] ?? library.category(category.rawValue)
     }
 
     // MARK: - Emit
 
-    // Messages are `@autoclosure`s so interpolated strings are only built when
-    // the level is enabled; call sites stay `Logger.debug("... \(value)")`.
-
     static func debug(_ message: @autoclosure () -> String, category: Category = .network) {
-        guard level >= .debug else { return }
-        let message = message()
-        osLogger(for: category).debug("\(message, privacy: .public)")
+        handle(for: category).debug(message())
     }
 
     static func info(_ message: @autoclosure () -> String, category: Category = .network) {
-        guard level >= .info else { return }
-        let message = message()
-        osLogger(for: category).info("\(message, privacy: .public)")
+        handle(for: category).info(message())
     }
 
     static func warning(_ message: @autoclosure () -> String, category: Category = .network) {
-        guard level >= .warning else { return }
-        let message = message()
-        osLogger(for: category).warning("\(message, privacy: .public)")
+        handle(for: category).warning(message())
     }
 
     static func error(
@@ -130,23 +128,13 @@ enum Logger {
         error: (any Error)? = nil,
         category: Category = .network
     ) {
-        guard level >= .error else { return }
-        let message = message()
-        if let error {
-            let errorDescription = String(describing: error)
-            osLogger(for: category).error(
-                "\(message, privacy: .public) — \(errorDescription, privacy: .private)")
-        } else {
-            osLogger(for: category).error("\(message, privacy: .public)")
-        }
+        handle(for: category).error(message(), error: error)
     }
 
     // MARK: - URL Helpers
 
     /// Logs a URL with private sanitization so query strings don't leak in the unified log.
     static func debugURL(_ message: @autoclosure () -> String, url: URL, category: Category = .network) {
-        guard level >= .debug else { return }
-        let message = message()
-        osLogger(for: category).debug("\(message, privacy: .public) \(url.absoluteString, privacy: .private)")
+        handle(for: category).debug(message(), url: url)
     }
 }

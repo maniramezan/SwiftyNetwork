@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// Reports one HTTP attempt's lifecycle to an optional ``NetworkInstrumentation``.
 ///
@@ -58,7 +59,6 @@ struct RequestTrace: Sendable {
 
     /// Monotonic seconds since ``start()``; unaffected by wall-clock corrections.
     private var elapsed: TimeInterval {
-        let components = startedAt.duration(to: .now).components
-        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+        startedAt.duration(to: .now).timeInterval
     }
 }

@@ -25,8 +25,14 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 
 ## Requirements
 
-- Swift 6.0+
+- Swift 6.2+
 - iOS 17.0+ / macOS 14.0+
+
+## Dependencies
+
+SwiftyNetwork depends only on [SwiftCommons](https://github.com/maniramezan/SwiftCommons) for its
+string, duration, logging, concurrency, and error helpers. It declares that dependency with `traits: []`, so
+SwiftCommons' SwiftData-backed APIs are not pulled in on its behalf.
 
 ## Code Quality
 

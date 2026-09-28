@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 // MARK: - Endpoint Protocol
 
@@ -127,8 +128,9 @@ enum EndpointURLBuilder {
             throw NetworkError.invalidURL(url: baseURL + path)
         }
 
-        let basePath = components.path.trimmingTrailingSlashes
-        let endpointPath = path.ensuringLeadingSlash
+        let basePath = components.path.trimmingSuffix(while: { $0 == "/" })
+        let endpointPath =
+            path.isEmpty ? "" : String(path.trimmingPrefix(while: { $0 == "/" })).ensuringStarts(with: "/")
         components.path = basePath + endpointPath
 
         if let queryItems, !queryItems.isEmpty {
@@ -139,20 +141,5 @@ enum EndpointURLBuilder {
             throw NetworkError.invalidURL(url: baseURL + path)
         }
         return url
-    }
-}
-
-extension String {
-    fileprivate var trimmingTrailingSlashes: String {
-        var result = self
-        while result.hasSuffix("/") {
-            result.removeLast()
-        }
-        return result
-    }
-
-    fileprivate var ensuringLeadingSlash: String {
-        if isEmpty { return "" }
-        return "/" + drop(while: { $0 == "/" })
     }
 }
