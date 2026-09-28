@@ -16,6 +16,9 @@ SwiftyNetwork provides:
 - **Single-flight remote data caching** with ``RemoteDataCache`` -- deduplicates concurrent fetches for the same key, composable with any ``Cache`` for app-configurable memory/disk layering.
 - **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with shared ``NetworkError/classification`` for retry policies and telemetry alike.
 
+For tests and previews, the separate `SwiftyNetworkTesting` library product provides
+`MockAPIClient`, a scriptable ``APIClient`` that records every request.
+
 ## Topics
 
 ### Essentials

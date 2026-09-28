@@ -71,16 +71,24 @@ When planning a new feature or significant change, consider:
 
 ```
 Sources/SwiftyNetwork/
-├── Network/          # HTTP client, endpoints, errors
-├── Cache/            # Cache protocols and implementations
-└── Repository/       # Data coordination layer
+├── Network/          # HTTP client, endpoints, auth, TLS, errors, observation
+├── Cache/            # Cache protocols, implementations, single-flight, LRU storage
+├── Repository/       # Data coordination layer
+└── Mutation/         # Fire-and-forget mutation queue, stores, retry policy
+
+Sources/SwiftyNetworkTesting/  # Public test doubles (MockAPIClient) for consumers
 
 Tests/SwiftyNetworkTests/
 ├── Network/          # Network client tests
 ├── Cache/            # Cache implementation tests
 ├── Repository/       # Repository pattern tests
+├── Mutation/         # Mutation queue tests
+├── Testing/          # SwiftyNetworkTesting tests
 └── Helpers/          # Test utilities and mocks
 ```
+
+For the step-by-step workflow, agents should load the `add-component` skill in
+`.claude/skills/`.
 
 ## Decision Framework
 

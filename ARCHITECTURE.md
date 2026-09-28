@@ -17,6 +17,14 @@ upcoming-feature flags. `Package.swift` is the source of truth.
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
 | Repository | `Repository.swift` | Coordinate local and network sources using `CachePolicy` |
 | Mutations | `Mutation/` | Retry, coalesce, persist, and observe background mutations |
+| Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()` |
+
+Internal building blocks are kept in their own files so they can be reused and
+tested directly: `HTTPStatusValidator` (status → `NetworkError`), `RequestTrace`
+(one instrumentation event per pipeline exit), `EncodedBodyEndpoint`/`HTTPHeaders`
+(JSON body + Content-Type defaulting shared with `MutationRequest`),
+`AnySendableError`, `LRUStorage` (O(1) LRU used by `InMemoryCache`), and
+`CacheOperationGate` (FIFO ordering for compound cache operations).
 
 ## Request pipeline
 
@@ -34,7 +42,9 @@ The encoded-body overload uses the configured encoder and preserves an explicitl
 supplied Content-Type header.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
-with `retryDelay` before replay. This is **not** general transient-error retry.
+with `retryDelay` before replay. The client passes the exact provider authorization
+it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
+skips refreshing a token that a concurrent request already replaced. This is **not** general transient-error retry.
 Endpoint-specific authorization does not trigger provider refresh. Attempt counts
 include auth replays. Instrumentation callbacks are awaited and therefore add to
 request latency; observers should do bounded work. Durations use `ContinuousClock`
@@ -47,6 +57,9 @@ Actors protect mutable client, cache, OAuth, monitor, and mutation state.
 `AnyCache` is a struct holding immutable `@Sendable` closures; its Sendable
 conformance is compiler-checked. Cache protocols also support Sendable value
 implementations. `GenericRepository` holds Sendable forwarding closures.
+
+`NetworkMonitor` forwards path updates through one ordered stream and registers
+each `updates` continuation synchronously on the actor.
 
 Actor isolation prevents data races, but an `await` allows another operation to
 interleave. `SingleFlightCache` and `LayeredCache` serialize their storage operations across
@@ -68,8 +81,8 @@ exceptions, not a pattern for new async APIs.
 
 `Cache` provides values and timestamps. `TimestampedCache` adds explicit timestamp
 writes. `PersistentCache` is a marker; apps implement actual persistence.
-`InMemoryCache` updates LRU access times on reads and scans entries on eviction
-(O(n)); expiration scans storage too. `LayeredCache` reads memory first and promotes
+`InMemoryCache` keeps entries in `LRUStorage`, so reads, writes, and eviction are
+O(1) and eviction order is deterministic; age-based expiration scans storage (O(n)). `LayeredCache` reads memory first and promotes
 persistent values, preserving an available timestamp.
 
 Repositories implement cache-first, reload, and maximum-age policies. Their read
