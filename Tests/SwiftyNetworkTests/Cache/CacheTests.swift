@@ -565,6 +565,17 @@ func inMemoryCacheReplaceUpdatesCost() async {
     #expect(await cache.count() == 1)
 }
 
+@Test("InMemoryCache cost accounting does not overflow at Int.max")
+func inMemoryCacheCostDoesNotOverflow() async {
+    let cache = InMemoryCache<Int>(maxCost: Int.max) { $0 }
+    await cache.setValue(Int.max, forKey: "large")
+    await cache.setValue(1, forKey: "small")
+
+    #expect(await cache.value(forKey: "large") == nil)
+    #expect(await cache.value(forKey: "small") == 1)
+    #expect(await cache.totalCost() == 1)
+}
+
 @Test("InMemoryCache evicts a single value costlier than the whole budget")
 func inMemoryCacheEvictsOversizedValue() async {
     let cache = InMemoryCache<Data>(maxBytes: 10)
