@@ -9,16 +9,24 @@ let package = Package(
     products: [
         .library(
             name: "SwiftyNetwork",
-            targets: ["SwiftyNetwork"])
+            targets: ["SwiftyNetwork"]),
+        // Test doubles for apps that depend on SwiftyNetwork. Link it only from test targets and previews.
+        .library(
+            name: "SwiftyNetworkTesting",
+            targets: ["SwiftyNetworkTesting"]),
     ],
     targets: [
         .target(
             name: "SwiftyNetwork",
             resources: [.process("SwiftyNetwork.docc")]
         ),
+        .target(
+            name: "SwiftyNetworkTesting",
+            dependencies: ["SwiftyNetwork"]
+        ),
         .testTarget(
             name: "SwiftyNetworkTests",
-            dependencies: ["SwiftyNetwork"]
+            dependencies: ["SwiftyNetwork", "SwiftyNetworkTesting"]
         ),
     ],
     swiftLanguageModes: [.v6]

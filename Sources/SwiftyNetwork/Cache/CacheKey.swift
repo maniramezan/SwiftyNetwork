@@ -12,7 +12,7 @@ import Foundation
 /// let userKey = CacheKey.user("123", resource: "profile")
 /// let endpointKey = CacheKey.endpoint("/users", parameters: ["page": "1"])
 /// ```
-public struct CacheKey: Hashable, Sendable {
+public struct CacheKey: Hashable, Sendable, ExpressibleByStringLiteral, CustomStringConvertible {
     /// The underlying string value of the cache key.
     public let rawValue: String
 
@@ -27,6 +27,21 @@ public struct CacheKey: Hashable, Sendable {
     public init(_ rawValue: String) {
         self.rawValue = rawValue
     }
+
+    /// Creates a cache key from a string literal.
+    ///
+    /// Example:
+    /// ```swift
+    /// let key: CacheKey = "user:123:profile"
+    /// ```
+    ///
+    /// - Parameter value: The string value for the cache key.
+    public init(stringLiteral value: String) {
+        self.rawValue = value
+    }
+
+    /// The raw string value, for logging and diagnostics.
+    public var description: String { rawValue }
 
     /// Creates a cache key from a URL, using its absolute string representation.
     ///
