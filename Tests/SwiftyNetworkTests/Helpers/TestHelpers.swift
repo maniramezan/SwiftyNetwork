@@ -245,6 +245,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     private let refreshResult: Bool
     private let refreshedAuth: AuthorizationType?
     private(set) var refreshCallCount = 0
+    private(set) var rejectedAuthorizations: [AuthorizationType] = []
 
     public init(
         current: AuthorizationType,
@@ -266,6 +267,11 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
             currentAuth = refreshedAuth
         }
         return refreshResult
+    }
+
+    public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
+        rejectedAuthorizations.append(rejected)
+        return await refreshAuthorizationIfNeeded()
     }
 }
 
