@@ -43,3 +43,11 @@ unless you set a fallback with ``MockAPIClient/setFallback(_:)``.
 
 - ``MockAPIClient``
 - ``RecordedRequest``
+
+### Authorization and instrumentation
+
+- ``TestAuthorizationProvider``
+- ``NetworkInstrumentationRecorder``
+
+Inject these spies into your network configuration to observe credential refresh
+and request lifecycle events without defining app-specific copies.
