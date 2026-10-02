@@ -1,4 +1,5 @@
 import Foundation
+import SwiftyNetworkTesting
 
 @testable import SwiftyNetwork
 
@@ -240,50 +241,5 @@ func firstEvent<T: Sendable>(
     return nil
 }
 
-public actor TestAuthorizationProvider: AuthorizationProvider {
-    private var currentAuth: AuthorizationType
-    private let refreshResult: Bool
-    private let refreshedAuth: AuthorizationType?
-    private(set) var refreshCallCount = 0
-    private(set) var rejectedAuthorizations: [AuthorizationType] = []
-
-    public init(
-        current: AuthorizationType,
-        refreshResult: Bool,
-        refreshedAuthorization: AuthorizationType? = nil
-    ) {
-        self.currentAuth = current
-        self.refreshResult = refreshResult
-        self.refreshedAuth = refreshedAuthorization
-    }
-
-    public func currentAuthorization() async -> AuthorizationType {
-        currentAuth
-    }
-
-    public func refreshAuthorizationIfNeeded() async -> Bool {
-        refreshCallCount += 1
-        if refreshResult, let refreshedAuth {
-            currentAuth = refreshedAuth
-        }
-        return refreshResult
-    }
-
-    public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
-        rejectedAuthorizations.append(rejected)
-        return await refreshAuthorizationIfNeeded()
-    }
-}
-
-/// Records every ``NetworkInstrumentation`` event for later assertions.
-actor FakeNetworkInstrumentation: NetworkInstrumentation {
-    private(set) var started: [NetworkRequestAttempt] = []
-    private(set) var retried: [NetworkRequestAttempt] = []
-    private(set) var completed: [NetworkRequestCompletion] = []
-    private(set) var failed: [NetworkRequestFailure] = []
-
-    func requestStarted(_ event: NetworkRequestAttempt) async { started.append(event) }
-    func requestRetried(_ event: NetworkRequestAttempt) async { retried.append(event) }
-    func requestCompleted(_ event: NetworkRequestCompletion) async { completed.append(event) }
-    func requestFailed(_ event: NetworkRequestFailure) async { failed.append(event) }
-}
+typealias TestAuthorizationProvider = SwiftyNetworkTesting.TestAuthorizationProvider
+typealias FakeNetworkInstrumentation = NetworkInstrumentationRecorder
