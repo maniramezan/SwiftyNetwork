@@ -1,6 +1,6 @@
 import SwiftyNetwork
 
-/// Records every ``NetworkInstrumentation`` event for later assertions.
+/// Records every `NetworkInstrumentation` event for later assertions.
 public actor NetworkInstrumentationRecorder: NetworkInstrumentation {
     /// Creates an empty recorder.
     public init() {}
