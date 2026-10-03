@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftyNetwork",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
         .library(
             name: "SwiftyNetwork",
@@ -18,7 +18,9 @@ let package = Package(
     dependencies: [
         // No traits: SwiftyNetwork only uses the string, duration, concurrency, logging, and error
         // helpers, so it opts out of SwiftCommons' SwiftData-backed APIs.
-        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.14.0", traits: [])
+        .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.14.0", traits: []),
+        // Shared test helpers, linked into the test target only.
+        .package(url: "https://github.com/maniramezan/SwiftTestCommons.git", from: "0.3.0"),
     ],
     targets: [
         .target(
@@ -35,7 +37,11 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftyNetworkTests",
-            dependencies: ["SwiftyNetwork", "SwiftyNetworkTesting"]
+            dependencies: [
+                "SwiftyNetwork",
+                "SwiftyNetworkTesting",
+                .product(name: "TestCommons", package: "SwiftTestCommons"),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

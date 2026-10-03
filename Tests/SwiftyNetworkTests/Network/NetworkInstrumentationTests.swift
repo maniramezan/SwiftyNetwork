@@ -8,13 +8,15 @@ struct NetworkInstrumentationTests {
 
     @Test("A successful request emits requestStarted then requestCompleted with matching requestID")
     func successfulRequestEmitsStartedThenCompleted() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-success"
-        let session = makeTestSession()
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let configuration = NetworkClientConfiguration(session: session, instrumentation: instrumentation)
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
-        TestURLProtocol.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
+        stub.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
 
         _ = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -36,13 +38,15 @@ struct NetworkInstrumentationTests {
     }
 
     @Test("A server error emits requestStarted then requestFailed with the classified error")
-    func serverErrorEmitsFailed() async {
+    func serverErrorEmitsFailed() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-server-error"
-        let session = makeTestSession()
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let configuration = NetworkClientConfiguration(session: session, instrumentation: instrumentation)
         let client = NetworkClient(configuration: configuration)
-        TestURLProtocol.setResponses([.status(500)], for: testId)
+        stub.setResponses([.status(500)], for: testId)
 
         _ = try? await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -57,13 +61,15 @@ struct NetworkInstrumentationTests {
     }
 
     @Test("A transport failure emits requestFailed with the mapped NetworkError classification")
-    func transportFailureEmitsFailed() async {
+    func transportFailureEmitsFailed() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-transport-failure"
-        let session = makeTestSession()
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let configuration = NetworkClientConfiguration(session: session, instrumentation: instrumentation)
         let client = NetworkClient(configuration: configuration)
-        TestURLProtocol.setResponses([.failure(URLError(.notConnectedToInternet))], for: testId)
+        stub.setResponses([.failure(URLError(.notConnectedToInternet))], for: testId)
 
         _ = try? await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -74,8 +80,10 @@ struct NetworkInstrumentationTests {
 
     @Test("A 401 that successfully refreshes emits requestRetried and a second attempt sharing the requestID")
     func successfulRefreshEmitsRetriedAndSecondAttempt() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-refresh-success"
-        let session = makeTestSession()
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
@@ -90,7 +98,7 @@ struct NetworkInstrumentationTests {
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401), .success(try JSONEncoder().encode(user))],
             for: testId
         )
@@ -111,9 +119,11 @@ struct NetworkInstrumentationTests {
     }
 
     @Test("A 401 that fails to refresh emits requestFailed without requestRetried")
-    func failedRefreshEmitsFailedWithoutRetried() async {
+    func failedRefreshEmitsFailedWithoutRetried() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-refresh-failure"
-        let session = makeTestSession()
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let provider = TestAuthorizationProvider(current: .bearer(token: "expired"), refreshResult: false)
         let configuration = NetworkClientConfiguration(
@@ -123,7 +133,7 @@ struct NetworkInstrumentationTests {
             instrumentation: instrumentation
         )
         let client = NetworkClient(configuration: configuration)
-        TestURLProtocol.setResponses([.status(401)], for: testId)
+        stub.setResponses([.status(401)], for: testId)
 
         _ = try? await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -135,14 +145,16 @@ struct NetworkInstrumentationTests {
 
     @Test("Independent requests receive distinct requestIDs")
     func independentRequestsHaveDistinctIDs() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let instrumentation = FakeNetworkInstrumentation()
         let configuration = NetworkClientConfiguration(session: session, instrumentation: instrumentation)
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let encoded = try JSONEncoder().encode(user)
-        TestURLProtocol.setResponses([.success(encoded)], for: "instrumentation-distinct-a")
-        TestURLProtocol.setResponses([.success(encoded)], for: "instrumentation-distinct-b")
+        stub.setResponses([.success(encoded)], for: "instrumentation-distinct-a")
+        stub.setResponses([.success(encoded)], for: "instrumentation-distinct-b")
 
         _ = try await client.request(makeEndpointWithTestId("instrumentation-distinct-a"), responseType: TestUser.self)
         _ = try await client.request(makeEndpointWithTestId("instrumentation-distinct-b"), responseType: TestUser.self)
@@ -154,14 +166,16 @@ struct NetworkInstrumentationTests {
 
     @Test("A conformer that implements no methods uses the no-op defaults without crashing")
     func defaultNoOpImplementationsAreUsable() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         struct MinimalInstrumentation: NetworkInstrumentation {}
 
         let testId = "instrumentation-minimal-conformer"
-        let session = makeTestSession()
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session, instrumentation: MinimalInstrumentation())
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
-        TestURLProtocol.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
+        stub.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
 
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -170,12 +184,14 @@ struct NetworkInstrumentationTests {
 
     @Test("Without instrumentation configured, requests still succeed")
     func noInstrumentationConfiguredStillWorks() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "instrumentation-none"
-        let session = makeTestSession()
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
-        TestURLProtocol.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
+        stub.setResponses([.success(try JSONEncoder().encode(user))], for: testId)
 
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 

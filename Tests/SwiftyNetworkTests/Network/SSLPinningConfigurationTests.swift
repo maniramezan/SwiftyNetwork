@@ -390,10 +390,12 @@ struct SSLPinningConfigurationTests {
 
     @Test("Pinned session initializer preserves request configuration")
     func testPinnedSessionInitializerPreservesRequestConfiguration() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let pin = SSLPinningConfiguration.Pin.certificate(Data([1, 2, 3]))
         let pinning = SSLPinningConfiguration(pinnedHosts: ["api.test.com": [pin]])
         let sessionConfiguration = URLSessionConfiguration.ephemeral
-        sessionConfiguration.protocolClasses = [TestURLProtocol.self]
+        sessionConfiguration.protocolClasses = stub.session.configuration.protocolClasses
         let authorizationProvider = TestAuthorizationProvider(current: .apiKey(key: "key"), refreshResult: false)
 
         let configuration = NetworkClientConfiguration(
@@ -409,7 +411,7 @@ struct SSLPinningConfigurationTests {
         let user = TestUser(id: "ssl", name: "Pinned", email: "pin@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "ssl-pinning-unlisted-protocol"
-        TestURLProtocol.setResponses([.success(data)], for: testId)
+        stub.setResponses([.success(data)], for: testId)
 
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -418,6 +420,7 @@ struct SSLPinningConfigurationTests {
         #expect(configuration.retryDelay == 0)
         #expect(configuration.logLevel == .info)
         #expect(response == user)
+        configuration.session.invalidateAndCancel()
     }
 }
 

@@ -43,8 +43,8 @@ bridges from synchronous platform callbacks. For each `Task {}` check:
 ## Locks and GCD
 
 Not in new code. The existing exceptions are `Logger` (`OSAllocatedUnfairLock`,
-synchronous API), `NWPathMonitor`'s dispatch queue, and `TestURLProtocolState`
-(`NSLock`, synchronous `URLProtocol`). Any new `@unchecked Sendable` needs a
+synchronous API), `NWPathMonitor`'s dispatch queue, and TestCommons-backed `TestHTTPStub`
+(`TestValueBox`, synchronous response handlers). Any new `@unchecked Sendable` needs a
 written safety invariant next to it.
 
 ## Cancellation
@@ -58,4 +58,4 @@ written safety invariant next to it.
 
 For each finding give: file:line, the interleaving that breaks (step by step),
 the observable symptom, and the minimal fix. Add a regression test that forces
-the interleaving with `Gate`s, not sleeps.
+the interleaving with TestCommons `AsyncGate`s, not sleeps.

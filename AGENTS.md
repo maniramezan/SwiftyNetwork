@@ -65,7 +65,7 @@ Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separa
 └── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
 
 Tests/SwiftyNetworkTests/
-├── Helpers/TestHelpers.swift        # TestURLProtocol, Gate, FakeAPIClient, TestAuthorizationProvider, ...
+├── Helpers/                         # TestHTTPStub, FakeAPIClient, TestAuthorizationProvider, ...
 ├── Network/                         # Client, auth, pinning, instrumentation, errors, endpoint tests
 ├── Cache/                           # Cache types, LRUStorage, ordering/single-flight, RemoteDataCache
 ├── Repository/RepositoryTests.swift # All cache policies against a real NetworkClient
@@ -146,13 +146,15 @@ swift package generate-documentation \
 
 ```swift
 // Mock responses
-TestURLProtocol.Response.success(data)     // 200 with data
-TestURLProtocol.Response.status(code)      // Specific HTTP status
-TestURLProtocol.Response.failure(error)    // URLError
+TestHTTPStub.Response.success(data)     // 200 with data
+TestHTTPStub.Response.status(code)      // Specific HTTP status
+TestHTTPStub.Response.failure(error)    // URLError
 
 // Test isolation
 makeEndpointWithTestId("unique-id")        // Endpoint with test-id query param
-makeTestSession()                          // Ephemeral URLSession with TestURLProtocol
+let stub = try TestHTTPStub()              // Per-test StubbedURLSession owner
+defer { stub.invalidate() }
+stub.session                              // Inject into the client/cache
 
 // Auth testing
 TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:)
@@ -163,14 +165,19 @@ await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
 let queue = MutationQueue(client: client, retryPolicy: .immediate())
 
 // Deterministic interleavings -- never rely on sleeps
-let gate = Gate(); await gate.wait(); await gate.open()
-FakeAPIClient(outcomes:gatesByCallIndex:)                 // per-call gating for MutationQueue races
+let fake = FakeAPIClient(outcomes: [.success])
+let gate = await fake.hold(call: 0) // register before starting the operation
+// Start work, observe the in-flight state, then release the call.
+gate.open()
+// FakeAPIClient uses TestCommons ScriptedResponder for per-call gating.
 
 // Pattern for isolated NetworkClient tests:
-let session = makeTestSession()
+let stub = try TestHTTPStub()
+defer { stub.invalidate() }
+let session = stub.session
 let config = NetworkClientConfiguration(session: session, retryDelay: 0)
 let client = NetworkClient(configuration: config)
-TestURLProtocol.setResponses([.success(data)], for: "test-id")
+stub.setResponses([.success(data)], for: "test-id")
 let endpoint = makeEndpointWithTestId("test-id")
 ```
 
@@ -255,7 +262,7 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder
 - All actors use instance isolation -- no locks or GCD in production code
-- `TestURLProtocolState` uses `NSLock` because `URLProtocol.startLoading()` is synchronous
+- `TestHTTPStub` uses TestCommons `TestValueBox` and `ScriptedValues` for synchronous response routing
 - `MutationRequest` is `Codable` (not a closure) so a durable `MutationStore` can serialize
   "which endpoint plus what body" and replay it after relaunch
 - Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
@@ -287,3 +294,9 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 | [GRAPHQL.md](GRAPHQL.md) | GraphQL-over-HTTP recipe and limitations |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting and integration security boundaries |
 | [.claude/skills/](.claude/skills) | Repo-specific agent workflows: adding components, tests, concurrency review, pre-push checks |
+
+## Conditional body readability
+
+Short, obvious early exits may stay on one line (for example, `guard let self else { return }`).
+Use multiline bodies for complex conditions, error construction, or meaningful work.
+This is a review guideline; Apple’s official `swift format` remains the only formatting tool.

@@ -26,7 +26,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 ## Requirements
 
 - Swift 6.2+
-- iOS 17.0+ / macOS 14.0+
+- iOS 18.0+ / macOS 15.0+
 
 ## Dependencies
 

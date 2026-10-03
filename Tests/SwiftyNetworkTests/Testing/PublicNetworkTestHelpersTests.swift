@@ -7,8 +7,10 @@ import Testing
 struct PublicNetworkTestHelpersTests {
     @Test("Repeated 401 responses exhaust the refresh budget and close the retried attempt")
     func repeatedUnauthorizedResponses() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let id = UUID().uuidString
-        TestURLProtocol.setResponses([.status(401), .status(401)], for: id)
+        stub.setResponses([.status(401), .status(401)], for: id)
         let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: true,
             refreshedAuthorization: .bearer(token: "refreshed")
@@ -16,7 +18,7 @@ struct PublicNetworkTestHelpersTests {
         let recorder = NetworkInstrumentationRecorder()
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
-                session: makeTestSession(), authorizationProvider: provider,
+                session: stub.session, authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1, retryDelay: 0, instrumentation: recorder
             ))
 
@@ -28,7 +30,7 @@ struct PublicNetworkTestHelpersTests {
 
         #expect(await provider.refreshCallCount == 1)
         #expect(await provider.rejectedAuthorizations == [.bearer(token: "original")])
-        #expect(TestURLProtocol.getLastRequestHeaders(for: id)?["Authorization"] == "Bearer refreshed")
+        #expect(stub.getLastRequestHeaders(for: id)?["Authorization"] == "Bearer refreshed")
         let started = await recorder.started
         let retried = await recorder.retried
         let failed = await recorder.failed
@@ -47,8 +49,10 @@ struct PublicNetworkTestHelpersTests {
 
     @Test("A failed refresh retains the rejected credential and never starts another attempt")
     func failedRefreshKeepsOriginalAuthorization() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let id = UUID().uuidString
-        TestURLProtocol.setResponses([.status(401)], for: id)
+        stub.setResponses([.status(401)], for: id)
         let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: false,
             refreshedAuthorization: .bearer(token: "must-not-be-used")
@@ -56,7 +60,7 @@ struct PublicNetworkTestHelpersTests {
         let recorder = NetworkInstrumentationRecorder()
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
-                session: makeTestSession(), authorizationProvider: provider,
+                session: stub.session, authorizationProvider: provider,
                 retryDelay: 0, instrumentation: recorder
             ))
 
@@ -82,8 +86,10 @@ struct PublicNetworkTestHelpersTests {
 
     @Test("Malformed JSON after a refresh records decoding failure rather than completion")
     func decodingFailureAfterRefresh() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let id = UUID().uuidString
-        TestURLProtocol.setResponses([.status(401), .success(Data("not-json".utf8))], for: id)
+        stub.setResponses([.status(401), .success(Data("not-json".utf8))], for: id)
         let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: true,
             refreshedAuthorization: .bearer(token: "refreshed")
@@ -91,7 +97,7 @@ struct PublicNetworkTestHelpersTests {
         let recorder = NetworkInstrumentationRecorder()
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
-                session: makeTestSession(), authorizationProvider: provider,
+                session: stub.session, authorizationProvider: provider,
                 retryDelay: 0, instrumentation: recorder
             ))
 
@@ -116,15 +122,17 @@ struct PublicNetworkTestHelpersTests {
 
     @Test("One public recorder correlates concurrent successful and failed requests independently")
     func concurrentMixedOutcomes() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let successID = UUID().uuidString
         let failureID = UUID().uuidString
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
-        TestURLProtocol.setResponses([.success(try JSONEncoder().encode(user))], for: successID)
-        TestURLProtocol.setResponses([.status(500)], for: failureID)
+        stub.setResponses([.success(try JSONEncoder().encode(user))], for: successID)
+        stub.setResponses([.status(500)], for: failureID)
         let recorder = NetworkInstrumentationRecorder()
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
-                session: makeTestSession(), instrumentation: recorder
+                session: stub.session, instrumentation: recorder
             ))
 
         try await withThrowingTaskGroup(of: Void.self) { group in
