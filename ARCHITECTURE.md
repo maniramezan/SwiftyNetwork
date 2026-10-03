@@ -1,6 +1,6 @@
 # SwiftyNetwork architecture
 
-The package uses Swift 6.2 tooling and Swift 6 language mode, iOS 17+, and macOS 14+,
+The package uses Swift 6.2 tooling and Swift 6 language mode, iOS 18+, and macOS 15+,
 with SwiftCommons for shared utilities (default traits disabled). It has no
 package-wide main-actor default isolation or upcoming-feature flags. `Package.swift` is the source of truth.
 

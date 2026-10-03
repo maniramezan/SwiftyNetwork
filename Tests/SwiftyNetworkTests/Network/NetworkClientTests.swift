@@ -1,4 +1,5 @@
 import Foundation
+import TestCommons
 import Testing
 
 @testable import SwiftyNetwork
@@ -13,13 +14,15 @@ func testNetworkClientConformsToAPIClient() {
 struct NetworkClientIntegrationTests {
     @Test("NetworkClient decodes response and counts requests")
     func testNetworkClientDecodesResponseAndCountsRequests() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "decode-success"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.success(data)],
             for: testId
         )
@@ -34,7 +37,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient applies authorization provider when endpoint has none")
     func testNetworkClientAppliesAuthorizationProvider() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "token-123"),
             refreshResult: false
@@ -43,7 +48,7 @@ struct NetworkClientIntegrationTests {
         let client = NetworkClient(configuration: configuration)
         let testId = "auth-provider"
         let payload = try JSONEncoder().encode(TestUser(id: "2", name: "Lin", email: "lin@example.com"))
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.success(payload)],
             for: testId
         )
@@ -51,12 +56,14 @@ struct NetworkClientIntegrationTests {
         let endpoint = makeEndpointWithTestId(testId)
         _ = try await client.request(endpoint, responseType: TestUser.self)
 
-        let headers = TestURLProtocol.getLastRequestHeaders(for: testId)
+        let headers = stub.getLastRequestHeaders(for: testId)
         #expect(headers?["Authorization"] == "Bearer token-123")
     }
 
     @Test("NetworkClient uses endpoint authorization over provider")
     func testNetworkClientUsesEndpointAuthorization() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         struct AuthEndpoint: NetworkEndpoint {
             let baseURL = "https://api.test.com"
             let authorization: AuthorizationType = .basicEncoded(credential: "basic-456")
@@ -65,7 +72,7 @@ struct NetworkClientIntegrationTests {
             var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: "endpoint-auth")] }
         }
 
-        let session = makeTestSession()
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "should-not-use"),
             refreshResult: false
@@ -73,19 +80,21 @@ struct NetworkClientIntegrationTests {
         let configuration = NetworkClientConfiguration(session: session, authorizationProvider: provider)
         let client = NetworkClient(configuration: configuration)
         let payload = try JSONEncoder().encode(TestUser(id: "3", name: "Kai", email: "kai@example.com"))
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.success(payload)],
             for: "endpoint-auth"
         )
 
         _ = try await client.request(AuthEndpoint(), responseType: TestUser.self)
-        let headers = TestURLProtocol.getLastRequestHeaders(for: "endpoint-auth")
+        let headers = stub.getLastRequestHeaders(for: "endpoint-auth")
         #expect(headers?["Authorization"] == "Basic basic-456")
     }
 
     @Test("NetworkClient refreshes authorization on 401 and retries")
     func testNetworkClientRefreshesOnUnauthorized() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
             refreshResult: true,
@@ -101,7 +110,7 @@ struct NetworkClientIntegrationTests {
         let user = TestUser(id: "4", name: "Mo", email: "mo@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "auth-refresh"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [
                 .status(401),
                 .success(data),
@@ -122,7 +131,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient reports authorization refresh failure")
     func testNetworkClientRefreshFailure() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
             refreshResult: false
@@ -134,7 +145,7 @@ struct NetworkClientIntegrationTests {
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "auth-refresh-fail"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401)],
             for: testId
         )
@@ -153,11 +164,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps http status to NetworkError")
     func testNetworkClientMapsStatusToError() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "status-map"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(404)],
             for: testId
         )
@@ -175,11 +188,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps decoding failures")
     func testNetworkClientDecodingFailure() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "decode-fail"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.success(Data("invalid".utf8))],
             for: testId
         )
@@ -197,11 +212,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient supports successful empty responses")
     func testNetworkClientSupportsEmptyResponse() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "empty-response"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(204)],
             for: testId
         )
@@ -214,11 +231,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient no-body request supports successful empty responses")
     func testNetworkClientNoBodyRequestSupportsEmptyResponse() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "no-body-empty-response"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(204)],
             for: testId
         )
@@ -230,11 +249,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps URL errors")
     func testNetworkClientMapsURLError() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "url-error"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.failure(URLError(.timedOut))],
             for: testId
         )
@@ -254,13 +275,15 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient encodes Encodable body and sends request")
     func testNetworkClientEncodesBody() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "encode-body"
         let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let data = try JSONEncoder().encode(responseUser)
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.success(data)],
             for: testId
         )
@@ -285,13 +308,15 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient adds Content-Type application/json for encoded bodies")
     func testNetworkClientAddsJSONContentType() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "encode-body-content-type"
         let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let data = try JSONEncoder().encode(responseUser)
-        TestURLProtocol.setResponses([.success(data)], for: testId)
+        stub.setResponses([.success(data)], for: testId)
 
         struct PostEndpoint: NetworkEndpoint {
             let testId: String
@@ -304,19 +329,21 @@ struct NetworkClientIntegrationTests {
         let bodyPayload = TestUser(id: "new", name: "New", email: "new@example.com")
         _ = try await client.request(PostEndpoint(testId: testId), body: bodyPayload, responseType: TestUser.self)
 
-        let headers = TestURLProtocol.getLastRequestHeaders(for: testId)
+        let headers = stub.getLastRequestHeaders(for: testId)
         #expect(contentType(in: headers) == "application/json")
     }
 
     @Test("NetworkClient preserves endpoint Content-Type for encoded bodies")
     func testNetworkClientPreservesEndpointContentType() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "encode-body-custom-content-type"
         let responseUser = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let data = try JSONEncoder().encode(responseUser)
-        TestURLProtocol.setResponses([.success(data)], for: testId)
+        stub.setResponses([.success(data)], for: testId)
 
         struct PostEndpoint: NetworkEndpoint {
             let testId: String
@@ -330,7 +357,7 @@ struct NetworkClientIntegrationTests {
         let bodyPayload = TestUser(id: "new", name: "New", email: "new@example.com")
         _ = try await client.request(PostEndpoint(testId: testId), body: bodyPayload, responseType: TestUser.self)
 
-        let headers = TestURLProtocol.getLastRequestHeaders(for: testId)
+        let headers = stub.getLastRequestHeaders(for: testId)
         #expect(contentType(in: headers) == "application/vnd.api+json")
     }
 
@@ -341,7 +368,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient throws encodingFailed for non-encodable body")
     func testNetworkClientEncodingFailure() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
 
@@ -368,11 +397,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps 403 to forbidden error")
     func testNetworkClientMaps403() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "status-403"
-        TestURLProtocol.setResponses([.status(403)], for: testId)
+        stub.setResponses([.status(403)], for: testId)
 
         let endpoint = makeEndpointWithTestId(testId)
         await #expect {
@@ -387,11 +418,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps 408 to timeout error")
     func testNetworkClientMaps408() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "status-408"
-        TestURLProtocol.setResponses([.status(408)], for: testId)
+        stub.setResponses([.status(408)], for: testId)
 
         let endpoint = makeEndpointWithTestId(testId)
         await #expect {
@@ -406,11 +439,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps 500 to serverError")
     func testNetworkClientMaps500() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "status-500"
-        TestURLProtocol.setResponses([.status(500)], for: testId)
+        stub.setResponses([.status(500)], for: testId)
 
         let endpoint = makeEndpointWithTestId(testId)
         await #expect {
@@ -425,11 +460,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps notConnectedToInternet URL error")
     func testNetworkClientMapsNoInternet() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "no-internet"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.failure(URLError(.notConnectedToInternet))],
             for: testId
         )
@@ -447,11 +484,13 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps unrecognized URLError codes to underlying")
     func testNetworkClientMapsUnrecognizedURLErrorToUnderlying() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "unrecognized-url-error"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.failure(URLError(.cannotFindHost))],
             for: testId
         )
@@ -469,13 +508,15 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient maps non-URLError transport failures to underlying")
     func testNetworkClientMapsNonURLErrorToUnderlying() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         struct CustomTransportError: Error {}
 
-        let session = makeTestSession()
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "custom-transport-error"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.failure(CustomTransportError())],
             for: testId
         )
@@ -493,13 +534,15 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient emits debug logs when logLevel is debug")
     func testNetworkClientDebugLogging() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let configuration = NetworkClientConfiguration(session: session, logLevel: .debug)
         let client = NetworkClient(configuration: configuration)
         let testId = "debug-logging"
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         let data = try JSONEncoder().encode(user)
-        TestURLProtocol.setResponses([.success(data)], for: testId)
+        stub.setResponses([.success(data)], for: testId)
 
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -510,7 +553,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient retryDelay delays before retry on 401")
     func testNetworkClientRetryDelayOnUnauthorized() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
             refreshResult: true,
@@ -527,7 +572,7 @@ struct NetworkClientIntegrationTests {
         let user = TestUser(id: "delay", name: "Delay", email: "delay@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "retry-delay"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401), .success(data)],
             for: testId
         )
@@ -544,7 +589,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient retryDelay of zero does not add delay")
     func testNetworkClientZeroRetryDelay() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
             refreshResult: true,
@@ -560,7 +607,7 @@ struct NetworkClientIntegrationTests {
         let user = TestUser(id: "nodelay", name: "NoDelay", email: "nodelay@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "zero-delay"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401), .success(data)],
             for: testId
         )
@@ -579,7 +626,9 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient throws unauthorized when max retries exhausted")
     func testNetworkClientMaxRetriesExhausted() async throws {
-        let session = makeTestSession()
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "expired"),
             refreshResult: true,
@@ -594,7 +643,7 @@ struct NetworkClientIntegrationTests {
         let client = NetworkClient(configuration: configuration)
         let testId = "max-retries"
         // Both responses are 401 — refresh succeeds but token still rejected
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401), .status(401)],
             for: testId
         )
@@ -616,6 +665,8 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient does not refresh provider when endpoint authorization was used")
     func testNetworkClientDoesNotRefreshProviderForEndpointAuthorization() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         struct AuthEndpoint: NetworkEndpoint {
             let testId: String
             let baseURL = "https://api.test.com"
@@ -625,7 +676,7 @@ struct NetworkClientIntegrationTests {
             var authorization: AuthorizationType { .bearer(token: "endpoint-token") }
         }
 
-        let session = makeTestSession()
+        let session = stub.session
         let provider = TestAuthorizationProvider(
             current: .bearer(token: "provider-token"),
             refreshResult: true,
@@ -639,7 +690,7 @@ struct NetworkClientIntegrationTests {
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "endpoint-auth-401"
-        TestURLProtocol.setResponses(
+        stub.setResponses(
             [.status(401)],
             for: testId
         )
@@ -659,22 +710,29 @@ struct NetworkClientIntegrationTests {
 
     @Test("NetworkClient keeps request configuration stable across awaits")
     func testNetworkClientUsesConfigurationSnapshot() async throws {
-        let initialSession = makeTestSession()
-        let replacementSession = makeTestSession()
-        let configuration = NetworkClientConfiguration(session: initialSession)
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let initialSession = stub.session
+        let replacementStub = try TestHTTPStub()
+        defer { replacementStub.invalidate() }
+        let provider = GatedAuthorizationProvider()
+        defer { provider.release.open() }
+        let configuration = NetworkClientConfiguration(session: initialSession, authorizationProvider: provider)
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "snapshot", name: "Stable", email: "stable@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "configuration-snapshot"
-        TestURLProtocol.setResponses(
-            [.success(data, delay: 0.05)],
+        stub.setResponses(
+            [.success(data)],
             for: testId
         )
 
         let endpoint = makeEndpointWithTestId(testId)
         async let response = client.request(endpoint, responseType: TestUser.self)
-        await Task.yield()
-        await client.updateConfiguration(NetworkClientConfiguration(session: replacementSession, logLevel: .debug))
+        _ = try await waitUntil(
+            timeout: .seconds(2), operation: { await provider.callCount }, matching: { $0 == 1 })
+        await client.updateConfiguration(NetworkClientConfiguration(session: replacementStub.session, logLevel: .debug))
+        provider.release.open()
 
         let fetched = try await response
 

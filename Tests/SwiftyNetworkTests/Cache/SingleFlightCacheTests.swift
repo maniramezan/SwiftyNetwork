@@ -1,4 +1,5 @@
 import Foundation
+import TestCommons
 import Testing
 
 @testable import SwiftyNetwork
@@ -64,16 +65,16 @@ struct SingleFlightCacheTests {
     func concurrentMissesCoalesce() async throws {
         let cache = SingleFlightCache(InMemoryCache<String>())
         let fetchCount = Counter()
-        let gate = Gate()
+        let gate = AsyncGate()
 
         async let first = cache.value(forKey: CacheKey("k")) {
             await fetchCount.increment()
-            await gate.wait()
+            try await gate.wait()
             return "fetched"
         }
         async let second = cache.value(forKey: CacheKey("k")) {
             await fetchCount.increment()
-            await gate.wait()
+            try await gate.wait()
             return "fetched"
         }
 
@@ -81,7 +82,7 @@ struct SingleFlightCacheTests {
         // gate) before releasing it, so the second call is guaranteed to
         // observe an in-flight fetch rather than racing to start its own.
         while await fetchCount.value == 0 { await Task.yield() }
-        await gate.open()
+        gate.open()
 
         let (firstResult, secondResult) = try await (first, second)
 
