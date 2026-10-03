@@ -20,7 +20,7 @@ let package = Package(
         // helpers, so it opts out of SwiftCommons' SwiftData-backed APIs.
         .package(url: "https://github.com/maniramezan/SwiftCommons.git", from: "0.14.0", traits: []),
         // Shared test helpers, linked into the test target only.
-        .package(url: "https://github.com/maniramezan/SwiftTestCommons.git", from: "0.1.0"),
+        .package(url: "https://github.com/maniramezan/SwiftTestCommons.git", from: "0.3.0"),
     ],
     targets: [
         .target(

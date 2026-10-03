@@ -12,12 +12,14 @@ struct RemoteDataCacheTests {
 
     @Test("Fetches from the network on a miss and caches the result")
     func fetchesAndCaches() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "fetch-and-cache"
         let url = makeURL(testId: testId)
         let expected = Data([0xDE, 0xAD, 0xBE, 0xEF])
-        TestURLProtocol.setResponses([.success(expected)], for: testId)
+        stub.setResponses([.success(expected)], for: testId)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
         let first = try await cache.data(for: url)
         #expect(first == expected)
@@ -32,16 +34,15 @@ struct RemoteDataCacheTests {
 
     @Test("Concurrent requests for the same URL coalesce into a single fetch")
     func concurrentRequestsCoalesce() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "coalesce"
         let url = makeURL(testId: testId)
         let expected = Data([1, 2, 3])
-        // A small delay keeps the first call in flight long enough for the
-        // second to reliably observe it, without relying on exact timing
-        // for correctness -- only one response is queued, so if two real
-        // network calls happened, the second would fail outright.
-        TestURLProtocol.setResponses([.success(expected, delay: 0.05)], for: testId)
+        // One scripted response makes a duplicate network fetch fail.
+        stub.setResponses([.success(expected)], for: testId)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
         async let first = cache.data(for: url)
         async let second = cache.data(for: url)
@@ -49,15 +50,18 @@ struct RemoteDataCacheTests {
 
         #expect(firstResult == expected)
         #expect(secondResult == expected)
+        #expect(stub.requests.count == 1)
     }
 
     @Test("Maps a non-2xx HTTP status to NetworkError.serverError")
-    func mapsServerError() async {
+    func mapsServerError() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "server-error"
         let url = makeURL(testId: testId)
-        TestURLProtocol.setResponses([.status(500)], for: testId)
+        stub.setResponses([.status(500)], for: testId)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
         await #expect(throws: NetworkError.self) {
             try await cache.data(for: url)
@@ -66,7 +70,9 @@ struct RemoteDataCacheTests {
     }
 
     @Test("Maps 4xx statuses the same way NetworkClient does")
-    func mapsClientErrorsLikeNetworkClient() async {
+    func mapsClientErrorsLikeNetworkClient() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let cases: [(status: Int, expected: NetworkErrorClassification)] = [
             (401, .unauthorized),
             (403, .forbidden),
@@ -74,11 +80,11 @@ struct RemoteDataCacheTests {
             (408, .timeout),
             (429, .serverError(statusCode: 429)),
         ]
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
         for (status, expected) in cases {
             let testId = "status-mapping-\(status)"
-            TestURLProtocol.setResponses([.status(status)], for: testId)
+            stub.setResponses([.status(status)], for: testId)
             do {
                 _ = try await cache.data(for: makeURL(testId: testId))
                 Issue.record("Expected status \(status) to throw")
@@ -92,11 +98,13 @@ struct RemoteDataCacheTests {
 
     @Test("Maps a transport failure to the corresponding NetworkError classification")
     func mapsTransportFailure() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "transport-failure"
         let url = makeURL(testId: testId)
-        TestURLProtocol.setResponses([.failure(URLError(.notConnectedToInternet))], for: testId)
+        stub.setResponses([.failure(URLError(.notConnectedToInternet))], for: testId)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
         do {
             _ = try await cache.data(for: url)
@@ -110,32 +118,36 @@ struct RemoteDataCacheTests {
 
     @Test("removeValue evicts a cached entry so the next call fetches again")
     func removeValueEvicts() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "remove-value"
         let url = makeURL(testId: testId)
         let first = Data([1])
         let second = Data([2])
-        TestURLProtocol.setResponses([.success(first)], for: testId)
+        stub.setResponses([.success(first)], for: testId)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
         #expect(try await cache.data(for: url) == first)
 
         await cache.removeValue(for: url)
         #expect(await cache.cachedData(for: url) == nil)
 
-        TestURLProtocol.setResponses([.success(second)], for: testId)
+        stub.setResponses([.success(second)], for: testId)
         #expect(try await cache.data(for: url) == second)
     }
 
     @Test("removeAll clears every cached entry")
     func removeAllClears() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let idA = "remove-all-a"
         let idB = "remove-all-b"
         let urlA = makeURL(testId: idA)
         let urlB = makeURL(testId: idB)
-        TestURLProtocol.setResponses([.success(Data([1]))], for: idA)
-        TestURLProtocol.setResponses([.success(Data([2]))], for: idB)
+        stub.setResponses([.success(Data([1]))], for: idA)
+        stub.setResponses([.success(Data([2]))], for: idB)
 
-        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: makeTestSession())
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
         _ = try await cache.data(for: urlA)
         _ = try await cache.data(for: urlB)
 
@@ -147,15 +159,17 @@ struct RemoteDataCacheTests {
 
     @Test("Composes with LayeredCache for app-supplied memory + disk layering")
     func composesWithLayeredCache() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
         let testId = "layered"
         let url = makeURL(testId: testId)
         let expected = Data([9, 9, 9])
-        TestURLProtocol.setResponses([.success(expected)], for: testId)
+        stub.setResponses([.success(expected)], for: testId)
 
         let memory = InMemoryCache<Data>(maxSize: 50)
         let disk = TestDiskDataCache()
         let layered = LayeredCache(memoryCache: memory, persistentCache: disk)
-        let cache = RemoteDataCache(cache: layered, session: makeTestSession())
+        let cache = RemoteDataCache(cache: layered, session: stub.session)
 
         let result = try await cache.data(for: url)
 

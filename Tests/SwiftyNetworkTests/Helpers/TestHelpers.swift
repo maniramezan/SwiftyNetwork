@@ -16,110 +16,6 @@ struct TestEndpoint: NetworkEndpoint {
     var method: HTTPMethod { .get }
 }
 
-final class TestURLProtocolState: @unchecked Sendable {
-    private let lock = NSLock()
-    private var responsesById = [String: [TestURLProtocol.Response]]()
-    private var lastRequestHeadersById = [String: [String: String]?]()
-
-    func setResponses(_ r: [TestURLProtocol.Response], for id: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        responsesById[id] = r
-    }
-
-    func dequeueResponse(for id: String?) -> TestURLProtocol.Response? {
-        lock.lock()
-        defer { lock.unlock() }
-        let key = id ?? "__default"
-        guard var arr = responsesById[key], !arr.isEmpty else { return nil }
-        let resp = arr.removeFirst()
-        responsesById[key] = arr
-        return resp
-    }
-
-    func setLastRequestHeaders(_ h: [String: String]?, for id: String?) {
-        lock.lock()
-        defer { lock.unlock() }
-        lastRequestHeadersById[id ?? "__default"] = h
-    }
-
-    func getLastRequestHeaders(for id: String?) -> [String: String]? {
-        lock.lock()
-        defer { lock.unlock() }
-        return lastRequestHeadersById[id ?? "__default"] ?? nil
-    }
-
-    func reset() {
-        lock.lock()
-        defer { lock.unlock() }
-        responsesById.removeAll()
-        lastRequestHeadersById.removeAll()
-    }
-}
-
-final class TestURLProtocol: URLProtocol {
-    struct Response {
-        let statusCode: Int
-        let data: Data?
-        let expectedAuthorization: String?
-        let error: Error?
-        let delay: TimeInterval
-
-        /// Creates a successful response with the given data.
-        static func success(_ data: Data, statusCode: Int = 200, delay: TimeInterval = 0) -> Response {
-            Response(statusCode: statusCode, data: data, expectedAuthorization: nil, error: nil, delay: delay)
-        }
-
-        /// Creates a response with a specific status code.
-        static func status(_ code: Int, data: Data = Data(), delay: TimeInterval = 0) -> Response {
-            Response(statusCode: code, data: data, expectedAuthorization: nil, error: nil, delay: delay)
-        }
-
-        /// Creates a failure response with an error.
-        static func failure(_ error: Error, delay: TimeInterval = 0) -> Response {
-            Response(statusCode: 0, data: nil, expectedAuthorization: nil, error: error, delay: delay)
-        }
-    }
-    private static let state = TestURLProtocolState()
-
-    static func setResponses(_ r: [Response], for id: String? = nil) { state.setResponses(r, for: id ?? "__default") }
-    static func dequeueResponse(for id: String?) -> Response? { state.dequeueResponse(for: id) }
-    static func setLastRequestHeaders(_ h: [String: String]?, for id: String? = nil) {
-        state.setLastRequestHeaders(h, for: id)
-    }
-    static func getLastRequestHeaders(for id: String? = nil) -> [String: String]? {
-        state.getLastRequestHeaders(for: id)
-    }
-    static func reset() { state.reset() }
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let testId = request.url.flatMap {
-            URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "test-id" })?
-                .value
-        }
-        TestURLProtocol.setLastRequestHeaders(request.allHTTPHeaderFields, for: testId)
-        guard let resp = Self.dequeueResponse(for: testId) else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        if resp.delay > 0 {
-            Thread.sleep(forTimeInterval: resp.delay)
-        }
-        if let error = resp.error {
-            client?.urlProtocol(self, didFailWithError: error)
-            return
-        }
-        let http = HTTPURLResponse(
-            url: request.url!, statusCode: resp.statusCode, httpVersion: "HTTP/1.1", headerFields: nil)!
-        client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
-        if let data = resp.data { client?.urlProtocol(self, didLoad: data) }
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
-
 func makeEndpointWithTestId(_ id: String) -> some NetworkEndpoint {
     struct E: NetworkEndpoint {
         let testId: String
@@ -132,12 +28,6 @@ func makeEndpointWithTestId(_ id: String) -> some NetworkEndpoint {
     return E(testId: id)
 }
 
-func makeTestSession() -> URLSession {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [TestURLProtocol.self]
-    return URLSession(configuration: configuration)
-}
-
 /// A scriptable ``APIClient`` for testing ``MutationQueue`` without going
 /// through `URLSession`. Each call to `request` consumes the next queued
 /// outcome and records the endpoint's path for later assertions.
@@ -147,52 +37,34 @@ actor FakeAPIClient: APIClient {
         case failure(any Error & Sendable)
     }
 
-    private var outcomes: [Outcome]
-    private let delayNanoseconds: UInt64
-    private let gate: AsyncGate?
-    /// Per-call gates, indexed by 0-based call number. Lets a test block a
-    /// *specific* call (e.g. only the second attempt) rather than every call,
-    /// which a single shared `AsyncGate` can't express once it's been opened once.
-    private let gatesByCallIndex: [Int: AsyncGate]
-    private(set) var callCount = 0
-    private(set) var recordedRequests: [MutationRequest] = []
+    private let responder: ScriptedResponder<MutationRequest, EmptyResponse>
 
-    init(
-        outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: AsyncGate? = nil,
-        gatesByCallIndex: [Int: AsyncGate] = [:]
-    ) {
-        self.outcomes = outcomes
-        self.delayNanoseconds = delayNanoseconds
-        self.gate = gate
-        self.gatesByCallIndex = gatesByCallIndex
+    var callCount: Int { get async { await responder.callCount } }
+    var recordedRequests: [MutationRequest] { get async { await responder.requests } }
+
+    init(outcomes: [Outcome]) {
+        responder = ScriptedResponder(
+            outcomes.map { outcome in
+                switch outcome {
+                case .success: .success(EmptyResponse())
+                case .failure(let error): .failure(error)
+                }
+            }, fallback: .success(EmptyResponse()))
+    }
+
+    func hold(call: Int) async -> AsyncGate {
+        await responder.hold(call: call)
     }
 
     func request<T: Decodable & Sendable>(
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type
     ) async throws -> T {
-        let callIndex = callCount
-        callCount += 1
-        recordedRequests.append(MutationRequest(endpoint: endpoint))
-
-        if let gate {
-            try await gate.wait()
+        let response = try await responder.respond(to: MutationRequest(endpoint: endpoint))
+        guard let value = response as? T else {
+            throw NetworkError.invalidData
         }
-        if let perCallGate = gatesByCallIndex[callIndex] {
-            try await perCallGate.wait()
-        }
-        if delayNanoseconds > 0 {
-            try? await Task.sleep(nanoseconds: delayNanoseconds)
-        }
-
-        let outcome = outcomes.isEmpty ? .success : outcomes.removeFirst()
-        switch outcome {
-        case .success:
-            guard let value = EmptyResponse() as? T else { throw NetworkError.invalidData }
-            return value
-        case .failure(let error):
-            throw error
-        }
+        return value
     }
 }
 

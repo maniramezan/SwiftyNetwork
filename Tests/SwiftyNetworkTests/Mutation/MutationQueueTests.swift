@@ -93,8 +93,8 @@ struct MutationQueueTests {
 
     @Test("Re-enqueueing before the in-flight call finishes coalesces to the latest desired state")
     func coalescesReenqueueDuringInFlightCall() async {
-        let gate = AsyncGate()
-        let fake = FakeAPIClient(outcomes: [.success, .success], gate: gate)
+        let fake = FakeAPIClient(outcomes: [.success, .success])
+        let gate = await fake.hold(call: 0)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
@@ -153,8 +153,8 @@ struct MutationQueueTests {
 
     @Test("A non-retryable failure does not discard a replacement enqueued while it was in flight")
     func nonRetryableFailurePreservesInFlightReplacement() async {
-        let gate = AsyncGate()
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden), .success], gate: gate)
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden), .success])
+        let gate = await fake.hold(call: 0)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
@@ -190,12 +190,11 @@ struct MutationQueueTests {
         // Only the terminal (second, index 1) attempt is gated: the first
         // attempt fails and schedules a retry, then the retry blocks so the
         // test can supersede the key while that terminal attempt is in flight.
-        let terminalAttemptGate = AsyncGate()
         let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success],
-            gatesByCallIndex: [1: terminalAttemptGate]
+            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
         )
+        let terminalAttemptGate = await fake.hold(call: 1)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: policy)
         let stream = await queue.events()
@@ -268,9 +267,10 @@ struct MutationQueueTests {
     @Test("Independent keys are processed without blocking each other")
     func independentKeysProcessConcurrently() async {
         let slowFake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success],
-            delayNanoseconds: 20_000_000
+            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
         )
+        let slowGate = await slowFake.hold(call: 0)
+        defer { slowGate.open() }
         let fastFake = FakeAPIClient(outcomes: [.success])
 
         // A single queue can only hold one client, so exercise both keys
@@ -328,8 +328,8 @@ struct MutationQueueTests {
 
     @Test("Cancelling an in-flight mutation reports a cancellation and ignores its late result")
     func cancelInFlightMutation() async throws {
-        let firstCall = AsyncGate()
-        let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
+        let fake = FakeAPIClient(outcomes: [.success, .success])
+        let firstCall = await fake.hold(call: 0)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let key: MutationKey = "like:video:42"
@@ -358,8 +358,8 @@ struct MutationQueueTests {
 
     @Test("A key can be enqueued again right after it is cancelled")
     func enqueueAfterCancel() async {
-        let firstCall = AsyncGate()
-        let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
+        let fake = FakeAPIClient(outcomes: [.success, .success])
+        let firstCall = await fake.hold(call: 0)
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
         let key: MutationKey = "like:video:42"
