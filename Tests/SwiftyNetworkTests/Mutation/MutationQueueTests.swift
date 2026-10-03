@@ -1,4 +1,5 @@
 import Foundation
+import TestCommons
 import Testing
 
 @testable import SwiftyNetwork
@@ -92,7 +93,7 @@ struct MutationQueueTests {
 
     @Test("Re-enqueueing before the in-flight call finishes coalesces to the latest desired state")
     func coalescesReenqueueDuringInFlightCall() async {
-        let gate = Gate()
+        let gate = AsyncGate()
         let fake = FakeAPIClient(outcomes: [.success, .success], gate: gate)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
@@ -111,7 +112,7 @@ struct MutationQueueTests {
         // rather than racing a fixed delay.
         while await fake.callCount == 0 { await Task.yield() }
         await queue.enqueue(unliked, key: "like:video:42")
-        await gate.open()
+        gate.open()
         let succeeded = await finalEvent
 
         #expect(succeeded != nil)
@@ -152,7 +153,7 @@ struct MutationQueueTests {
 
     @Test("A non-retryable failure does not discard a replacement enqueued while it was in flight")
     func nonRetryableFailurePreservesInFlightReplacement() async {
-        let gate = Gate()
+        let gate = AsyncGate()
         let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden), .success], gate: gate)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
@@ -172,7 +173,7 @@ struct MutationQueueTests {
         await queue.enqueue(liked, key: "like:video:42")
         while await fake.callCount == 0 { await Task.yield() }
         await queue.enqueue(unliked, key: "like:video:42")
-        await gate.open()
+        gate.open()
         let terminalEvent = await finalEvent
 
         // The old (now-superseded) call fails permanently, but "unliked" was
@@ -189,7 +190,7 @@ struct MutationQueueTests {
         // Only the terminal (second, index 1) attempt is gated: the first
         // attempt fails and schedules a retry, then the retry blocks so the
         // test can supersede the key while that terminal attempt is in flight.
-        let terminalAttemptGate = Gate()
+        let terminalAttemptGate = AsyncGate()
         let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
             outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success],
@@ -209,7 +210,7 @@ struct MutationQueueTests {
         await queue.enqueue(liked, key: "like:video:42")
         while await fake.callCount < 2 { await Task.yield() }
         await queue.enqueue(unliked, key: "like:video:42")
-        await terminalAttemptGate.open()
+        terminalAttemptGate.open()
         let succeeded = await finalEvent
 
         #expect(succeeded != nil)
@@ -327,7 +328,7 @@ struct MutationQueueTests {
 
     @Test("Cancelling an in-flight mutation reports a cancellation and ignores its late result")
     func cancelInFlightMutation() async throws {
-        let firstCall = Gate()
+        let firstCall = AsyncGate()
         let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
@@ -347,7 +348,7 @@ struct MutationQueueTests {
         #expect(await store.load(for: key) == nil)
 
         // Let the stale call finish; it must not publish success over the cancellation.
-        await firstCall.open()
+        firstCall.open()
         let otherEvents = await queue.events()
         await queue.enqueue(makeRequest(path: "/videos/7/like"), key: "like:video:7")
         _ = await firstEvent(in: otherEvents) { $0.key == "like:video:7" && $0.status == .succeeded }
@@ -357,7 +358,7 @@ struct MutationQueueTests {
 
     @Test("A key can be enqueued again right after it is cancelled")
     func enqueueAfterCancel() async {
-        let firstCall = Gate()
+        let firstCall = AsyncGate()
         let fake = FakeAPIClient(outcomes: [.success, .success], gatesByCallIndex: [0: firstCall])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
@@ -373,7 +374,7 @@ struct MutationQueueTests {
         #expect(await succeeded != nil)
         #expect(await fake.recordedRequests.last?.body == unliked.body)
 
-        await firstCall.open()
+        firstCall.open()
     }
 
     @Test("cancelAll clears persisted mutations and reports each one as cancelled")
@@ -396,7 +397,7 @@ struct MutationQueueTests {
     }
 
     @Test("Resume waits for cancellation before reading persisted mutations", arguments: [true, false])
-    func resumeWaitsForCancellation(cancelAll: Bool) async {
+    func resumeWaitsForCancellation(cancelAll: Bool) async throws {
         let store = CancellationGatedStore(request: makeRequest())
         let client = FakeAPIClient(outcomes: [])
         let queue = MutationQueue(client: client, store: store)
@@ -407,10 +408,10 @@ struct MutationQueueTests {
                 await queue.cancel("pending")
             }
         }
-        await store.loadStarted.wait()
+        try await store.loadStarted.wait()
         let resume = Task { await queue.resumePendingMutations() }
         while await queue.operations.queuedOperationCount == 0 { await Task.yield() }
-        await store.finishLoad.open()
+        store.finishLoad.open()
         await cancellation.value
         await resume.value
 
@@ -463,8 +464,8 @@ private actor RoutingAPIClient: APIClient {
 
 /// Suspends cancellation before its removal, leaving a request visible to an ungated resume.
 private actor CancellationGatedStore: MutationStore {
-    let loadStarted = Gate()
-    let finishLoad = Gate()
+    let loadStarted = AsyncGate()
+    let finishLoad = AsyncGate()
     private var request: MutationRequest?
 
     init(request: MutationRequest) { self.request = request }
@@ -472,8 +473,9 @@ private actor CancellationGatedStore: MutationStore {
     func save(_ request: MutationRequest, for key: MutationKey) { self.request = request }
 
     func load(for key: MutationKey) async -> MutationRequest? {
-        await loadStarted.open()
-        await finishLoad.wait()
+        loadStarted.open()
+        // `load` cannot throw; a cancelled wait reports nothing persisted.
+        guard (try? await finishLoad.wait()) != nil else { return nil }
         return request
     }
 

@@ -58,4 +58,4 @@ written safety invariant next to it.
 
 For each finding give: file:line, the interleaving that breaks (step by step),
 the observable symptom, and the minimal fix. Add a regression test that forces
-the interleaving with `Gate`s, not sleeps.
+the interleaving with TestCommons `AsyncGate`s, not sleeps.

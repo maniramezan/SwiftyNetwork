@@ -1,5 +1,6 @@
 import Foundation
 import SwiftyNetworkTesting
+import TestCommons
 
 @testable import SwiftyNetwork
 
@@ -137,26 +138,6 @@ func makeTestSession() -> URLSession {
     return URLSession(configuration: configuration)
 }
 
-/// A single-use rendezvous point: `wait()` suspends until `open()` is called
-/// (or returns immediately if `open()` already happened). Used to force a
-/// deterministic interleaving between a fake network call and a test's
-/// subsequent actions, instead of relying on a race won by a fixed delay.
-actor Gate {
-    private var isOpen = false
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func wait() async {
-        if isOpen { return }
-        await withCheckedContinuation { continuation = $0 }
-    }
-
-    func open() {
-        isOpen = true
-        continuation?.resume()
-        continuation = nil
-    }
-}
-
 /// A scriptable ``APIClient`` for testing ``MutationQueue`` without going
 /// through `URLSession`. Each call to `request` consumes the next queued
 /// outcome and records the endpoint's path for later assertions.
@@ -168,15 +149,18 @@ actor FakeAPIClient: APIClient {
 
     private var outcomes: [Outcome]
     private let delayNanoseconds: UInt64
-    private let gate: Gate?
+    private let gate: AsyncGate?
     /// Per-call gates, indexed by 0-based call number. Lets a test block a
     /// *specific* call (e.g. only the second attempt) rather than every call,
-    /// which a single shared `Gate` can't express once it's been opened once.
-    private let gatesByCallIndex: [Int: Gate]
+    /// which a single shared `AsyncGate` can't express once it's been opened once.
+    private let gatesByCallIndex: [Int: AsyncGate]
     private(set) var callCount = 0
     private(set) var recordedRequests: [MutationRequest] = []
 
-    init(outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: Gate? = nil, gatesByCallIndex: [Int: Gate] = [:]) {
+    init(
+        outcomes: [Outcome], delayNanoseconds: UInt64 = 0, gate: AsyncGate? = nil,
+        gatesByCallIndex: [Int: AsyncGate] = [:]
+    ) {
         self.outcomes = outcomes
         self.delayNanoseconds = delayNanoseconds
         self.gate = gate
@@ -192,10 +176,10 @@ actor FakeAPIClient: APIClient {
         recordedRequests.append(MutationRequest(endpoint: endpoint))
 
         if let gate {
-            await gate.wait()
+            try await gate.wait()
         }
         if let perCallGate = gatesByCallIndex[callIndex] {
-            await perCallGate.wait()
+            try await perCallGate.wait()
         }
         if delayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: delayNanoseconds)
@@ -212,33 +196,28 @@ actor FakeAPIClient: APIClient {
     }
 }
 
-/// Consumes exactly `count` events from an `AsyncStream`, or fewer if the
-/// stream never yields that many. Bounded so a failing assertion doesn't
-/// hang the test indefinitely.
-func collectEvents<T: Sendable>(_ stream: AsyncStream<T>, count: Int) async -> [T] {
-    var results: [T] = []
-    var iterator = stream.makeAsyncIterator()
-    for _ in 0..<count {
-        guard let event = await iterator.next() else { break }
-        results.append(event)
-    }
-    return results
+/// Collects up to `count` events, stopping early if the stream finishes or `timeout` expires.
+///
+/// Backed by `observeStream`, so a stalled stream cannot hang the test. A timeout finishes the
+/// stream, so only reuse a stream after this returns `count` events.
+func collectEvents<T: Sendable>(
+    _ stream: AsyncStream<T>, count: Int, timeout: Duration = .seconds(5)
+) async -> [T] {
+    (try? await observeStream(stream, maxCount: count, timeout: timeout).values) ?? []
 }
 
-/// Consumes events from an `AsyncStream` until `predicate` matches, giving up
-/// after `maxCount` events so a failing assertion doesn't hang the test
-/// indefinitely. Returns the matching event, or `nil` if it never arrived.
+/// Returns the first event matching `predicate`, or `nil` after `maxCount` events, the end of
+/// the stream, or `timeout`.
 func firstEvent<T: Sendable>(
     in stream: AsyncStream<T>,
     maxCount: Int = 50,
-    where predicate: (T) -> Bool
+    timeout: Duration = .seconds(5),
+    where predicate: @escaping @Sendable (T) -> Bool
 ) async -> T? {
-    var iterator = stream.makeAsyncIterator()
-    for _ in 0..<maxCount {
-        guard let event = await iterator.next() else { return nil }
-        if predicate(event) { return event }
-    }
-    return nil
+    guard let observation = try? await observeStream(stream, maxCount: maxCount, timeout: timeout, until: predicate),
+        observation.end == .matched
+    else { return nil }
+    return observation.values.last
 }
 
 typealias TestAuthorizationProvider = SwiftyNetworkTesting.TestAuthorizationProvider

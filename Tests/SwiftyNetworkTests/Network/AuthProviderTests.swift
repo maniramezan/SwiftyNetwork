@@ -1,4 +1,5 @@
 import Foundation
+import TestCommons
 import Testing
 
 @testable import SwiftyNetwork
@@ -121,20 +122,21 @@ struct OAuthAuthorizationProviderTests {
     }
 
     @Test("Explicit token updates supersede an in-flight refresh", arguments: [true, false])
-    func explicitUpdateSupersedesRefresh(refreshSucceeds: Bool) async {
-        let started = Gate()
-        let finish = Gate()
+    func explicitUpdateSupersedesRefresh(refreshSucceeds: Bool) async throws {
+        let started = AsyncGate()
+        let finish = AsyncGate()
         let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") {
-            await started.open()
-            await finish.wait()
+            started.open()
+            // The refresh closure cannot throw; treat a cancelled wait as a failed refresh.
+            guard (try? await finish.wait()) != nil else { return nil }
             return refreshSucceeds ? "stale-refresh-token" : nil
         }
         let refresh = Task { await provider.refreshAuthorizationIfNeeded() }
-        await started.wait()
+        try await started.wait()
         await provider.updateAccessToken("signed-in-token")
         // A late 401 can use the explicit token without waiting for the old refresh.
         #expect(await provider.refreshAuthorization(rejecting: .bearer(token: "old-token")))
-        await finish.open()
+        finish.open()
         #expect(await refresh.value)
         #expect(await provider.currentAuthorization() == .bearer(token: "signed-in-token"))
     }
