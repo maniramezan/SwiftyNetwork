@@ -1,13 +1,13 @@
 {
-  "originHash" : "d9ecfc609c3a4ed07b603a1e099e5e94cf0426e77c15f0f5f774b34a1bf19a37",
+  "originHash" : "3c11d3a78d460a8fb87c7bef46b80a922178189a2b64db4525b09f33f5b44ff7",
   "pins" : [
     {
       "identity" : "swiftcommons",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/maniramezan/SwiftCommons.git",
       "state" : {
-        "revision" : "53ac4fbf3194240e24865f54f3f5a6aa7a9e7cdf",
-        "version" : "0.14.0"
+        "revision" : "e67d24d7bd74815421b292426d482a4791d74156",
+        "version" : "0.15.0"
       }
     },
     {
