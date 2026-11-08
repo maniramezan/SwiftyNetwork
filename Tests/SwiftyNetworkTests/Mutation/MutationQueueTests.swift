@@ -81,6 +81,45 @@ struct MutationQueueTests {
         #expect(await store.load(for: "like:video:42") == nil)
     }
 
+    @Test("A 4xx is reported as rejected at once, while going offline is retried and then reported as offline")
+    func rejectedAndOfflineFailuresAreDistinct() async throws {
+        let body = Data(#"{"code":"invalid"}"#.utf8)
+        let fake = FakeAPIClient(outcomes: [
+            .failure(NetworkError.clientError(.status(422, body: body))),
+            .failure(NetworkError.noInternetConnection),
+            .failure(NetworkError.noInternetConnection),
+        ])
+        let policy = MutationRetryPolicy(
+            maxRetries: 1, backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .zero))
+        let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
+        let stream = await queue.events()
+
+        async let rejectedEvents = collectEvents(stream, count: 2)
+        await queue.enqueue(makeRequest(path: "/posts"), key: "post")
+        let rejected = await rejectedEvents
+        guard case .failed(let rejection) = rejected.last?.status else {
+            Issue.record("Expected a failure, got \(rejected)")
+            return
+        }
+        #expect(rejection.category == .rejected)
+        #expect(rejection.statusCode == 422)
+        #expect(rejection.response?.body == body)
+        #expect(await fake.callCount == 1)
+
+        async let offlineEvents = collectEvents(stream, count: 3)
+        await queue.enqueue(makeRequest(), key: "like")
+        let offline = await offlineEvents
+        #expect(offline.map(\.status).prefix(2) == [.pending, .retrying(attempt: 1)])
+        guard case .failed(let disconnect) = offline.last?.status else {
+            Issue.record("Expected a failure, got \(offline)")
+            return
+        }
+        #expect(disconnect.category == .offline)
+        #expect(disconnect.statusCode == nil)
+        #expect(disconnect.isTransient)
+        #expect(await fake.callCount == 3)
+    }
+
     @Test("Non-retryable failures are reported failed without retrying")
     func nonRetryableFailureFailsImmediately() async {
         let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden(.status(403)))])
