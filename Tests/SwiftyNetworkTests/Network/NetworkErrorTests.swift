@@ -23,12 +23,12 @@ func testAllNetworkErrorCases() {
     #expect(
         notFound.errorDescription?.contains("404") == true || notFound.errorDescription?.contains("not found") == true)
 
-    let unauthorized = NetworkError.unauthorized
+    let unauthorized = NetworkError.unauthorized()
     #expect(
         unauthorized.errorDescription?.contains("401") == true
             || unauthorized.errorDescription?.contains("Unauthorized") == true)
 
-    let forbidden = NetworkError.forbidden
+    let forbidden = NetworkError.forbidden()
     #expect(
         forbidden.errorDescription?.contains("403") == true || forbidden.errorDescription?.contains("forbidden") == true
     )
@@ -62,7 +62,7 @@ func testAllNetworkErrorCases() {
 @Test("NetworkError serverErrorData returns nil for non-server errors")
 func testServerErrorDataReturnsNilForNonServerErrors() {
     #expect(NetworkError.notFound.serverErrorData == nil)
-    #expect(NetworkError.unauthorized.serverErrorData == nil)
+    #expect(NetworkError.unauthorized().serverErrorData == nil)
     #expect(NetworkError.timeout.serverErrorData == nil)
 }
 
@@ -73,8 +73,8 @@ func testClassificationMapsEveryCase() {
     #expect(NetworkError.invalidData.classification == .invalidData)
     #expect(NetworkError.serverError(statusCode: 503, data: nil).classification == .serverError(statusCode: 503))
     #expect(NetworkError.tooManyRequests(retryAfter: 5, data: nil).classification == .tooManyRequests)
-    #expect(NetworkError.unauthorized.classification == .unauthorized)
-    #expect(NetworkError.forbidden.classification == .forbidden)
+    #expect(NetworkError.unauthorized().classification == .unauthorized)
+    #expect(NetworkError.forbidden().classification == .forbidden)
     #expect(NetworkError.notFound.classification == .notFound)
     #expect(NetworkError.timeout.classification == .timeout)
     #expect(NetworkError.noInternetConnection.classification == .noConnection)
@@ -93,8 +93,8 @@ func testIsTransientMatchesClassification() {
         .serverError(statusCode: 500, data: nil),
         .serverError(statusCode: 499, data: nil),
         .tooManyRequests(retryAfter: nil, data: nil),
-        .unauthorized,
-        .forbidden,
+        .unauthorized(),
+        .forbidden(),
         .notFound,
         .timeout,
         .noInternetConnection,
@@ -119,8 +119,8 @@ func testIsTransientClassifiesTransientErrors() {
     #expect(NetworkError.tooManyRequests(retryAfter: nil, data: nil).isTransient)
 
     #expect(!NetworkError.serverError(statusCode: 499, data: nil).isTransient)
-    #expect(!NetworkError.unauthorized.isTransient)
-    #expect(!NetworkError.forbidden.isTransient)
+    #expect(!NetworkError.unauthorized().isTransient)
+    #expect(!NetworkError.forbidden().isTransient)
     #expect(!NetworkError.notFound.isTransient)
     #expect(!NetworkError.invalidURL(url: "x").isTransient)
     #expect(!NetworkError.invalidData.isTransient)

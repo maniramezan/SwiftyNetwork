@@ -48,7 +48,10 @@ supplied Content-Type header.
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `retryDelay` before replay. The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
-skips refreshing a token that a concurrent request already replaced. This is **not** general transient-error retry;
+skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
+`shouldRefreshAuthorization(after:)` (default `true`) with the `401` response, so a provider can decline for a
+`401` that a new token cannot fix. `401` and `403` errors carry an `HTTPErrorResponse` (status, headers, body),
+exposed as `NetworkError.response`; `403` never triggers a refresh. Neither is general transient-error retry;
 that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by default), which `performRequest`
 consults through `retryOrFail` after any failed attempt. It retries `GET`/`HEAD`/`PUT`/`DELETE` only, on 429, 5xx,
 timeout and lost connectivity, with capped jittered backoff and a clamped `Retry-After`. Refresh and policy retries

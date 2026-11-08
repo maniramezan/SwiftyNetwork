@@ -45,8 +45,8 @@ struct NetworkRetryPolicyTests {
         let errors: [NetworkError] = [
             .serverError(statusCode: 400, data: nil),
             .serverError(statusCode: 499, data: nil),
-            .unauthorized,
-            .forbidden,
+            .unauthorized(),
+            .forbidden(),
             .notFound,
             .invalidResponse,
             .invalidData,

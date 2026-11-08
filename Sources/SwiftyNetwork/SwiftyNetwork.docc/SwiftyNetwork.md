@@ -34,6 +34,7 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 - ``EmptyResponse``
 - ``NetworkError``
 - ``NetworkErrorClassification``
+- ``HTTPErrorResponse``
 
 ### Instrumentation
 

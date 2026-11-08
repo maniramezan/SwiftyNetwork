@@ -53,8 +53,8 @@ struct MutationRetryPolicyTests {
 
     @Test("Default policy does not retry client errors, encoding failures, or unknown errors")
     func defaultDoesNotRetryNonTransientErrors() {
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.unauthorized))
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.forbidden))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.unauthorized()))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.forbidden()))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.notFound))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 400, data: nil)))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.invalidURL(url: "bad")))
@@ -70,8 +70,8 @@ struct MutationRetryPolicyTests {
             .serverError(statusCode: 500, data: nil),
             .serverError(statusCode: 400, data: nil),
             .tooManyRequests(retryAfter: 5, data: nil),
-            .unauthorized,
-            .forbidden,
+            .unauthorized(),
+            .forbidden(),
             .notFound,
             .invalidURL(url: "bad"),
         ]
