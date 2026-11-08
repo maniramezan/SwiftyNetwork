@@ -572,7 +572,9 @@ do {
 ```swift
 let configuration = NetworkClientConfiguration(
     retryPolicy: NetworkRetryPolicy(
-        maxRetries: 2, baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
+        maxRetries: 2,
+        backoff: BackoffPolicy(baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
+    )
 )
 let client = NetworkClient(configuration: configuration)
 ```
@@ -580,15 +582,17 @@ let client = NetworkClient(configuration: configuration)
 - Only `GET`, `HEAD`, `PUT` and `DELETE` are retried. `POST` and `PATCH` are never replayed, even on `429`.
 - Retried failures: `429`, 5xx, timeouts, and lost connectivity. Other 4xx responses and decoding failures
   are reported immediately.
-- Backoff is exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is honored (the wait is at
-  least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
+- Waits follow a `BackoffPolicy`: exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is
+  honored (the wait is at least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
 - Waits are cancellation-aware: cancelling the calling task ends the wait with `CancellationError`.
 - `maxRetries` bounds the retries after the first attempt, independently of `maxAuthRefreshAttempts`.
   Each retry emits `requestRetried` to your `NetworkInstrumentation`.
 
 If the client sits behind a `MutationQueue`, its `MutationRetryPolicy` also retries; enabling both makes
-the attempts multiply, so prefer one. `MutationRetryPolicy` honors `Retry-After` too (bounded by its
-`maxRetryAfter`, default 300s), so a throttled mutation waits as long as the server asked instead of failing.
+the attempts multiply, so prefer one. Both policies have the same shape: `maxRetries` counts retries after the
+first attempt, `backoff` is a `BackoffPolicy`, and `shouldRetry` decides which failures are retried.
+`MutationRetryPolicy.defaultBackoff` honors `Retry-After` up to 300s, so a throttled mutation waits as long as the
+server asked instead of failing.
 
 ## Configuration
 

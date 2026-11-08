@@ -17,11 +17,8 @@ struct MutationQueueTests {
     }
 
     private static let noDelayPolicy = MutationRetryPolicy(
-        maxAttempts: 5,
-        baseDelay: .zero,
-        maxDelay: .zero,
-        jitterRange: 0...0
-    )
+        maxRetries: 5,
+        backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0, maxRetryAfter: .seconds(300)))
 
     @Test("A successful mutation reports pending then succeeded, and is removed from the store")
     func succeedsOnFirstAttempt() async {
@@ -58,7 +55,9 @@ struct MutationQueueTests {
 
     @Test("Retries are exhausted and the mutation is reported failed")
     func exhaustsRetriesAndFails() async {
-        let policy = MutationRetryPolicy(maxAttempts: 2, baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0)
+        let policy = MutationRetryPolicy(
+            maxRetries: 2,
+            backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0, maxRetryAfter: .seconds(300)))
         let fake = FakeAPIClient(
             outcomes: [
                 .failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)),
@@ -196,7 +195,9 @@ struct MutationQueueTests {
         // Only the terminal (second, index 1) attempt is gated: the first
         // attempt fails and schedules a retry, then the retry blocks so the
         // test can supersede the key while that terminal attempt is in flight.
-        let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0)
+        let policy = MutationRetryPolicy(
+            maxRetries: 1,
+            backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0, maxRetryAfter: .seconds(300)))
         let fake = FakeAPIClient(
             outcomes: [.failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)), .success]
         )
@@ -256,7 +257,9 @@ struct MutationQueueTests {
     @Test("A positive retry delay is actually awaited before the next attempt")
     func retryDelayIsAwaited() async {
         let policy = MutationRetryPolicy(
-            maxAttempts: 3, baseDelay: .seconds(0.01), maxDelay: .seconds(0.01), jitterRange: 1...1)
+            maxRetries: 3,
+            backoff: BackoffPolicy(
+                baseDelay: .seconds(0.01), maxDelay: .seconds(0.01), jitterRange: 1...1, maxRetryAfter: .seconds(300)))
         let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout(nil)), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
         let stream = await queue.events()
@@ -274,12 +277,8 @@ struct MutationQueueTests {
     @Test("A 429 Retry-After is awaited before the mutation is retried, instead of failing permanently")
     func tooManyRequestsWaitsForRetryAfter() async {
         let policy = MutationRetryPolicy(
-            maxAttempts: 3,
-            baseDelay: .zero,
-            maxDelay: .zero,
-            jitterRange: 1...1,
-            maxRetryAfter: .seconds(0.2)
-        )
+            maxRetries: 3,
+            backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.2)))
         let throttled = NetworkError.tooManyRequests(.status(429, retryAfter: 5))
         let fake = FakeAPIClient(outcomes: [.failure(throttled), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)

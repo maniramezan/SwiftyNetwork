@@ -180,7 +180,10 @@ struct NetworkClientRetryTests {
             ],
             for: testId
         )
-        let client = makeClient(stub, retryPolicy: .init(maxRetries: 4, baseDelay: .zero, maxDelay: .zero))
+        let client = makeClient(
+            stub,
+            retryPolicy: .init(
+                maxRetries: 4, backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
@@ -195,7 +198,10 @@ struct NetworkClientRetryTests {
             defer { stub.invalidate() }
             let testId = "retry-\(method.rawValue)"
             stub.setResponses([.status(502), .success(try JSONEncoder().encode(user))], for: testId)
-            let client = makeClient(stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero))
+            let client = makeClient(
+                stub,
+                retryPolicy: .init(
+                    backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
             let response = try await client.request(
                 makeEndpointWithTestId(testId, method: method),
@@ -217,7 +223,10 @@ struct NetworkClientRetryTests {
                 [.status(429, headers: ["Retry-After": "0"]), .success(try JSONEncoder().encode(user))],
                 for: testId
             )
-            let client = makeClient(stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero))
+            let client = makeClient(
+                stub,
+                retryPolicy: .init(
+                    backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
             let error = await #expect(throws: NetworkError.self) {
                 try await client.request(
@@ -241,7 +250,10 @@ struct NetworkClientRetryTests {
             defer { stub.invalidate() }
             let testId = "retry-permanent-\(status)"
             stub.setResponses([.status(status), .success(try JSONEncoder().encode(user))], for: testId)
-            let client = makeClient(stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero))
+            let client = makeClient(
+                stub,
+                retryPolicy: .init(
+                    backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
             await #expect(throws: NetworkError.self) {
                 try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
@@ -256,7 +268,9 @@ struct NetworkClientRetryTests {
         defer { stub.invalidate() }
         let testId = "retry-decoding"
         stub.setResponses([.success(Data("not json".utf8)), .success(try JSONEncoder().encode(user))], for: testId)
-        let client = makeClient(stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero))
+        let client = makeClient(
+            stub,
+            retryPolicy: .init(backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
         await #expect(throws: NetworkError.self) {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
@@ -271,7 +285,10 @@ struct NetworkClientRetryTests {
         let testId = "retry-exhausted"
         stub.setResponses(
             [.status(503), .status(503), .status(500), .success(try JSONEncoder().encode(user))], for: testId)
-        let client = makeClient(stub, retryPolicy: .init(maxRetries: 2, baseDelay: .zero, maxDelay: .zero))
+        let client = makeClient(
+            stub,
+            retryPolicy: .init(
+                maxRetries: 2, backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
         let error = await #expect(throws: NetworkError.self) {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
@@ -312,7 +329,9 @@ struct NetworkClientRetryTests {
         )
         let client = makeClient(
             stub,
-            retryPolicy: .init(baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3))
+            retryPolicy: .init(
+                backoff: BackoffPolicy(
+                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3)))
         )
 
         let start = ContinuousClock.now
@@ -335,7 +354,9 @@ struct NetworkClientRetryTests {
         )
         let client = makeClient(
             stub,
-            retryPolicy: .init(baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3))
+            retryPolicy: .init(
+                backoff: BackoffPolicy(
+                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3)))
         )
 
         let start = ContinuousClock.now
@@ -357,7 +378,8 @@ struct NetworkClientRetryTests {
             for: testId
         )
         let client = makeClient(
-            stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30)))
+            stub,
+            retryPolicy: .init(backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
         let endpoint = makeEndpointWithTestId(testId)
 
         let task = Task { try await client.request(endpoint, responseType: TestUser.self) }
@@ -399,7 +421,7 @@ struct NetworkClientRetryTests {
         let instrumentation = FakeNetworkInstrumentation()
         let client = makeClient(
             stub,
-            retryPolicy: .init(baseDelay: .zero, maxDelay: .zero),
+            retryPolicy: .init(backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))),
             instrumentation: instrumentation
         )
 
@@ -424,7 +446,8 @@ struct NetworkClientRetryTests {
         let instrumentation = FakeNetworkInstrumentation()
         let client = makeClient(
             stub,
-            retryPolicy: .init(maxRetries: 1, baseDelay: .zero, maxDelay: .zero),
+            retryPolicy: .init(
+                maxRetries: 1, backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))),
             instrumentation: instrumentation
         )
 
@@ -456,7 +479,8 @@ struct NetworkClientRetryTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 authRefreshDelay: .zero,
-                retryPolicy: .init(baseDelay: .zero, maxDelay: .zero)
+                retryPolicy: .init(
+                    backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30)))
             )
         )
 
@@ -473,7 +497,9 @@ struct NetworkClientRetryTests {
         defer { stub.invalidate() }
         let testId = "retry-body"
         stub.setResponses([.status(503), .success(try JSONEncoder().encode(user))], for: testId)
-        let client = makeClient(stub, retryPolicy: .init(baseDelay: .zero, maxDelay: .zero))
+        let client = makeClient(
+            stub,
+            retryPolicy: .init(backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, maxRetryAfter: .seconds(30))))
 
         _ = try await client.request(
             makeEndpointWithTestId(testId, method: .put),

@@ -27,6 +27,7 @@ Sources/SwiftyNetwork/
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
 │   ├── NetworkClientConfiguration.swift  # Session, coders, auth, timeouts, instrumentation
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
+│   ├── BackoffPolicy.swift          # Shared jittered exponential backoff + Retry-After floor
 │   ├── NetworkRetryPolicy.swift     # Opt-in idempotent-request retry policy (429/5xx/timeout/offline)
 │   ├── RetryAfter.swift             # Internal: Retry-After parsing (delta-seconds + HTTP-date)
 │   ├── RequestTrace.swift           # Internal: per-attempt instrumentation reporting
@@ -64,6 +65,7 @@ Sources/SwiftyNetwork/
 Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
 ├── MockAPIClient.swift              # Scriptable APIClient that records requests
 ├── RecordedRequest.swift            # Snapshot of a received endpoint
+├── BackoffPolicy+Testing.swift        # BackoffPolicy.immediate (zero wait, ignores Retry-After)
 ├── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
 └── NetworkRetryPolicy+Testing.swift   # .immediate() zero-backoff request retry policy
 

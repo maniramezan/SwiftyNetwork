@@ -312,7 +312,7 @@ extension NetworkError {
     /// Whether this error is generally worth retrying.
     ///
     /// The single source of truth for transient-error classification --
-    /// ``MutationRetryPolicy/defaultIsRetryable(_:)`` and any custom retry
+    /// ``MutationRetryPolicy/defaultShouldRetry(_:)`` and any custom retry
     /// or telemetry logic should use this instead of re-deriving it.
     /// Equivalent to `classification.isTransient`.
     public var isTransient: Bool {
