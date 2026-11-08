@@ -337,10 +337,43 @@ for await event in await queue.events() where event.key == "like:video:42" {
     switch event.status {
     case .succeeded:
         break
-    case .failed:
-        showLikeFailedError()
+    case .failed(let reason):
+        handleLikeFailure(reason)
     case .pending, .retrying:
         break
+    }
+}
+```
+
+A failed mutation's `MutationFailureReason.category` tells apart the outcomes a UI handles differently:
+
+| Category | Meaning | Typical handling |
+| --- | --- | --- |
+| `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
+| `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
+| `.rejected` | The server refused it with a 4xx (other than 401/408); retrying won't help | Roll back; show `reason.response` details |
+| `.unauthorized` | `401` and the token could not be refreshed | Prompt sign-in |
+| `.serverError` | The server failed with a 5xx (retried first) | Generic error |
+| `.cancelled` | `cancel(_:)` or `cancelAll()` ended it | Nothing |
+| `.other` | Encoding, decoding, invalid URL, or a non-`NetworkError` | Generic error |
+
+`reason.statusCode` and `reason.response` carry the HTTP details for `.rejected`, `.unauthorized`, and
+`.serverError`, and `reason.isTransient` says whether the queue gave up only because retries ran out:
+
+```swift
+func handleLikeFailure(_ reason: MutationFailureReason) {
+    switch reason.category {
+    case .cancelled:
+        return
+    case .offline, .timedOut:
+        showBanner("You're offline. Your like will need to be sent again.")
+    case .rejected:
+        rollBackLike()
+        showError(try? reason.response?.decodeBody(APIError.self))
+    case .unauthorized:
+        promptSignIn()
+    case .serverError, .other:
+        showBanner("Couldn't save your like.")
     }
 }
 ```

@@ -57,7 +57,7 @@ Sources/SwiftyNetwork/
     ├── MutationQueue.swift          # Actor: enqueue, background retry, coalescing, status via AsyncStream
     ├── MutationRequest.swift        # Codable NetworkEndpoint value type (endpoint + body), replayable
     ├── MutationKey.swift            # Coalescing key
-    ├── MutationStatus.swift         # pending/retrying/succeeded/failed + MutationFailureReason
+    ├── MutationStatus.swift         # pending/retrying/succeeded/failed + MutationFailureReason (category: offline/rejected/...)
     ├── MutationRetryPolicy.swift    # Exponential backoff + jitter (capped), transient classification
     ├── MutationStore.swift          # Pluggable persistence protocol
     └── InMemoryMutationStore.swift  # Default in-memory MutationStore
