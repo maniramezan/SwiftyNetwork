@@ -95,22 +95,28 @@ public struct MutationRetryPolicy: Sendable {
         (error as? NetworkError)?.isTransient ?? false
     }
 
-    /// Computes the backoff delay before a given retry attempt.
+    /// Computes the wait before a retry attempt.
+    ///
+    /// The result is the jittered exponential backoff, capped at ``maxDelay``.
+    /// When `error` is ``NetworkError/tooManyRequests(retryAfter:data:)`` with a
+    /// `Retry-After`, the result is at least that long, clamped to ``maxRetryAfter``.
     ///
     /// - Parameters:
     ///   - attempt: The 1-based retry attempt number about to run.
+    ///   - error: The failure that triggered the retry, if any. Pass `nil` for the plain backoff.
     ///   - jitterGenerator: Produces a value in `0...1` used to sample within
     ///     ``jitterRange``. Overridable for deterministic tests; defaults to
     ///     `Double.random(in: 0...1)`.
-    /// - Returns: The delay in seconds, already capped at ``maxDelay``.
+    /// - Returns: The delay in seconds.
     public func delay(
         forAttempt attempt: Int,
+        after error: (any Error)? = nil,
         jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
     ) -> TimeInterval {
         // Negative multipliers can't produce a meaningful delay; clamp so the
         // shared backoff's non-negative jitter requirement always holds.
         let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
-        return withoutActuallyEscaping(jitterGenerator) { jitterSource in
+        let backoff = withoutActuallyEscaping(jitterGenerator) { jitterSource in
             let delay = RetryBackoff.exponential(
                 baseDelay: .seconds(baseDelay),
                 maxDelay: .seconds(maxDelay),
@@ -122,25 +128,6 @@ public struct MutationRetryPolicy: Sendable {
             // Preserve the queue's hard cap after jitter as well as before it.
             return min(max(0, delay), maxDelay)
         }
-    }
-
-    /// Computes the wait before a retry, honoring a `429` `Retry-After`.
-    ///
-    /// Equivalent to ``delay(forAttempt:jitterGenerator:)`` unless `error` is
-    /// ``NetworkError/tooManyRequests(retryAfter:data:)`` with a `Retry-After`,
-    /// in which case the result is at least that long, clamped to ``maxRetryAfter``.
-    ///
-    /// - Parameters:
-    ///   - attempt: The 1-based retry attempt number about to run.
-    ///   - error: The failure that triggered the retry.
-    ///   - jitterGenerator: Produces a value in `0...1` used to sample within ``jitterRange``.
-    /// - Returns: The delay in seconds.
-    public func delay(
-        forAttempt attempt: Int,
-        after error: any Error,
-        jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
-    ) -> TimeInterval {
-        let backoff = delay(forAttempt: attempt, jitterGenerator: jitterGenerator)
         return RetryAfter.delay(
             backoff: backoff,
             retryAfter: (error as? NetworkError)?.retryAfter,

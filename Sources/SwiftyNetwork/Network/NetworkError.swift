@@ -46,8 +46,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     ///
     /// - Parameters:
     ///   - retryAfter: How long the server asked the client to wait, in seconds.
-    ///   - data: The response body, if one was returned (e.g. a problem+json document).
-    case tooManyRequests(retryAfter: TimeInterval?, data: Data?)
+    ///   - data: The response body (e.g. a problem+json document). Empty when the server sent no body.
+    case tooManyRequests(retryAfter: TimeInterval?, data: Data)
 
     /// The server returned `401 Unauthorized`, and authorization could not be refreshed.
     case unauthorized
@@ -110,10 +110,14 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         }
     }
 
-    /// The underlying error data for server errors and `429` responses, if available.
-    public var serverErrorData: Data? {
+    /// The response body for ``serverError(statusCode:data:)`` and ``tooManyRequests(retryAfter:data:)``, if available.
+    ///
+    /// `nil` for every other case.
+    public var responseBody: Data? {
         switch self {
-        case .serverError(_, let data), .tooManyRequests(_, let data):
+        case .serverError(_, let data):
+            return data
+        case .tooManyRequests(_, let data):
             return data
         default:
             return nil
