@@ -273,8 +273,8 @@ public actor MutationQueue {
                 )
                 setStatus(.retrying(attempt: attempt), for: key)
                 let delay = retryPolicy.delay(forAttempt: attempt, after: error)
-                if delay > 0 {
-                    try? await Task.sleep(for: .seconds(delay))
+                if delay > .zero {
+                    try? await Task.sleep(for: delay)
                 }
             }
         }

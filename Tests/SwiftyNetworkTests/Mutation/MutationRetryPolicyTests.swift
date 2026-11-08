@@ -8,36 +8,40 @@ struct MutationRetryPolicyTests {
 
     @Test("Delay grows exponentially with attempt number, before jitter")
     func delayGrowsExponentially() {
-        let policy = MutationRetryPolicy(maxAttempts: 10, baseDelay: 1, maxDelay: 1000, jitterRange: 1...1)
+        let policy = MutationRetryPolicy(
+            maxAttempts: 10, baseDelay: .seconds(1), maxDelay: .seconds(1000), jitterRange: 1...1)
 
-        #expect(policy.delay(forAttempt: 1) == 1)
-        #expect(policy.delay(forAttempt: 2) == 2)
-        #expect(policy.delay(forAttempt: 3) == 4)
-        #expect(policy.delay(forAttempt: 4) == 8)
+        #expect(policy.delay(forAttempt: 1) == .seconds(1))
+        #expect(policy.delay(forAttempt: 2) == .seconds(2))
+        #expect(policy.delay(forAttempt: 3) == .seconds(4))
+        #expect(policy.delay(forAttempt: 4) == .seconds(8))
     }
 
     @Test("Delay is capped at maxDelay")
     func delayIsCapped() {
-        let policy = MutationRetryPolicy(maxAttempts: 20, baseDelay: 1, maxDelay: 10, jitterRange: 1...1)
+        let policy = MutationRetryPolicy(
+            maxAttempts: 20, baseDelay: .seconds(1), maxDelay: .seconds(10), jitterRange: 1...1)
 
-        #expect(policy.delay(forAttempt: 10) == 10)
+        #expect(policy.delay(forAttempt: 10) == .seconds(10))
     }
 
     @Test("Jitter scales the delay within jitterRange")
     func jitterScalesDelay() {
-        let policy = MutationRetryPolicy(maxAttempts: 5, baseDelay: 10, maxDelay: 100, jitterRange: 0.5...1.5)
+        let policy = MutationRetryPolicy(
+            maxAttempts: 5, baseDelay: .seconds(10), maxDelay: .seconds(100), jitterRange: 0.5...1.5)
 
-        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 0 }) == 5)
-        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 1 }) == 15)
-        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 0.5 }) == 10)
+        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 0 }) == .seconds(5))
+        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 1 }) == .seconds(15))
+        #expect(policy.delay(forAttempt: 1, jitterGenerator: { 0.5 }) == .seconds(10))
     }
 
     @Test("Upward jitter never pushes the delay past maxDelay")
     func jitterNeverExceedsMaxDelay() {
-        let policy = MutationRetryPolicy(maxAttempts: 20, baseDelay: 1, maxDelay: 10, jitterRange: 0.5...1.5)
+        let policy = MutationRetryPolicy(
+            maxAttempts: 20, baseDelay: .seconds(1), maxDelay: .seconds(10), jitterRange: 0.5...1.5)
 
-        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 1 }) == 10)
-        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 0 }) == 5)
+        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 1 }) == .seconds(10))
+        #expect(policy.delay(forAttempt: 10, jitterGenerator: { 0 }) == .seconds(5))
     }
 
     @Test("Default policy retries timeouts, missing connectivity, invalid responses, and 5xx errors")
@@ -82,62 +86,68 @@ struct MutationRetryPolicyTests {
 
     @Test("maxAttempts and baseDelay are clamped to non-negative values")
     func negativeValuesAreClamped() {
-        let policy = MutationRetryPolicy(maxAttempts: -1, baseDelay: -5, maxDelay: -10)
+        let policy = MutationRetryPolicy(maxAttempts: -1, baseDelay: .seconds(-5), maxDelay: .seconds(-10))
 
         #expect(policy.maxAttempts == 0)
-        #expect(policy.baseDelay == 0)
-        #expect(policy.maxDelay == 0)
+        #expect(policy.baseDelay == .seconds(0))
+        #expect(policy.maxDelay == .seconds(0))
     }
 
     @Test("A 429 Retry-After longer than the backoff sets the delay")
     func retryAfterOverridesShorterBackoff() {
-        let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1)
+        let policy = MutationRetryPolicy(baseDelay: .seconds(1), maxDelay: .seconds(4), jitterRange: 1...1)
         let error = NetworkError.tooManyRequests(.status(429, retryAfter: 20))
 
-        #expect(policy.delay(forAttempt: 1, after: error) == 20)
+        #expect(policy.delay(forAttempt: 1, after: error) == .seconds(20))
     }
 
     @Test("A 429 Retry-After is clamped to maxRetryAfter, not maxDelay")
     func retryAfterIsClampedToMaxRetryAfter() {
-        let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1, maxRetryAfter: 30)
+        let policy = MutationRetryPolicy(
+            baseDelay: .seconds(1), maxDelay: .seconds(4), jitterRange: 1...1, maxRetryAfter: .seconds(30))
 
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 600))) == 30)
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 10))) == 10)
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 600)))
+                == .seconds(30))
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 10)))
+                == .seconds(10))
     }
 
     @Test("A 503 Retry-After sets the delay like a 429 does")
     func serviceUnavailableRetryAfterSetsDelay() {
-        let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1, maxRetryAfter: 30)
+        let policy = MutationRetryPolicy(
+            baseDelay: .seconds(1), maxDelay: .seconds(4), jitterRange: 1...1, maxRetryAfter: .seconds(30))
 
         #expect(
             policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503, retryAfter: 20)))
-                == 20
+                == .seconds(20)
         )
         #expect(
             policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503, retryAfter: 600)))
-                == 30
+                == .seconds(30)
         )
     }
 
     @Test("A Retry-After shorter than the backoff never shortens the backoff")
     func retryAfterNeverShortensBackoff() {
-        let policy = MutationRetryPolicy(baseDelay: 8, maxDelay: 8, jitterRange: 1...1)
+        let policy = MutationRetryPolicy(baseDelay: .seconds(8), maxDelay: .seconds(8), jitterRange: 1...1)
         let error = NetworkError.tooManyRequests(.status(429, retryAfter: 1))
 
-        #expect(policy.delay(forAttempt: 1, after: error) == 8)
+        #expect(policy.delay(forAttempt: 1, after: error) == .seconds(8))
     }
 
     @Test("Errors without Retry-After use the plain backoff")
     func errorsWithoutRetryAfterUseBackoff() {
-        let policy = MutationRetryPolicy(baseDelay: 2, maxDelay: 60, jitterRange: 1...1)
+        let policy = MutationRetryPolicy(baseDelay: .seconds(2), maxDelay: .seconds(60), jitterRange: 1...1)
 
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429))) == 2)
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503))) == 2)
-        #expect(policy.delay(forAttempt: 2, after: URLError(.timedOut)) == 4)
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429))) == .seconds(2))
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503))) == .seconds(2))
+        #expect(policy.delay(forAttempt: 2, after: URLError(.timedOut)) == .seconds(4))
     }
 
     @Test("maxRetryAfter is clamped to a non-negative value")
     func negativeMaxRetryAfterIsClamped() {
-        #expect(MutationRetryPolicy(maxRetryAfter: -1).maxRetryAfter == 0)
+        #expect(MutationRetryPolicy(maxRetryAfter: .seconds(-1)).maxRetryAfter == .zero)
     }
 }

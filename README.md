@@ -137,7 +137,7 @@ func createUserRepository() -> GenericRepository<User> {
     // Create network client with configuration
     let configuration = NetworkClientConfiguration(
         maxAuthRefreshAttempts: 3,
-        timeoutInterval: 30
+        timeout: .seconds(30)
     )
     let networkClient = NetworkClient(configuration: configuration)
     
@@ -253,7 +253,7 @@ func refreshUser(userId: String, baseURL: String) async throws -> User {
 func fetchUserWithExpiration(
     userId: String, 
     baseURL: String,
-    maxCacheAge: TimeInterval = 300 // 5 minutes
+    maxCacheAge: Duration = .seconds(300)
 ) async throws -> User {
     let repository = createUserRepository()
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
@@ -384,7 +384,7 @@ func makePinnedClient() throws -> NetworkClient {
 
     let configuration = NetworkClientConfiguration(
         session: pinning.makeSession(),
-        timeoutInterval: 30
+        timeout: .seconds(30)
     )
     return NetworkClient(configuration: configuration)
 }
@@ -443,7 +443,7 @@ Every method has a no-op default, so implement only what you need.
 ```swift
 struct RequestMetrics: NetworkInstrumentation {
     func requestCompleted(_ event: NetworkRequestCompletion) async {
-        Metrics.record("http.duration", event.duration, tags: ["status": "\(event.statusCode)"])
+        Metrics.record("http.duration_ms", event.duration / .milliseconds(1), tags: ["status": "\(event.statusCode)"])
     }
 
     func requestFailed(_ event: NetworkRequestFailure) async {
@@ -549,7 +549,7 @@ Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count 
 ### Rate Limiting (429) and Retry-After
 
 A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(_:)`, never as
-`.clientError`. `HTTPErrorResponse.retryAfter` is the parsed `Retry-After` header in seconds (both the
+`.clientError`. `HTTPErrorResponse.retryAfter` is the parsed `Retry-After` header as a `Duration` (both the
 delta-seconds and HTTP-date forms; `nil` if absent or malformed), `body` keeps the response body (empty if the
 server sent none) so you can decode a problem+json document, and the headers keep values such as
 `X-RateLimit-Remaining`. A `503 Service Unavailable` carries `retryAfter` on `.serverError` the same way:
@@ -571,7 +571,8 @@ do {
 
 ```swift
 let configuration = NetworkClientConfiguration(
-    retryPolicy: NetworkRetryPolicy(maxRetries: 2, baseDelay: 0.5, maxDelay: 8, maxRetryAfter: 30)
+    retryPolicy: NetworkRetryPolicy(
+        maxRetries: 2, baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
 )
 let client = NetworkClient(configuration: configuration)
 ```
@@ -601,7 +602,7 @@ let configuration = NetworkClientConfiguration(
     authorizationProvider: authProvider,
     maxAuthRefreshAttempts: 3,
     retryPolicy: nil,
-    timeoutInterval: 30
+    timeout: .seconds(30)
 )
 
 let client = NetworkClient(configuration: configuration)

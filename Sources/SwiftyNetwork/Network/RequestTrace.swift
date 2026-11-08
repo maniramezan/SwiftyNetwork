@@ -57,8 +57,8 @@ struct RequestTrace: Sendable {
         )
     }
 
-    /// Monotonic seconds since ``start()``; unaffected by wall-clock corrections.
-    private var elapsed: TimeInterval {
-        startedAt.duration(to: .now).timeInterval
+    /// Monotonic time since ``start()``; unaffected by wall-clock corrections.
+    private var elapsed: Duration {
+        startedAt.duration(to: .now)
     }
 }

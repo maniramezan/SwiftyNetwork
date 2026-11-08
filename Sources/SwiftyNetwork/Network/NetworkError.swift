@@ -168,11 +168,11 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         response?.statusCode
     }
 
-    /// How long the server asked the client to wait before retrying, in seconds.
+    /// How long the server asked the client to wait before retrying.
     ///
     /// Equivalent to `response?.retryAfter`: non-`nil` only for a `429` or `503` that
     /// carried a valid `Retry-After` header.
-    public var retryAfter: TimeInterval? {
+    public var retryAfter: Duration? {
         response?.retryAfter
     }
 

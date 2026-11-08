@@ -263,13 +263,13 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     private func fetchWithExpirationCheck(
         endpoint: any NetworkEndpoint,
         cacheKey: CacheKey,
-        maxAge: TimeInterval
+        maxAge: Duration
     ) async throws -> Entity {
         if let cachedEntity = await localRead(cacheKey),
             let timestamp = await localTimestamp(cacheKey)
         {
 
-            let cacheAge = Date().timeIntervalSince(timestamp)
+            let cacheAge = Duration.seconds(Date().timeIntervalSince(timestamp))
             let cachePolicy = CachePolicy.returnCacheIfNotExpired(maxAge: maxAge)
             if cachePolicy.shouldUseCachedData(cacheAge: cacheAge) {
                 return cachedEntity

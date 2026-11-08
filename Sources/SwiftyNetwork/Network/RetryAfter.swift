@@ -3,7 +3,7 @@ import Foundation
 /// Parses the HTTP `Retry-After` response header (RFC 9110 §10.2.3).
 ///
 /// The header carries either a non-negative number of seconds (delta-seconds)
-/// or an HTTP-date. Both forms are normalized to a ``TimeInterval`` measured
+/// or an HTTP-date. Both forms are normalized to a `Duration` measured
 /// from the moment the response was received.
 enum RetryAfter {
     /// The header field name.
@@ -14,19 +14,19 @@ enum RetryAfter {
     /// - Parameters:
     ///   - value: The raw header value, e.g. `"5"` or `"Wed, 21 Oct 2015 07:28:00 GMT"`.
     ///   - now: The reference instant for the HTTP-date form. Overridable for tests.
-    /// - Returns: The delay in seconds, never negative (a date in the past yields `0`),
+    /// - Returns: The delay, never negative (a date in the past yields `.zero`),
     ///   or `nil` when the value is malformed.
-    static func parse(_ value: String, now: Date = Date()) -> TimeInterval? {
+    static func parse(_ value: String, now: Date = Date()) -> Duration? {
         let trimmed = value.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
 
         if trimmed.allSatisfy({ $0.isASCII && $0.isNumber }) {
-            guard let seconds = TimeInterval(trimmed), seconds.isFinite else { return nil }
-            return seconds
+            guard let seconds = Int64(trimmed) else { return nil }
+            return .seconds(seconds)
         }
 
         guard let date = parseHTTPDate(trimmed) else { return nil }
-        return max(0, date.timeIntervalSince(now))
+        return .seconds(max(0, date.timeIntervalSince(now)))
     }
 
     /// Accepts the three HTTP-date formats servers may send (RFC 9110 §5.6.7).
