@@ -62,5 +62,5 @@ let configuration = NetworkClientConfiguration(retryPolicy: .immediate(maxRetrie
 let queue = MutationQueue(client: client, retryPolicy: .immediate())
 ```
 
-- ``SwiftyNetwork/NetworkRetryPolicy``
-- ``SwiftyNetwork/MutationRetryPolicy``
+These helpers extend `SwiftyNetwork.NetworkRetryPolicy` and
+`SwiftyNetwork.MutationRetryPolicy`.
