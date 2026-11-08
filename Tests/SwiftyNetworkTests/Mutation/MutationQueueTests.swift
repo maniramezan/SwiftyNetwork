@@ -42,7 +42,9 @@ struct MutationQueueTests {
 
     @Test("Transient failures are retried in the background until success")
     func retriesTransientFailuresThenSucceeds() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success])
+        let fake = FakeAPIClient(outcomes: [
+            .failure(NetworkError.timeout()), .failure(NetworkError.timeout()), .success,
+        ])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
 
@@ -58,7 +60,9 @@ struct MutationQueueTests {
     func exhaustsRetriesAndFails() async {
         let policy = MutationRetryPolicy(maxAttempts: 2, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .failure(NetworkError.timeout)]
+            outcomes: [
+                .failure(NetworkError.timeout()), .failure(NetworkError.timeout()), .failure(NetworkError.timeout()),
+            ]
         )
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: policy)
@@ -71,7 +75,7 @@ struct MutationQueueTests {
         #expect(
             events.map(\.status) == [
                 .pending, .retrying(attempt: 1), .retrying(attempt: 2),
-                .failed(MutationFailureReason(NetworkError.timeout)),
+                .failed(MutationFailureReason(NetworkError.timeout())),
             ])
         #expect(await fake.callCount == 3)
         #expect(await store.load(for: "like:video:42") == nil)
@@ -192,7 +196,7 @@ struct MutationQueueTests {
         // test can supersede the key while that terminal attempt is in flight.
         let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
+            outcomes: [.failure(NetworkError.timeout()), .failure(NetworkError.timeout()), .success]
         )
         let terminalAttemptGate = await fake.hold(call: 1)
         let store = InMemoryMutationStore()
@@ -250,7 +254,7 @@ struct MutationQueueTests {
     @Test("A positive retry delay is actually awaited before the next attempt")
     func retryDelayIsAwaited() async {
         let policy = MutationRetryPolicy(maxAttempts: 3, baseDelay: 0.01, maxDelay: 0.01, jitterRange: 1...1)
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .success])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout()), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
         let stream = await queue.events()
 
@@ -292,7 +296,7 @@ struct MutationQueueTests {
     @Test("Independent keys are processed without blocking each other")
     func independentKeysProcessConcurrently() async {
         let slowFake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
+            outcomes: [.failure(NetworkError.timeout()), .failure(NetworkError.timeout()), .success]
         )
         let slowGate = await slowFake.hold(call: 0)
         defer { slowGate.open() }
@@ -328,7 +332,7 @@ struct MutationQueueTests {
         let store = InMemoryMutationStore()
         await store.save(makeRequest(liked: true), for: "resume:1")
         let fake = FakeAPIClient(outcomes: [
-            .failure(NetworkError.timeout), .success, .failure(NetworkError.forbidden()),
+            .failure(NetworkError.timeout()), .success, .failure(NetworkError.forbidden()),
         ])
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
@@ -463,7 +467,7 @@ struct MutationQueueTests {
     @Test("MutationFailureReason flags cancellation only for CancellationError")
     func failureReasonFlagsCancellation() {
         #expect(MutationFailureReason(CancellationError()).isCancellation)
-        #expect(!MutationFailureReason(NetworkError.timeout).isCancellation)
+        #expect(!MutationFailureReason(NetworkError.timeout()).isCancellation)
     }
 }
 

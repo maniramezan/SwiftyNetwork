@@ -42,7 +42,7 @@ struct MutationRetryPolicyTests {
 
     @Test("Default policy retries timeouts, missing connectivity, invalid responses, and 5xx errors")
     func defaultRetriesTransientErrors() {
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.timeout))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.timeout()))
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.noInternetConnection))
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.invalidResponse))
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 500, data: nil)))
@@ -55,7 +55,7 @@ struct MutationRetryPolicyTests {
     func defaultDoesNotRetryNonTransientErrors() {
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.unauthorized()))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.forbidden()))
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.notFound))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.notFound()))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 400, data: nil)))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.invalidURL(url: "bad")))
         #expect(!MutationRetryPolicy.defaultIsRetryable(URLError(.badURL)))
@@ -64,7 +64,7 @@ struct MutationRetryPolicyTests {
     @Test("defaultIsRetryable delegates to NetworkError.isTransient, the shared classification source of truth")
     func defaultIsRetryableDelegatesToNetworkErrorIsTransient() {
         let errors: [NetworkError] = [
-            .timeout,
+            .timeout(),
             .noInternetConnection,
             .invalidResponse,
             .serverError(statusCode: 500, data: nil),
@@ -72,7 +72,7 @@ struct MutationRetryPolicyTests {
             .tooManyRequests(retryAfter: 5, data: Data()),
             .unauthorized(),
             .forbidden(),
-            .notFound,
+            .notFound(),
             .invalidURL(url: "bad"),
         ]
         for error in errors {

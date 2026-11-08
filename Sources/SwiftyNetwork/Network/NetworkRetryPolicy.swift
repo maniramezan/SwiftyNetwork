@@ -12,7 +12,7 @@ import SwiftCommons
 ///   `429`, so a request that may have been processed is never duplicated.
 /// - Retried failures are `429` (``NetworkError/tooManyRequests(retryAfter:data:response:)``),
 ///   5xx (``NetworkError/serverError(statusCode:data:retryAfter:response:)``), timeouts
-///   (``NetworkError/timeout``) and lost connectivity
+///   (``NetworkError/timeout(response:)``) and lost connectivity
 ///   (``NetworkError/noInternetConnection``). Everything else, including
 ///   decoding failures and other 4xx responses, is reported immediately.
 /// - Waits use jittered exponential backoff capped at ``maxDelay``. When a

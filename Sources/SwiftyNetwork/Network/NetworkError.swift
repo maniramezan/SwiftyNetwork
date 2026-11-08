@@ -77,10 +77,19 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     case forbidden(response: HTTPErrorResponse? = nil)
 
     /// The server returned `404 Not Found`.
-    case notFound
+    ///
+    /// Matching `.notFound` without a binding keeps working. Read an API error document
+    /// from the body through ``response``.
+    ///
+    /// - Parameter response: The rejected response, or `nil` when the error was not
+    ///   produced from a live response (for example in a test double).
+    case notFound(response: HTTPErrorResponse? = nil)
 
     /// The request timed out at the transport layer or the server returned `408 Request Timeout`.
-    case timeout
+    ///
+    /// - Parameter response: The `408` response, or `nil` when the timeout happened at the
+    ///   transport layer, where there is no response, or in a test double.
+    case timeout(response: HTTPErrorResponse? = nil)
 
     /// The transport layer reported that no internet connection is available.
     case noInternetConnection
@@ -133,8 +142,9 @@ public enum NetworkError: Error, LocalizedError, Sendable {
 
     /// The HTTP response behind this error, with its status code, headers, and body.
     ///
-    /// Available for ``unauthorized(response:)``, ``forbidden(response:)``,
-    /// ``tooManyRequests(retryAfter:data:response:)``, and
+    /// Available for every case that comes from an HTTP response:
+    /// ``unauthorized(response:)``, ``forbidden(response:)``, ``notFound(response:)``,
+    /// ``timeout(response:)`` (for a `408`), ``tooManyRequests(retryAfter:data:response:)``, and
     /// ``serverError(statusCode:data:retryAfter:response:)``. Use it to tell apart failures that
     /// share a status code, for example by decoding an API error `code` from
     /// ``HTTPErrorResponse/body``, reading ``HTTPErrorResponse/wwwAuthenticate``, or reading
@@ -143,7 +153,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// - Returns: The response, or `nil` for other cases and for errors built without one.
     public var response: HTTPErrorResponse? {
         switch self {
-        case .unauthorized(let response), .forbidden(let response):
+        case .unauthorized(let response), .forbidden(let response), .notFound(let response),
+            .timeout(let response):
             return response
         case .tooManyRequests(_, _, let response), .serverError(_, _, _, let response):
             return response
@@ -199,7 +210,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
             return .noInternetConnection
         case .timedOut:
-            return .timeout
+            return .timeout()
         default:
             return .underlying(error)
         }
