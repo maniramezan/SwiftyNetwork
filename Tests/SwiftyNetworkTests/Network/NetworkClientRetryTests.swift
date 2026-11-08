@@ -38,12 +38,12 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .tooManyRequests(let retryAfter, let data, _)? = error else {
+        guard case .tooManyRequests(let response)? = error else {
             Issue.record("Expected tooManyRequests, got \(String(describing: error))")
             return
         }
-        #expect(retryAfter == 5)
-        #expect(data == body)
+        #expect(response.retryAfter == 5)
+        #expect(response.body == body)
         #expect(await client.attemptCount() == 1)
     }
 
@@ -80,11 +80,11 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .tooManyRequests(let retryAfter, _, _)? = error else {
+        guard case .tooManyRequests(let response)? = error else {
             Issue.record("Expected tooManyRequests, got \(String(describing: error))")
             return
         }
-        #expect(retryAfter == nil)
+        #expect(response.retryAfter == nil)
     }
 
     @Test("A 429 keeps its full response, including rate-limit headers")
@@ -123,14 +123,14 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .serverError(let code, let data, let retryAfter, let response)? = error else {
+        guard case .serverError(let response)? = error else {
             Issue.record("Expected serverError, got \(String(describing: error))")
             return
         }
-        #expect(code == 503)
-        #expect(data == body)
-        #expect(retryAfter == 12)
-        #expect(response?.header("x-region") == "eu")
+        #expect(response.statusCode == 503)
+        #expect(response.body == body)
+        #expect(response.retryAfter == 12)
+        #expect(response.header("x-region") == "eu")
     }
 
     @Test("Retry-After is ignored on statuses where it has no retry meaning")
@@ -278,11 +278,11 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .serverError(let code, _, _, _)? = error else {
+        guard case .serverError(let response)? = error else {
             Issue.record("Expected serverError, got \(String(describing: error))")
             return
         }
-        #expect(code == 500)
+        #expect(response.statusCode == 500)
         #expect(stub.requests.count == 3)
     }
 

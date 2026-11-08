@@ -386,14 +386,14 @@ public actor NetworkClient: NetworkDataSource {
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
-            let error = NetworkError.unauthorized(response: response)
+            let error = NetworkError.unauthorized(response)
             await trace.failed(error)
             throw error
         }
 
         guard await provider.shouldRefreshAuthorization(after: response) else {
             Logger.info("Authorization provider declined to refresh for this 401", category: .auth)
-            let error = NetworkError.unauthorized(response: response)
+            let error = NetworkError.unauthorized(response)
             await trace.failed(error)
             throw error
         }

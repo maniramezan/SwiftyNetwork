@@ -4,57 +4,57 @@ import Foundation
 ///
 /// Single source of truth for status mapping, shared by ``NetworkClient`` and
 /// ``RemoteDataCache``. ``NetworkClient`` handles `401` through its auth-refresh
-/// path before validation runs; other callers get ``NetworkError/unauthorized(response:)``.
+/// path before validation runs; other callers get ``NetworkError/unauthorized(_:)``.
 ///
-/// The validator reads the headers itself, so no caller can forget to attach the
-/// ``HTTPErrorResponse`` snapshot or the parsed `Retry-After`.
+/// Every thrown error carries the ``HTTPErrorResponse`` snapshot, which parses
+/// `Retry-After` itself, so no caller can forget either.
 enum HTTPStatusValidator {
-    /// The statuses on which `Retry-After` is meaningful for an error (RFC 9110 §10.2.3).
-    private static let retryAfterStatusCodes: Set<Int> = [429, 503]
-
     /// Throws the ``NetworkError`` that corresponds to a non-2xx response.
     ///
     /// - Parameters:
     ///   - httpResponse: The response whose status code and headers are inspected.
     ///   - data: The response body, retained on the thrown error.
-    /// - Throws: ``NetworkError/unauthorized(response:)``, ``NetworkError/forbidden(response:)``,
-    ///   ``NetworkError/notFound(response:)``, ``NetworkError/timeout(response:)``,
-    ///   ``NetworkError/tooManyRequests(retryAfter:data:response:)``, or
-    ///   ``NetworkError/serverError(statusCode:data:retryAfter:response:)``. Every error that
-    ///   carries a payload also carries the full ``HTTPErrorResponse`` snapshot.
+    /// - Throws: ``NetworkError/unauthorized(_:)``, ``NetworkError/forbidden(_:)``,
+    ///   ``NetworkError/notFound(_:)``, ``NetworkError/timeout(_:)``,
+    ///   ``NetworkError/tooManyRequests(_:)``, ``NetworkError/clientError(_:)``,
+    ///   ``NetworkError/serverError(_:)``, or ``NetworkError/unexpectedStatus(_:)``.
     static func validate(_ httpResponse: HTTPURLResponse, data: Data) throws {
         let statusCode = httpResponse.statusCode
-        switch statusCode {
-        case 200..<300:
+        if (200..<300).contains(statusCode) {
             Logger.debug("Request successful with status \(statusCode)")
+            return
+        }
+        throw error(for: HTTPErrorResponse(httpResponse, body: data))
+    }
+
+    /// Returns the ``NetworkError`` for a non-2xx response snapshot.
+    static func error(for response: HTTPErrorResponse) -> NetworkError {
+        let statusCode = response.statusCode
+        switch statusCode {
         case 401:
             Logger.warning("Unauthorized request (401)")
-            throw NetworkError.unauthorized(response: HTTPErrorResponse(httpResponse, body: data))
+            return .unauthorized(response)
         case 403:
             Logger.warning("Forbidden request (403)")
-            throw NetworkError.forbidden(response: HTTPErrorResponse(httpResponse, body: data))
+            return .forbidden(response)
         case 404:
             Logger.warning("Resource not found (404)")
-            throw NetworkError.notFound(response: HTTPErrorResponse(httpResponse, body: data))
+            return .notFound(response)
         case 408:
             Logger.warning("Request timeout (408)")
-            throw NetworkError.timeout(response: HTTPErrorResponse(httpResponse, body: data))
+            return .timeout(response)
         case 429:
             Logger.warning("Too many requests (429)")
-            throw NetworkError.tooManyRequests(
-                retryAfter: RetryAfter.parse(from: httpResponse),
-                data: data,
-                response: HTTPErrorResponse(httpResponse, body: data)
-            )
-        default:
+            return .tooManyRequests(response)
+        case 400..<500:
+            Logger.warning("Client error with status \(statusCode)")
+            return .clientError(response)
+        case 500..<600:
             Logger.error("Server error with status \(statusCode)")
-            let retryAfter = retryAfterStatusCodes.contains(statusCode) ? RetryAfter.parse(from: httpResponse) : nil
-            throw NetworkError.serverError(
-                statusCode: statusCode,
-                data: data,
-                retryAfter: retryAfter,
-                response: HTTPErrorResponse(httpResponse, body: data)
-            )
+            return .serverError(response)
+        default:
+            Logger.error("Unexpected status \(statusCode)")
+            return .unexpectedStatus(response)
         }
     }
 }

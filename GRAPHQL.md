@@ -80,8 +80,8 @@ See the [GraphQL response specification](https://spec.graphql.org/September2025/
 
 Non-2xx responses follow `NetworkError` mapping before GraphQL decoding. Every
 HTTP error case (`unauthorized`, `forbidden`, `notFound`, `timeout` for a `408`,
-`tooManyRequests` and `serverError`) carries its `HTTPErrorResponse` in
-`NetworkError.response`, so the status, headers, and body of a non-2xx GraphQL
+`tooManyRequests`, `clientError`, `serverError`, and `unexpectedStatus`) carries its
+`HTTPErrorResponse` in `NetworkError.response`, so the status, headers, and body of a non-2xx GraphQL
 error envelope are recoverable. A `200` response with an `errors` array, and
 any successful response, still needs a raw response transport API, which this
 package does not yet provide. Media types and
