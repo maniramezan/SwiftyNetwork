@@ -61,6 +61,33 @@ struct HTTPErrorResponseTests {
         #expect(response.body == body)
     }
 
+    @Test("Descriptions redact header values and body bytes, including inside a NetworkError")
+    func descriptionsAreRedacted() {
+        let response = HTTPErrorResponse(
+            statusCode: 401,
+            headers: ["Set-Cookie": "session=SECRET-COOKIE", "X-Request-Id": "abc"],
+            body: Data("SECRET-BODY".utf8)
+        )
+        let error = NetworkError.unauthorized(response: response)
+
+        for text in [
+            response.description,
+            response.debugDescription,
+            String(describing: response),
+            String(reflecting: response),
+            "\(response)",
+            String(describing: error),
+            String(reflecting: error),
+        ] {
+            #expect(!text.contains("SECRET"))
+            #expect(text.contains("401"))
+        }
+        #expect(
+            response.description
+                == "HTTPErrorResponse(statusCode: 401, headers: [Set-Cookie, X-Request-Id], body: 11 bytes)"
+        )
+    }
+
     @Test("Only 401 and 403 errors carry a response")
     func responseAccessorIsLimitedToAuthErrors() {
         let response = HTTPErrorResponse(statusCode: 401)
@@ -110,7 +137,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let testId = "auth-response-401-after-retry"
@@ -149,7 +176,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let testId = "auth-response-endpoint-auth"
@@ -175,7 +202,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 0,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let testId = "auth-response-zero-budget"
@@ -202,7 +229,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let testId = "auth-response-403"
@@ -237,7 +264,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let testId = "auth-response-decline"
@@ -269,7 +296,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                retryDelay: 0
+                authRefreshDelay: 0
             )
         )
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")

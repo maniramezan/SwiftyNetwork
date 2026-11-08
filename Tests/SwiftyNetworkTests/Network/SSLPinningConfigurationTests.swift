@@ -404,7 +404,7 @@ struct SSLPinningConfigurationTests {
             authorizationProvider: authorizationProvider,
             maxAuthRefreshAttempts: -1,
             timeoutInterval: 12,
-            retryDelay: 0,
+            authRefreshDelay: 0,
             logLevel: .info
         )
         let client = NetworkClient(configuration: configuration)
@@ -417,7 +417,7 @@ struct SSLPinningConfigurationTests {
 
         #expect(configuration.maxAuthRefreshAttempts == 0)
         #expect(configuration.timeoutInterval == 12)
-        #expect(configuration.retryDelay == 0)
+        #expect(configuration.authRefreshDelay == 0)
         #expect(configuration.logLevel == .info)
         #expect(response == user)
         configuration.session.invalidateAndCancel()

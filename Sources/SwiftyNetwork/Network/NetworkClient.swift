@@ -417,10 +417,10 @@ public actor NetworkClient: NetworkDataSource {
         }
         Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
 
-        if configuration.retryDelay > 0 {
-            Logger.debug("Waiting \(configuration.retryDelay)s before retry")
+        if configuration.authRefreshDelay > 0 {
+            Logger.debug("Waiting \(configuration.authRefreshDelay)s before retry")
             do {
-                try await Task.sleep(for: .seconds(configuration.retryDelay))
+                try await Task.sleep(for: .seconds(configuration.authRefreshDelay))
             } catch {
                 // Cancelled while waiting: close out this attempt for observers.
                 await trace.failed(.underlying(AnySendableError(error)))

@@ -8,7 +8,9 @@ import Foundation
 /// (a token refresh can fix it) from one that does not.
 ///
 /// The body is the raw server payload and can contain user-specific data. SwiftyNetwork never
-/// logs it; do the same in your own logging.
+/// logs it; do the same in your own logging. The `description` and `debugDescription` are
+/// redacted so that interpolating the response, or a ``NetworkError`` that carries it, into a log
+/// line reveals only the status code, header names, and body size, never header values or body bytes.
 ///
 /// Example:
 /// ```swift
@@ -77,5 +79,21 @@ public struct HTTPErrorResponse: Sendable, Equatable {
             }
         }
         self.init(statusCode: response.statusCode, headers: headers, body: body)
+    }
+}
+
+extension HTTPErrorResponse: CustomStringConvertible, CustomDebugStringConvertible {
+    /// A redacted summary: the status code, the sorted header names, and the body size in bytes.
+    ///
+    /// Header values and body bytes are omitted because they can carry credentials,
+    /// cookies, or personal data.
+    public var description: String {
+        let names = headers.keys.sorted().joined(separator: ", ")
+        return "HTTPErrorResponse(statusCode: \(statusCode), headers: [\(names)], body: \(body.count) bytes)"
+    }
+
+    /// The same redacted summary as ``description``.
+    public var debugDescription: String {
+        description
     }
 }

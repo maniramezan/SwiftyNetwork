@@ -178,7 +178,7 @@ gate.open()
 let stub = try TestHTTPStub()
 defer { stub.invalidate() }
 let session = stub.session
-let config = NetworkClientConfiguration(session: session, retryDelay: 0)
+let config = NetworkClientConfiguration(session: session, authRefreshDelay: 0)
 let client = NetworkClient(configuration: config)
 stub.setResponses([.success(data)], for: "test-id")
 let endpoint = makeEndpointWithTestId("test-id")
@@ -255,7 +255,7 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - `NetworkEndpoint` is the only endpoint protocol (has defaults, used by NetworkClient)
 - `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
 - `AnyCache` conforms to `Cache` protocol -- struct with immutable `@Sendable` closures
-- `retryDelay` applies `Task.sleep(for:)` before auth retry; use `retryDelay: 0` in tests
+- `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: 0` in tests
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
   (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
 - 429 is `NetworkError.tooManyRequests(retryAfter:data:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`

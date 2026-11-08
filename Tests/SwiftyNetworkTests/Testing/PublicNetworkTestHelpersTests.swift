@@ -19,7 +19,7 @@ struct PublicNetworkTestHelpersTests {
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
                 session: stub.session, authorizationProvider: provider,
-                maxAuthRefreshAttempts: 1, retryDelay: 0, instrumentation: recorder
+                maxAuthRefreshAttempts: 1, authRefreshDelay: 0, instrumentation: recorder
             ))
 
         await #expect {
@@ -61,7 +61,7 @@ struct PublicNetworkTestHelpersTests {
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
                 session: stub.session, authorizationProvider: provider,
-                retryDelay: 0, instrumentation: recorder
+                authRefreshDelay: 0, instrumentation: recorder
             ))
 
         await #expect {
@@ -98,7 +98,7 @@ struct PublicNetworkTestHelpersTests {
         let client = NetworkClient(
             configuration: NetworkClientConfiguration(
                 session: stub.session, authorizationProvider: provider,
-                retryDelay: 0, instrumentation: recorder
+                authRefreshDelay: 0, instrumentation: recorder
             ))
 
         await #expect {

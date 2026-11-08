@@ -70,10 +70,13 @@ public struct NetworkClientConfiguration: Sendable {
     /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
     public var timeoutInterval: TimeInterval
 
-    /// Delay applied before retrying a request after a successful auth refresh.
+    /// Delay applied before replaying a request after a successful auth refresh.
+    ///
+    /// This applies only to the `401` refresh path. It is unrelated to ``retryPolicy``,
+    /// which controls backoff for transient failures.
     ///
     /// Set this to `0` in tests or when the API can be retried immediately.
-    public var retryDelay: TimeInterval
+    public var authRefreshDelay: TimeInterval
 
     /// Verbosity for SwiftyNetwork's internal logger.
     ///
@@ -101,7 +104,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
-    ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
+    ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
@@ -113,7 +116,7 @@ public struct NetworkClientConfiguration: Sendable {
         authorizationProvider: AuthorizationProvider? = nil,
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
-        retryDelay: TimeInterval = 1.0,
+        authRefreshDelay: TimeInterval = 1.0,
         logLevel: LogLevel? = nil,
         instrumentation: (any NetworkInstrumentation)? = nil,
         retryPolicy: NetworkRetryPolicy? = nil
@@ -124,7 +127,7 @@ public struct NetworkClientConfiguration: Sendable {
         self.authorizationProvider = authorizationProvider
         self.maxAuthRefreshAttempts = max(0, maxAuthRefreshAttempts)
         self.timeoutInterval = timeoutInterval
-        self.retryDelay = retryDelay
+        self.authRefreshDelay = authRefreshDelay
         self.logLevel = logLevel
         self.instrumentation = instrumentation
         self.retryPolicy = retryPolicy
@@ -145,7 +148,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
-    ///   - retryDelay: Delay before retrying after auth refresh. Defaults to 1 second.
+    ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
@@ -159,7 +162,7 @@ public struct NetworkClientConfiguration: Sendable {
         authorizationProvider: AuthorizationProvider? = nil,
         maxAuthRefreshAttempts: Int = 1,
         timeoutInterval: TimeInterval = 30,
-        retryDelay: TimeInterval = 1.0,
+        authRefreshDelay: TimeInterval = 1.0,
         logLevel: LogLevel? = nil,
         instrumentation: (any NetworkInstrumentation)? = nil,
         retryPolicy: NetworkRetryPolicy? = nil
@@ -177,7 +180,7 @@ public struct NetworkClientConfiguration: Sendable {
             authorizationProvider: authorizationProvider,
             maxAuthRefreshAttempts: maxAuthRefreshAttempts,
             timeoutInterval: timeoutInterval,
-            retryDelay: retryDelay,
+            authRefreshDelay: authRefreshDelay,
             logLevel: logLevel,
             instrumentation: instrumentation,
             retryPolicy: retryPolicy
