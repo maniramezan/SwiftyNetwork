@@ -4,8 +4,8 @@ import SwiftyNetwork
 /// A scriptable client for SwiftyNetwork requests in unit tests and SwiftUI previews.
 ///
 /// Stub responses per HTTP method and path, then inject the mock wherever the
-/// code under test accepts `any APIClient` or a `NetworkDataSource` (for
-/// example `GenericRepository` or `MutationQueue`). Every request is recorded
+/// code under test accepts `any APIClient` (for example `GenericRepository`
+/// or `MutationQueue`). Every request is recorded
 /// so tests can assert on what was sent.
 ///
 /// Responses for a route are consumed in order; the last one repeats for any
@@ -24,7 +24,7 @@ import SwiftyNetwork
 /// let sent = await client.requests(to: "/users/1")
 /// #expect(sent.count == 1)
 /// ```
-public actor MockAPIClient: NetworkDataSource {
+public actor MockAPIClient: APIClient {
     /// A scripted outcome for a stubbed route.
     public enum Response: Sendable {
         /// JSON bytes decoded into the requested type with the mock's decoder.

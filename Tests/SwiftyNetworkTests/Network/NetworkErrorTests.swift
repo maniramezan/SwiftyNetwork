@@ -47,7 +47,7 @@ func testAllNetworkErrorCases() {
     let invalidData = NetworkError.invalidData
     #expect(invalidData.errorDescription?.contains("data") == true)
 
-    let authRefresh = NetworkError.authorizationRefreshFailed
+    let authRefresh = NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired))
     #expect(
         authRefresh.errorDescription?.contains("authorization") == true
             || authRefresh.errorDescription?.contains("refresh") == true)
@@ -109,7 +109,9 @@ func testClassificationMapsEveryCase() {
     #expect(NetworkError.noInternetConnection.classification == .noConnection)
     #expect(NetworkError.decodingFailed(underlying: URLError(.badURL)).classification == .decodingFailed)
     #expect(NetworkError.encodingFailed(underlying: URLError(.badURL)).classification == .encodingFailed)
-    #expect(NetworkError.authorizationRefreshFailed.classification == .authorizationRefreshFailed)
+    #expect(
+        NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)).classification
+            == .authorizationRefreshFailed)
     #expect(NetworkError.underlying(URLError(.badURL)).classification == .underlying)
 }
 
@@ -130,7 +132,7 @@ func testIsTransientMatchesClassification() {
         .noInternetConnection,
         .decodingFailed(underlying: URLError(.badURL)),
         .encodingFailed(underlying: URLError(.badURL)),
-        .authorizationRefreshFailed,
+        .authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)),
         .underlying(URLError(.badURL)),
     ]
     for error in errors {
@@ -157,7 +159,7 @@ func testIsTransientClassifiesTransientErrors() {
     #expect(!NetworkError.invalidData.isTransient)
     #expect(!NetworkError.decodingFailed(underlying: URLError(.badURL)).isTransient)
     #expect(!NetworkError.encodingFailed(underlying: URLError(.badURL)).isTransient)
-    #expect(!NetworkError.authorizationRefreshFailed.isTransient)
+    #expect(!NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)).isTransient)
     #expect(!NetworkError.underlying(URLError(.badURL)).isTransient)
 }
 

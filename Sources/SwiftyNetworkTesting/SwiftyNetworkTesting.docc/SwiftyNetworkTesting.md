@@ -17,7 +17,7 @@ never from production targets:
 )
 ```
 
-``MockAPIClient`` conforms to SwiftyNetwork's `APIClient` and `NetworkDataSource`,
+``MockAPIClient`` conforms to SwiftyNetwork's `APIClient`,
 so it plugs into anything that accepts `any APIClient`, `GenericRepository`,
 or `MutationQueue`. Stub responses per HTTP method and path, run the code
 under test, then assert on ``MockAPIClient/recordedRequests``:
