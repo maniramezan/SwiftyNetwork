@@ -495,7 +495,7 @@ do {
 }
 ```
 
-`unauthorized`, `forbidden`, `tooManyRequests`, and `serverError` carry the rejected response. Read its status,
+Every HTTP error (`unauthorized`, `forbidden`, `notFound`, `timeout` for a `408`, `tooManyRequests`, and `serverError`) carries the rejected response. Read its status,
 headers, and body through `NetworkError.response` to tell apart failures that share a status code, such as an
 API error `code` in the body, the `WWW-Authenticate` challenge, or `X-RateLimit-*` headers:
 
@@ -515,7 +515,7 @@ do {
 ```
 
 `catch NetworkError.unauthorized` without a binding still matches. Construct these errors in test doubles
-as `NetworkError.unauthorized()` or `NetworkError.forbidden(response: ...)`. The body is raw server data and
+as `NetworkError.unauthorized()`, `NetworkError.notFound()`, or `NetworkError.forbidden(response: ...)`. The body is raw server data and
 may contain user information, so don't log it. `HTTPErrorResponse` prints only its status code, header names,
 and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
 

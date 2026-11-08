@@ -88,20 +88,24 @@ struct HTTPErrorResponseTests {
         )
     }
 
-    @Test("Errors that carry a payload expose their response; the rest return nil")
-    func responseAccessorCoversPayloadErrors() {
+    @Test("Every HTTP error exposes its response; transport errors and responseless doubles return nil")
+    func responseAccessorCoversHTTPErrors() {
         let response = HTTPErrorResponse(statusCode: 401)
         #expect(NetworkError.unauthorized(response: response).response == response)
         #expect(NetworkError.forbidden(response: response).response == response)
         #expect(NetworkError.tooManyRequests(retryAfter: 1, data: Data(), response: response).response == response)
         #expect(NetworkError.serverError(statusCode: 500, data: nil, response: response).response == response)
+        #expect(NetworkError.notFound(response: response).response == response)
+        #expect(NetworkError.timeout(response: response).response == response)
 
         #expect(NetworkError.unauthorized().response == nil)
         #expect(NetworkError.forbidden().response == nil)
         #expect(NetworkError.tooManyRequests(retryAfter: 1, data: Data()).response == nil)
         #expect(NetworkError.serverError(statusCode: 500, data: nil).response == nil)
-        #expect(NetworkError.notFound.response == nil)
-        #expect(NetworkError.timeout.response == nil)
+        #expect(NetworkError.notFound().response == nil)
+        #expect(NetworkError.timeout().response == nil)
+        #expect(NetworkError.noInternetConnection.response == nil)
+        #expect(NetworkError.invalidResponse.response == nil)
     }
 }
 
@@ -126,6 +130,47 @@ struct NetworkClientAuthErrorResponseTests {
             #expect(response?.wwwAuthenticate == challenge)
             #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
         }
+    }
+
+    @Test("A 404 and a 408 keep their status, headers, and body")
+    func notFoundAndTimeoutCarryResponse() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let client = NetworkClient(configuration: NetworkClientConfiguration(session: stub.session))
+
+        for status in [404, 408] {
+            let testId = "auth-response-\(status)"
+            stub.setResponses(
+                [.status(status, data: errorBody("missing_\(status)"), headers: ["X-Test": "1"])],
+                for: testId
+            )
+
+            let error = await #expect(throws: NetworkError.self) {
+                try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+            }
+
+            let response = try #require(error?.response)
+            #expect(response.statusCode == status)
+            #expect(response.header("x-test") == "1")
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "missing_\(status)"))
+            switch status {
+            case 404:
+                guard case .notFound? = error else {
+                    Issue.record("Expected notFound, got \(String(describing: error))")
+                    return
+                }
+            default:
+                guard case .timeout? = error else {
+                    Issue.record("Expected timeout, got \(String(describing: error))")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test("A transport timeout has no response")
+    func transportTimeoutHasNoResponse() {
+        #expect(NetworkError.mapURLError(URLError(.timedOut)).response == nil)
     }
 
     @Test("After a refresh and retry, the error carries the final 401")
@@ -321,13 +366,15 @@ struct NetworkClientAuthErrorResponseTests {
 
 @Suite("RemoteDataCache auth error responses")
 struct RemoteDataCacheAuthErrorResponseTests {
-    @Test("401 and 403 from the byte cache carry the response")
+    @Test("401, 403, 404 and 408 from the byte cache carry the response")
     func cacheErrorsCarryResponse() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
         let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
-        for (status, code) in [(401, "authentication_failed"), (403, "registration_required")] {
+        for (status, code) in [
+            (401, "authentication_failed"), (403, "registration_required"), (404, "missing"), (408, "slow"),
+        ] {
             let testId = "cache-auth-\(status)"
             stub.setResponses([.status(status, data: errorBody(code), headers: ["X-Test": "1"])], for: testId)
             let url = try #require(URL(string: "https://api.test.com/img?test-id=\(testId)"))

@@ -19,7 +19,7 @@ func testNetworkErrorDescriptionsAndData() {
 
 @Test("NetworkError covers all cases")
 func testAllNetworkErrorCases() {
-    let notFound = NetworkError.notFound
+    let notFound = NetworkError.notFound()
     #expect(
         notFound.errorDescription?.contains("404") == true || notFound.errorDescription?.contains("not found") == true)
 
@@ -33,7 +33,7 @@ func testAllNetworkErrorCases() {
         forbidden.errorDescription?.contains("403") == true || forbidden.errorDescription?.contains("forbidden") == true
     )
 
-    let timeout = NetworkError.timeout
+    let timeout = NetworkError.timeout()
     #expect(timeout.errorDescription?.contains("timed out") == true)
 
     let noConnection = NetworkError.noInternetConnection
@@ -61,9 +61,9 @@ func testAllNetworkErrorCases() {
 
 @Test("NetworkError responseBody returns nil for non-server errors")
 func testServerErrorDataReturnsNilForNonServerErrors() {
-    #expect(NetworkError.notFound.responseBody == nil)
+    #expect(NetworkError.notFound().responseBody == nil)
     #expect(NetworkError.unauthorized().responseBody == nil)
-    #expect(NetworkError.timeout.responseBody == nil)
+    #expect(NetworkError.timeout().responseBody == nil)
 }
 
 @Test("classification maps every NetworkError case to the matching NetworkErrorClassification")
@@ -75,8 +75,8 @@ func testClassificationMapsEveryCase() {
     #expect(NetworkError.tooManyRequests(retryAfter: 5, data: Data()).classification == .tooManyRequests)
     #expect(NetworkError.unauthorized().classification == .unauthorized)
     #expect(NetworkError.forbidden().classification == .forbidden)
-    #expect(NetworkError.notFound.classification == .notFound)
-    #expect(NetworkError.timeout.classification == .timeout)
+    #expect(NetworkError.notFound().classification == .notFound)
+    #expect(NetworkError.timeout().classification == .timeout)
     #expect(NetworkError.noInternetConnection.classification == .noConnection)
     #expect(NetworkError.decodingFailed(underlying: URLError(.badURL)).classification == .decodingFailed)
     #expect(NetworkError.encodingFailed(underlying: URLError(.badURL)).classification == .encodingFailed)
@@ -95,8 +95,8 @@ func testIsTransientMatchesClassification() {
         .tooManyRequests(retryAfter: nil, data: Data()),
         .unauthorized(),
         .forbidden(),
-        .notFound,
-        .timeout,
+        .notFound(),
+        .timeout(),
         .noInternetConnection,
         .decodingFailed(underlying: URLError(.badURL)),
         .encodingFailed(underlying: URLError(.badURL)),
@@ -110,7 +110,7 @@ func testIsTransientMatchesClassification() {
 
 @Test("isTransient is true only for timeouts, missing connectivity, invalid responses, 429, and 5xx errors")
 func testIsTransientClassifiesTransientErrors() {
-    #expect(NetworkError.timeout.isTransient)
+    #expect(NetworkError.timeout().isTransient)
     #expect(NetworkError.noInternetConnection.isTransient)
     #expect(NetworkError.invalidResponse.isTransient)
     #expect(NetworkError.serverError(statusCode: 500, data: nil).isTransient)
@@ -121,7 +121,7 @@ func testIsTransientClassifiesTransientErrors() {
     #expect(!NetworkError.serverError(statusCode: 499, data: nil).isTransient)
     #expect(!NetworkError.unauthorized().isTransient)
     #expect(!NetworkError.forbidden().isTransient)
-    #expect(!NetworkError.notFound.isTransient)
+    #expect(!NetworkError.notFound().isTransient)
     #expect(!NetworkError.invalidURL(url: "x").isTransient)
     #expect(!NetworkError.invalidData.isTransient)
     #expect(!NetworkError.decodingFailed(underlying: URLError(.badURL)).isTransient)
@@ -181,7 +181,7 @@ func testTooManyRequestsAccessors() {
     #expect(error.errorDescription?.contains("Too many requests") == true)
     #expect(NetworkError.tooManyRequests(retryAfter: nil, data: Data()).retryAfter == nil)
     #expect(NetworkError.serverError(statusCode: 503, data: nil).retryAfter == nil)
-    #expect(NetworkError.timeout.retryAfter == nil)
+    #expect(NetworkError.timeout().retryAfter == nil)
 }
 
 @Test("serverError exposes retryAfter, its response body, and its response")

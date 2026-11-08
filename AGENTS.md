@@ -262,8 +262,8 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced;
   it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
-- `NetworkError.unauthorized` / `.forbidden` / `.tooManyRequests` / `.serverError` carry an optional
-  `HTTPErrorResponse` (status, headers, body), built by `HTTPStatusValidator` from the `HTTPURLResponse`;
+- Every HTTP-derived `NetworkError` (`.unauthorized` / `.forbidden` / `.notFound` / `.timeout` for 408 /
+  `.tooManyRequests` / `.serverError`) carries an optional `HTTPErrorResponse` (status, headers, body), built by `HTTPStatusValidator` from the `HTTPURLResponse`;
   its `description` is redacted, but still never log the body. `Retry-After` is parsed for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly

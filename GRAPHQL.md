@@ -78,10 +78,13 @@ extend it with typed `locations`, mixed string/integer `path` components, and
 server-specific `extensions` when the application needs those details.
 See the [GraphQL response specification](https://spec.graphql.org/September2025/#sec-Response).
 
-Non-2xx responses follow `NetworkError` mapping before GraphQL decoding. Some
-status mappings retain the body in `serverError`; others do not. Applications
-requiring every GraphQL error envelope, regardless of HTTP status, need a raw
-response transport API, which this package does not yet provide. Media types and
+Non-2xx responses follow `NetworkError` mapping before GraphQL decoding. Every
+HTTP error case (`unauthorized`, `forbidden`, `notFound`, `timeout` for a `408`,
+`tooManyRequests` and `serverError`) carries its `HTTPErrorResponse` in
+`NetworkError.response`, so the status, headers, and body of a non-2xx GraphQL
+error envelope are recoverable. A `200` response with an `errors` array, and
+any successful response, still needs a raw response transport API, which this
+package does not yet provide. Media types and
 status semantics are described by the [GraphQL over HTTP draft](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md).
 
 Cache keys must include operation, variables, and account/tenant identity. Decide

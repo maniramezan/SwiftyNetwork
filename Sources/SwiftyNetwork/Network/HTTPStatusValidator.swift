@@ -18,7 +18,7 @@ enum HTTPStatusValidator {
     ///   - httpResponse: The response whose status code and headers are inspected.
     ///   - data: The response body, retained on the thrown error.
     /// - Throws: ``NetworkError/unauthorized(response:)``, ``NetworkError/forbidden(response:)``,
-    ///   ``NetworkError/notFound``, ``NetworkError/timeout``,
+    ///   ``NetworkError/notFound(response:)``, ``NetworkError/timeout(response:)``,
     ///   ``NetworkError/tooManyRequests(retryAfter:data:response:)``, or
     ///   ``NetworkError/serverError(statusCode:data:retryAfter:response:)``. Every error that
     ///   carries a payload also carries the full ``HTTPErrorResponse`` snapshot.
@@ -35,10 +35,10 @@ enum HTTPStatusValidator {
             throw NetworkError.forbidden(response: HTTPErrorResponse(httpResponse, body: data))
         case 404:
             Logger.warning("Resource not found (404)")
-            throw NetworkError.notFound
+            throw NetworkError.notFound(response: HTTPErrorResponse(httpResponse, body: data))
         case 408:
             Logger.warning("Request timeout (408)")
-            throw NetworkError.timeout
+            throw NetworkError.timeout(response: HTTPErrorResponse(httpResponse, body: data))
         case 429:
             Logger.warning("Too many requests (429)")
             throw NetworkError.tooManyRequests(
