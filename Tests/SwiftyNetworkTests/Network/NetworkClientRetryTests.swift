@@ -16,7 +16,7 @@ struct NetworkClientRetryTests {
         NetworkClient(
             configuration: NetworkClientConfiguration(
                 session: stub.session,
-                retryDelay: 0,
+                authRefreshDelay: 0,
                 instrumentation: instrumentation,
                 retryPolicy: retryPolicy
             )
@@ -370,7 +370,7 @@ struct NetworkClientRetryTests {
             configuration: NetworkClientConfiguration(
                 session: stub.session,
                 authorizationProvider: provider,
-                retryDelay: 0,
+                authRefreshDelay: 0,
                 retryPolicy: .init(baseDelay: 0, maxDelay: 0)
             )
         )

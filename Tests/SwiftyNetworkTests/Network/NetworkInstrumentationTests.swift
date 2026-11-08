@@ -93,7 +93,7 @@ struct NetworkInstrumentationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            retryDelay: 0,
+            authRefreshDelay: 0,
             instrumentation: instrumentation
         )
         let client = NetworkClient(configuration: configuration)
@@ -129,7 +129,7 @@ struct NetworkInstrumentationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            retryDelay: 0,
+            authRefreshDelay: 0,
             instrumentation: instrumentation
         )
         let client = NetworkClient(configuration: configuration)

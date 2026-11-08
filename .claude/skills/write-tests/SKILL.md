@@ -29,7 +29,7 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
   event from a stream (`firstEvent(in:where:)`, `collectEvents(_:count:)`) -- both wrap
   TestCommons `observeStream` with an event budget and a 5-second deadline, so a failure can't
   hang the suite. A deadline finishes the stream, so don't reuse a stream after a miss.
-- Use `retryDelay: 0` for `NetworkClientConfiguration` and
+- Use `authRefreshDelay: 0` for `NetworkClientConfiguration` and
   `MutationRetryPolicy.immediate()` (or `baseDelay: 0`) for queues.
 - `#expect(throws: SomeError.self)` for expected errors; `#require` for
   prerequisites; `Issue.record` only for unreachable branches.
