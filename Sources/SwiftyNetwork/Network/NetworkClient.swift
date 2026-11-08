@@ -41,7 +41,7 @@ public actor NetworkClient: APIClient {
     ///
     /// Example:
     /// ```swift
-    /// let configuration = NetworkClientConfiguration(timeoutInterval: 10)
+    /// let configuration = NetworkClientConfiguration(timeout: .seconds(10))
     /// let client = NetworkClient(configuration: configuration)
     /// ```
     ///
@@ -147,7 +147,7 @@ public actor NetworkClient: APIClient {
         await trace.start()
 
         var request = endpoint.makeUnauthenticatedURLRequest(url: url)
-        request.timeoutInterval = configuration.timeoutInterval
+        request.timeoutInterval = configuration.timeout.timeInterval
         let providerAuthorization = await applyAuthorization(
             to: &request,
             from: endpoint,
@@ -229,12 +229,12 @@ public actor NetworkClient: APIClient {
 
         let delay = policy.delay(forRetry: retryAttempt + 1, after: error)
         Logger.info(
-            "Retrying \(endpoint.method.rawValue) after \(error.classification) in \(delay)s "
+            "Retrying \(endpoint.method.rawValue) after \(error.classification) in \(delay) "
                 + "(retry \(retryAttempt + 1) of \(policy.maxRetries))"
         )
-        if delay > 0 {
+        if delay > .zero {
             do {
-                try await Task.sleep(for: .seconds(delay))
+                try await Task.sleep(for: delay)
             } catch {
                 // Cancelled while waiting: close out this attempt for observers.
                 Logger.info("Retry wait cancelled")
@@ -381,10 +381,10 @@ public actor NetworkClient: APIClient {
         }
         Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
 
-        if configuration.authRefreshDelay > 0 {
-            Logger.debug("Waiting \(configuration.authRefreshDelay)s before retry")
+        if configuration.authRefreshDelay > .zero {
+            Logger.debug("Waiting \(configuration.authRefreshDelay) before retry")
             do {
-                try await Task.sleep(for: .seconds(configuration.authRefreshDelay))
+                try await Task.sleep(for: configuration.authRefreshDelay)
             } catch {
                 // Cancelled while waiting: close out this attempt for observers.
                 await trace.failed(.underlying(AnySendableError(error)))

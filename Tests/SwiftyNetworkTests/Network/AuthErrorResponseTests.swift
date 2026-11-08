@@ -184,7 +184,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let testId = "auth-response-401-after-retry"
@@ -223,7 +223,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let testId = "auth-response-endpoint-auth"
@@ -249,7 +249,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 0,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let testId = "auth-response-zero-budget"
@@ -276,7 +276,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let testId = "auth-response-403"
@@ -311,7 +311,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let testId = "auth-response-decline"
@@ -343,7 +343,7 @@ struct NetworkClientAuthErrorResponseTests {
                 session: stub.session,
                 authorizationProvider: provider,
                 maxAuthRefreshAttempts: 1,
-                authRefreshDelay: 0
+                authRefreshDelay: .zero
             )
         )
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
@@ -403,7 +403,7 @@ struct RemoteDataCacheAuthErrorResponseTests {
                 _ = try await cache.data(for: url)
                 Issue.record("Expected status \(status) to throw")
             } catch let error as NetworkError {
-                #expect(error.retryAfter == 9)
+                #expect(error.retryAfter == .seconds(9))
                 #expect(error.response?.statusCode == status)
                 #expect(error.response?.header("x-test") == "1")
             }

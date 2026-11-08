@@ -11,10 +11,10 @@ extension NetworkRetryPolicy {
     public static func immediate(maxRetries: Int = 2) -> NetworkRetryPolicy {
         NetworkRetryPolicy(
             maxRetries: maxRetries,
-            baseDelay: 0,
-            maxDelay: 0,
+            baseDelay: .zero,
+            maxDelay: .zero,
             jitterRange: 1...1,
-            maxRetryAfter: 0
+            maxRetryAfter: .zero
         )
     }
 }

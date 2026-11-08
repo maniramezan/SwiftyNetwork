@@ -9,26 +9,26 @@ struct RetryAfterTests {
 
     @Test("Parses delta-seconds")
     func parsesDeltaSeconds() {
-        #expect(RetryAfter.parse("5", now: now) == 5)
-        #expect(RetryAfter.parse("0", now: now) == 0)
-        #expect(RetryAfter.parse("  120 ", now: now) == 120)
+        #expect(RetryAfter.parse("5", now: now) == .seconds(5))
+        #expect(RetryAfter.parse("0", now: now) == .seconds(0))
+        #expect(RetryAfter.parse("  120 ", now: now) == .seconds(120))
     }
 
     @Test("Parses the IMF-fixdate HTTP-date form relative to now")
     func parsesIMFFixdate() {
         // 1_445_412_000 is Wed, 21 Oct 2015 07:20:00 GMT.
-        #expect(RetryAfter.parse("Wed, 21 Oct 2015 07:28:00 GMT", now: now) == 480)
+        #expect(RetryAfter.parse("Wed, 21 Oct 2015 07:28:00 GMT", now: now) == .seconds(480))
     }
 
     @Test("Parses the obsolete RFC 850 and asctime HTTP-date forms")
     func parsesObsoleteDateForms() {
-        #expect(RetryAfter.parse("Wednesday, 21-Oct-15 07:21:00 GMT", now: now) == 60)
-        #expect(RetryAfter.parse("Wed Oct 21 07:22:00 2015", now: now) == 120)
+        #expect(RetryAfter.parse("Wednesday, 21-Oct-15 07:21:00 GMT", now: now) == .seconds(60))
+        #expect(RetryAfter.parse("Wed Oct 21 07:22:00 2015", now: now) == .seconds(120))
     }
 
     @Test("An HTTP-date in the past yields zero")
     func pastDateYieldsZero() {
-        #expect(RetryAfter.parse("Wed, 21 Oct 2015 07:00:00 GMT", now: now) == 0)
+        #expect(RetryAfter.parse("Wed, 21 Oct 2015 07:00:00 GMT", now: now) == .seconds(0))
     }
 
     @Test("Malformed values yield nil")
@@ -55,8 +55,8 @@ struct RetryAfterTests {
         )
         let without = try #require(HTTPURLResponse(url: url, statusCode: 429, httpVersion: nil, headerFields: [:]))
 
-        #expect(HTTPErrorResponse(tooMany, body: Data()).retryAfter == 7)
-        #expect(HTTPErrorResponse(unavailable, body: Data()).retryAfter == 3)
+        #expect(HTTPErrorResponse(tooMany, body: Data()).retryAfter == .seconds(7))
+        #expect(HTTPErrorResponse(unavailable, body: Data()).retryAfter == .seconds(3))
         #expect(HTTPErrorResponse(teapot, body: Data()).retryAfter == nil)
         #expect(HTTPErrorResponse(without, body: Data()).retryAfter == nil)
     }

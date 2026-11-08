@@ -402,8 +402,8 @@ struct SSLPinningConfigurationTests {
             session: pinning.makeSession(configuration: sessionConfiguration),
             authorizationProvider: authorizationProvider,
             maxAuthRefreshAttempts: -1,
-            authRefreshDelay: 0,
-            timeoutInterval: 12
+            authRefreshDelay: .zero,
+            timeout: .seconds(12)
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "ssl", name: "Pinned", email: "pin@example.com")
@@ -414,8 +414,8 @@ struct SSLPinningConfigurationTests {
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
         #expect(configuration.maxAuthRefreshAttempts == 0)
-        #expect(configuration.timeoutInterval == 12)
-        #expect(configuration.authRefreshDelay == 0)
+        #expect(configuration.timeout == .seconds(12))
+        #expect(configuration.authRefreshDelay == .zero)
         #expect(configuration.session.delegate is SSLPinningURLSessionDelegate)
         #expect(response == user)
         configuration.session.invalidateAndCancel()
