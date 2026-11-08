@@ -90,62 +90,18 @@ struct NetworkRetryPolicyTests {
         }
     }
 
-    @Test("Backoff doubles per retry and is capped at maxDelay")
-    func backoffDoublesAndCaps() {
-        let policy = NetworkRetryPolicy(
-            maxRetries: 10, baseDelay: .seconds(1), maxDelay: .seconds(5), jitterRange: 1...1)
-
-        #expect(policy.delay(forRetry: 1) == .seconds(1))
-        #expect(policy.delay(forRetry: 2) == .seconds(2))
-        #expect(policy.delay(forRetry: 3) == .seconds(4))
-        #expect(policy.delay(forRetry: 4) == .seconds(5))
-        #expect(policy.delay(forRetry: 10) == .seconds(5))
+    @Test("The default policy retries twice with the network default backoff")
+    func defaults() {
+        #expect(NetworkRetryPolicy.default.maxRetries == 2)
+        #expect(NetworkRetryPolicy.default.backoff == NetworkRetryPolicy.defaultBackoff)
+        #expect(NetworkRetryPolicy.defaultBackoff.baseDelay == .milliseconds(500))
+        #expect(NetworkRetryPolicy.defaultBackoff.maxDelay == .seconds(8))
+        #expect(NetworkRetryPolicy.defaultBackoff.maxRetryAfter == .seconds(30))
     }
 
-    @Test("Jitter scales the backoff within the range and never exceeds maxDelay")
-    func jitterStaysWithinBounds() {
-        let policy = NetworkRetryPolicy(baseDelay: .seconds(4), maxDelay: .seconds(5), jitterRange: 0.5...1.5)
-
-        #expect(policy.delay(forRetry: 1, jitterGenerator: { 0 }) == .seconds(2))
-        #expect(policy.delay(forRetry: 1, jitterGenerator: { 1 }) == .seconds(5))
-    }
-
-    @Test("Retry-After longer than the backoff sets the delay")
-    func retryAfterOverridesBackoff() {
-        let policy = NetworkRetryPolicy(
-            baseDelay: .seconds(0.5), maxDelay: .seconds(8), jitterRange: 1...1, maxRetryAfter: .seconds(30))
-        let error = NetworkError.tooManyRequests(.status(429, retryAfter: 5))
-
-        #expect(policy.delay(forRetry: 1, after: error) == .seconds(5))
-    }
-
-    @Test("A huge Retry-After is clamped to maxRetryAfter")
-    func hugeRetryAfterIsClamped() {
-        let policy = NetworkRetryPolicy(
-            baseDelay: .seconds(0.5), maxDelay: .seconds(8), jitterRange: 1...1, maxRetryAfter: .seconds(30))
-        let error = NetworkError.tooManyRequests(.status(429, retryAfter: 86_400))
-
-        #expect(policy.delay(forRetry: 1, after: error) == .seconds(30))
-    }
-
-    @Test("A Retry-After shorter than the backoff never shortens it")
-    func shortRetryAfterKeepsBackoff() {
-        let policy = NetworkRetryPolicy(baseDelay: .seconds(4), maxDelay: .seconds(8), jitterRange: 1...1)
-        let error = NetworkError.tooManyRequests(.status(429, retryAfter: 1))
-
-        #expect(policy.delay(forRetry: 1, after: error) == .seconds(4))
-    }
-
-    @Test("Initializer clamps negative values and keeps maxDelay at or above baseDelay")
-    func initializerClampsValues() {
-        let policy = NetworkRetryPolicy(
-            maxRetries: -1, baseDelay: .seconds(-2), maxDelay: .seconds(-3), maxRetryAfter: .seconds(-4))
-
-        #expect(policy.maxRetries == 0)
-        #expect(policy.baseDelay == .seconds(0))
-        #expect(policy.maxDelay == .seconds(0))
-        #expect(policy.maxRetryAfter == .zero)
-        #expect(NetworkRetryPolicy(baseDelay: .seconds(10), maxDelay: .seconds(2)).maxDelay == .seconds(10))
+    @Test("maxRetries is clamped to a non-negative value")
+    func negativeMaxRetriesIsClamped() {
+        #expect(NetworkRetryPolicy(maxRetries: -1).maxRetries == 0)
     }
 
     @Test("The retry policy is off by default")
