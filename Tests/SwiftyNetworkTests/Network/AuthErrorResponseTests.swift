@@ -88,15 +88,20 @@ struct HTTPErrorResponseTests {
         )
     }
 
-    @Test("Only 401 and 403 errors carry a response")
-    func responseAccessorIsLimitedToAuthErrors() {
+    @Test("Errors that carry a payload expose their response; the rest return nil")
+    func responseAccessorCoversPayloadErrors() {
         let response = HTTPErrorResponse(statusCode: 401)
         #expect(NetworkError.unauthorized(response: response).response == response)
         #expect(NetworkError.forbidden(response: response).response == response)
+        #expect(NetworkError.tooManyRequests(retryAfter: 1, data: Data(), response: response).response == response)
+        #expect(NetworkError.serverError(statusCode: 500, data: nil, response: response).response == response)
+
         #expect(NetworkError.unauthorized().response == nil)
         #expect(NetworkError.forbidden().response == nil)
-        #expect(NetworkError.notFound.response == nil)
+        #expect(NetworkError.tooManyRequests(retryAfter: 1, data: Data()).response == nil)
         #expect(NetworkError.serverError(statusCode: 500, data: nil).response == nil)
+        #expect(NetworkError.notFound.response == nil)
+        #expect(NetworkError.timeout.response == nil)
     }
 }
 
@@ -335,6 +340,28 @@ struct RemoteDataCacheAuthErrorResponseTests {
                 #expect(response.statusCode == status)
                 #expect(response.header("x-test") == "1")
                 #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: code))
+            }
+        }
+    }
+
+    @Test("429 and 503 from the byte cache carry the response and Retry-After")
+    func cacheRateLimitErrorsCarryResponseAndRetryAfter() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
+
+        for status in [429, 503] {
+            let testId = "cache-rate-limit-\(status)"
+            stub.setResponses([.status(status, headers: ["Retry-After": "9", "X-Test": "1"])], for: testId)
+            let url = try #require(URL(string: "https://api.test.com/img?test-id=\(testId)"))
+
+            do {
+                _ = try await cache.data(for: url)
+                Issue.record("Expected status \(status) to throw")
+            } catch let error as NetworkError {
+                #expect(error.retryAfter == 9)
+                #expect(error.response?.statusCode == status)
+                #expect(error.response?.header("x-test") == "1")
             }
         }
     }

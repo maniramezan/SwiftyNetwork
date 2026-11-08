@@ -452,7 +452,7 @@ struct NetworkClientIntegrationTests {
             try await client.request(endpoint, responseType: TestUser.self)
         } throws: { error in
             guard let networkError = error as? NetworkError,
-                case .serverError(let code, _) = networkError
+                case .serverError(let code, _, _, _) = networkError
             else { return false }
             return code == 500
         }

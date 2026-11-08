@@ -258,12 +258,13 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: 0` in tests
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
   (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
-- 429 is `NetworkError.tooManyRequests(retryAfter:data:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`
+- 429 is `NetworkError.tooManyRequests(retryAfter:data:response:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced;
   it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
-- `NetworkError.unauthorized` / `.forbidden` carry an optional `HTTPErrorResponse` (status, headers, body),
-  built only for 401/403 in `NetworkClient` and `RemoteDataCache`; never log the body
+- `NetworkError.unauthorized` / `.forbidden` / `.tooManyRequests` / `.serverError` carry an optional
+  `HTTPErrorResponse` (status, headers, body), built by `HTTPStatusValidator` from the `HTTPURLResponse`;
+  its `description` is redacted, but still never log the body. `Retry-After` is parsed for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.mapURLError` is the single transport-error mapping; connectivity-loss codes map to

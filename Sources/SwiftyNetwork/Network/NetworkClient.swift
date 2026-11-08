@@ -216,12 +216,7 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         do {
-            try HTTPStatusValidator.validate(
-                statusCode: httpResponse.statusCode,
-                data: data,
-                retryAfter: RetryAfter.parse(from: httpResponse),
-                response: Self.errorResponse(for: httpResponse, body: data)
-            )
+            try HTTPStatusValidator.validate(httpResponse, data: data)
             let decoded = try await Self.decodeResponse(
                 data: data,
                 responseType: responseType,
@@ -290,12 +285,6 @@ public actor NetworkClient: NetworkDataSource {
             configuration: configuration,
             requestID: trace.requestID
         )
-    }
-
-    /// Builds the response snapshot only for statuses whose errors carry one.
-    private static func errorResponse(for httpResponse: HTTPURLResponse, body: Data) -> HTTPErrorResponse? {
-        guard httpResponse.statusCode == 401 || httpResponse.statusCode == 403 else { return nil }
-        return HTTPErrorResponse(httpResponse, body: body)
     }
 
     /// Executes `request`, mapping every transport failure to a ``NetworkError``.
