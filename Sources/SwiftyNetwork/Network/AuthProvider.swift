@@ -51,11 +51,28 @@ public protocol AuthorizationProvider: Sendable {
     /// - Parameter rejected: The authorization that the server rejected.
     /// - Returns: `true` if newer authorization is available for a retry; otherwise `false`.
     func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool
+
+    /// Decides whether a `401` warrants a credential refresh.
+    ///
+    /// ``NetworkClient`` calls this before ``refreshAuthorization(rejecting:)``. Return
+    /// `false` when the response body or `WWW-Authenticate` header shows that a new
+    /// token cannot help, for example an unrelated `401` from a backend. The client then
+    /// throws ``NetworkError/unauthorized(response:)`` without refreshing or retrying.
+    ///
+    /// The default implementation returns `true`, which keeps the refresh-once behavior.
+    ///
+    /// - Parameter response: The `401` response, including its headers and body.
+    /// - Returns: `true` to refresh and retry once; `false` to fail immediately.
+    func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool
 }
 
 extension AuthorizationProvider {
     public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
         await refreshAuthorizationIfNeeded()
+    }
+
+    public func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool {
+        true
     }
 }
 

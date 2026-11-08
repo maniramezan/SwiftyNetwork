@@ -297,6 +297,11 @@ already replaced retries with the new token instead of refreshing again. That ma
 rotate refresh tokens. Call `updateAccessToken(_:)` after sign-in to swap the token without rebuilding the
 client. Custom providers get the same behavior by implementing `refreshAuthorization(rejecting:)`.
 
+A provider can also veto a refresh by implementing `shouldRefreshAuthorization(after:)`. The client passes it
+the `401` response (status, headers, and body) before refreshing; return `false` for a `401` that a new token
+cannot fix and the client throws `NetworkError.unauthorized` without refreshing or retrying. The default
+returns `true`. `403` is never refreshed.
+
 ### Fire-and-Forget Mutations with MutationQueue
 
 Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
@@ -489,6 +494,29 @@ do {
     // Handle other errors
 }
 ```
+
+`unauthorized` and `forbidden` carry the rejected response. Read its status, headers, and body through
+`NetworkError.response` to tell apart failures that share a status code, such as an API error `code` in
+the body or the `WWW-Authenticate` challenge:
+
+```swift
+struct APIErrorBody: Decodable { let code: String }
+
+do {
+    let user = try await client.request(endpoint, responseType: User.self)
+} catch NetworkError.forbidden(let response) {
+    let apiError = try? response?.decodeBody(APIErrorBody.self)
+    if apiError?.code == "registration_required" {
+        showRegistration()
+    }
+} catch NetworkError.unauthorized(let response) {
+    let challenge = response?.wwwAuthenticate
+}
+```
+
+`catch NetworkError.unauthorized` without a binding still matches. Construct these errors in test doubles
+as `NetworkError.unauthorized()` or `NetworkError.forbidden(response: ...)`. The body is raw server data and
+may contain user information, so don't log it.
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
 Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count as transient. This is the same rule

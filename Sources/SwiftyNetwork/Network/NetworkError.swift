@@ -50,10 +50,22 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     case tooManyRequests(retryAfter: TimeInterval?, data: Data?)
 
     /// The server returned `401 Unauthorized`, and authorization could not be refreshed.
-    case unauthorized
+    ///
+    /// Matching `.unauthorized` without a binding keeps working. Read the server's
+    /// status, headers, and body through ``response``.
+    ///
+    /// - Parameter response: The rejected response, or `nil` when the error was not
+    ///   produced from a live response (for example in a test double).
+    case unauthorized(response: HTTPErrorResponse? = nil)
 
     /// The server returned `403 Forbidden`.
-    case forbidden
+    ///
+    /// ``NetworkClient`` never refreshes authorization for a `403`. Read the server's
+    /// status, headers, and body through ``response``.
+    ///
+    /// - Parameter response: The rejected response, or `nil` when the error was not
+    ///   produced from a live response (for example in a test double).
+    case forbidden(response: HTTPErrorResponse? = nil)
 
     /// The server returned `404 Not Found`.
     case notFound
@@ -107,6 +119,22 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "Failed to refresh authorization credentials."
         case .underlying(let error):
             return "An underlying error occurred: \(error.localizedDescription)"
+        }
+    }
+
+    /// The rejected HTTP response for ``unauthorized(response:)`` and ``forbidden(response:)``.
+    ///
+    /// Use it to tell apart failures that share a status code, for example by decoding
+    /// an API error `code` from ``HTTPErrorResponse/body`` or reading
+    /// ``HTTPErrorResponse/wwwAuthenticate``.
+    ///
+    /// - Returns: The response, or `nil` for other cases and for errors built without one.
+    public var response: HTTPErrorResponse? {
+        switch self {
+        case .unauthorized(let response), .forbidden(let response):
+            return response
+        default:
+            return nil
         }
     }
 

@@ -79,7 +79,7 @@ struct MutationQueueTests {
 
     @Test("Non-retryable failures are reported failed without retrying")
     func nonRetryableFailureFailsImmediately() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden)])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden())])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
 
@@ -87,7 +87,7 @@ struct MutationQueueTests {
         await queue.enqueue(makeRequest(), key: "like:video:42")
         let events = await collected
 
-        #expect(events.map(\.status) == [.pending, .failed(MutationFailureReason(NetworkError.forbidden))])
+        #expect(events.map(\.status) == [.pending, .failed(MutationFailureReason(NetworkError.forbidden()))])
         #expect(await fake.callCount == 1)
     }
 
@@ -153,7 +153,7 @@ struct MutationQueueTests {
 
     @Test("A non-retryable failure does not discard a replacement enqueued while it was in flight")
     func nonRetryableFailurePreservesInFlightReplacement() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden), .success])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden()), .success])
         let gate = await fake.hold(call: 0)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
@@ -327,7 +327,9 @@ struct MutationQueueTests {
         // retry (.debug + .warning + .debug), and a permanent failure (.error).
         let store = InMemoryMutationStore()
         await store.save(makeRequest(liked: true), for: "resume:1")
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .success, .failure(NetworkError.forbidden)])
+        let fake = FakeAPIClient(outcomes: [
+            .failure(NetworkError.timeout), .success, .failure(NetworkError.forbidden()),
+        ])
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
 
@@ -339,7 +341,7 @@ struct MutationQueueTests {
         await queue.enqueue(makeRequest(path: "/other"), key: "other:1")
         let failedEvent = await permanentlyFailed
 
-        #expect(failedEvent?.status == .failed(MutationFailureReason(NetworkError.forbidden)))
+        #expect(failedEvent?.status == .failed(MutationFailureReason(NetworkError.forbidden())))
     }
 
     @Test("status(for:) returns nil for a key that was never enqueued")
