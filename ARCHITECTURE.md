@@ -46,7 +46,7 @@ The encoded-body overload uses the configured encoder and preserves an explicitl
 supplied Content-Type header.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
-with `retryDelay` before replay. The client passes the exact provider authorization
+with `authRefreshDelay` before replay. The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
 skips refreshing a token that a concurrent request already replaced. This is **not** general transient-error retry;
 that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by default), which `performRequest`

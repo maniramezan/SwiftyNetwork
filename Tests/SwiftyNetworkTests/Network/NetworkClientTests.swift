@@ -104,7 +104,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 2,
-            retryDelay: 0
+            authRefreshDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "4", name: "Mo", email: "mo@example.com")
@@ -551,7 +551,7 @@ struct NetworkClientIntegrationTests {
 
     // MARK: - Retry Delay Tests
 
-    @Test("NetworkClient retryDelay delays before retry on 401")
+    @Test("NetworkClient authRefreshDelay delays before retry on 401")
     func testNetworkClientRetryDelayOnUnauthorized() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
@@ -561,12 +561,12 @@ struct NetworkClientIntegrationTests {
             refreshResult: true,
             refreshedAuthorization: .bearer(token: "fresh")
         )
-        let retryDelay: TimeInterval = 0.2
+        let authRefreshDelay: TimeInterval = 0.2
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            retryDelay: retryDelay
+            authRefreshDelay: authRefreshDelay
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "delay", name: "Delay", email: "delay@example.com")
@@ -583,11 +583,11 @@ struct NetworkClientIntegrationTests {
         let elapsed = ContinuousClock().now - start
 
         #expect(response == user)
-        // The delay should be at least retryDelay (with some tolerance)
+        // The delay should be at least authRefreshDelay (with some tolerance)
         #expect(elapsed >= .milliseconds(150))
     }
 
-    @Test("NetworkClient retryDelay of zero does not add delay")
+    @Test("NetworkClient authRefreshDelay of zero does not add delay")
     func testNetworkClientZeroRetryDelay() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
@@ -601,7 +601,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            retryDelay: 0
+            authRefreshDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "nodelay", name: "NoDelay", email: "nodelay@example.com")
@@ -638,7 +638,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            retryDelay: 0
+            authRefreshDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "max-retries"
@@ -686,7 +686,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            retryDelay: 0
+            authRefreshDelay: 0
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "endpoint-auth-401"

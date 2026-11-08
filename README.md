@@ -498,19 +498,19 @@ Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count 
 
 A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(retryAfter:data:)`, not
 `.serverError`. `retryAfter` is the parsed `Retry-After` header in seconds (both the delta-seconds and
-HTTP-date forms; `nil` if absent or malformed), and `data` keeps the response body so you can decode a
+HTTP-date forms; `nil` if absent or malformed), and `data` keeps the response body (empty if the server sent none) so you can decode a
 problem+json document:
 
 ```swift
 do {
     _ = try await client.request(endpoint, responseType: User.self)
 } catch NetworkError.tooManyRequests(let retryAfter, let data) {
-    let throttle = data.flatMap { try? JSONDecoder().decode(Problem.self, from: $0) }
+    let throttle = try? JSONDecoder().decode(Problem.self, from: data)
     showBanner("Slow down", retryIn: retryAfter)
 }
 ```
 
-`error.retryAfter` and `error.serverErrorData` give the same values without a `switch`.
+`error.retryAfter` and `error.responseBody` give the same values without a `switch`.
 
 ### Retrying Idempotent Requests
 

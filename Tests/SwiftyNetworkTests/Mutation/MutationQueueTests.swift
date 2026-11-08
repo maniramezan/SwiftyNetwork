@@ -273,7 +273,7 @@ struct MutationQueueTests {
             jitterRange: 1...1,
             maxRetryAfter: 0.2
         )
-        let throttled = NetworkError.tooManyRequests(retryAfter: 5, data: nil)
+        let throttled = NetworkError.tooManyRequests(retryAfter: 5, data: Data())
         let fake = FakeAPIClient(outcomes: [.failure(throttled), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
         let stream = await queue.events()

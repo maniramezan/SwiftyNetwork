@@ -14,8 +14,8 @@ struct NetworkRetryPolicyTests {
     func retriesTransientErrorsOnIdempotentMethods() {
         let policy = NetworkRetryPolicy()
         let errors: [NetworkError] = [
-            .tooManyRequests(retryAfter: 5, data: nil),
-            .tooManyRequests(retryAfter: nil, data: nil),
+            .tooManyRequests(retryAfter: 5, data: Data()),
+            .tooManyRequests(retryAfter: nil, data: Data()),
             .serverError(statusCode: 500, data: nil),
             .serverError(statusCode: 503, data: nil),
             .timeout,
@@ -28,11 +28,40 @@ struct NetworkRetryPolicyTests {
         }
     }
 
+    @Test("shouldRetry matches NetworkError.isTransient for every error except invalidResponse")
+    func shouldRetryIsDerivedFromIsTransient() {
+        let policy = NetworkRetryPolicy()
+        let errors: [NetworkError] = [
+            .invalidURL(url: "x"),
+            .invalidResponse,
+            .invalidData,
+            .serverError(statusCode: 499, data: nil),
+            .serverError(statusCode: 500, data: nil),
+            .serverError(statusCode: 503, data: nil),
+            .tooManyRequests(retryAfter: 5, data: Data()),
+            .unauthorized,
+            .forbidden,
+            .notFound,
+            .timeout,
+            .noInternetConnection,
+            .decodingFailed(underlying: URLError(.badURL)),
+            .encodingFailed(underlying: URLError(.badURL)),
+            .authorizationRefreshFailed,
+            .underlying(URLError(.badURL)),
+        ]
+        for error in errors {
+            let expected = error.isTransient && error.classification != .invalidResponse
+            #expect(policy.shouldRetry(error, method: .get) == expected, "\(error)")
+        }
+        #expect(NetworkError.invalidResponse.isTransient)
+        #expect(!policy.shouldRetry(.invalidResponse, method: .get))
+    }
+
     @Test("Never retries POST, PATCH or OPTIONS, even on 429")
     func neverRetriesNonIdempotentMethods() {
         let policy = NetworkRetryPolicy()
         for method in [HTTPMethod.post, .patch, .options] {
-            #expect(!policy.shouldRetry(.tooManyRequests(retryAfter: 1, data: nil), method: method))
+            #expect(!policy.shouldRetry(.tooManyRequests(retryAfter: 1, data: Data()), method: method))
             #expect(!policy.shouldRetry(.serverError(statusCode: 503, data: nil), method: method))
             #expect(!policy.shouldRetry(.timeout, method: method))
             #expect(!policy.shouldRetry(.noInternetConnection, method: method))
@@ -83,7 +112,7 @@ struct NetworkRetryPolicyTests {
     @Test("Retry-After longer than the backoff sets the delay")
     func retryAfterOverridesBackoff() {
         let policy = NetworkRetryPolicy(baseDelay: 0.5, maxDelay: 8, jitterRange: 1...1, maxRetryAfter: 30)
-        let error = NetworkError.tooManyRequests(retryAfter: 5, data: nil)
+        let error = NetworkError.tooManyRequests(retryAfter: 5, data: Data())
 
         #expect(policy.delay(forRetry: 1, after: error) == 5)
     }
@@ -91,7 +120,7 @@ struct NetworkRetryPolicyTests {
     @Test("A huge Retry-After is clamped to maxRetryAfter")
     func hugeRetryAfterIsClamped() {
         let policy = NetworkRetryPolicy(baseDelay: 0.5, maxDelay: 8, jitterRange: 1...1, maxRetryAfter: 30)
-        let error = NetworkError.tooManyRequests(retryAfter: 86_400, data: nil)
+        let error = NetworkError.tooManyRequests(retryAfter: 86_400, data: Data())
 
         #expect(policy.delay(forRetry: 1, after: error) == 30)
     }
@@ -99,7 +128,7 @@ struct NetworkRetryPolicyTests {
     @Test("A Retry-After shorter than the backoff never shortens it")
     func shortRetryAfterKeepsBackoff() {
         let policy = NetworkRetryPolicy(baseDelay: 4, maxDelay: 8, jitterRange: 1...1)
-        let error = NetworkError.tooManyRequests(retryAfter: 1, data: nil)
+        let error = NetworkError.tooManyRequests(retryAfter: 1, data: Data())
 
         #expect(policy.delay(forRetry: 1, after: error) == 4)
     }
