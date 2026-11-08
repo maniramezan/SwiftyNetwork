@@ -264,6 +264,31 @@ struct MutationQueueTests {
         #expect(elapsed >= 0.01)
     }
 
+    @Test("A 429 Retry-After is awaited before the mutation is retried, instead of failing permanently")
+    func tooManyRequestsWaitsForRetryAfter() async {
+        let policy = MutationRetryPolicy(
+            maxAttempts: 3,
+            baseDelay: 0,
+            maxDelay: 0,
+            jitterRange: 1...1,
+            maxRetryAfter: 0.2
+        )
+        let throttled = NetworkError.tooManyRequests(retryAfter: 5, data: nil)
+        let fake = FakeAPIClient(outcomes: [.failure(throttled), .success])
+        let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
+        let stream = await queue.events()
+
+        async let collected = collectEvents(stream, count: 3)
+        let start = ContinuousClock.now
+        await queue.enqueue(makeRequest(), key: "like:video:42")
+        let events = await collected
+        let elapsed = start.duration(to: .now)
+
+        #expect(events.map(\.status) == [.pending, .retrying(attempt: 1), .succeeded])
+        #expect(elapsed >= .milliseconds(190))
+        #expect(await fake.callCount == 2)
+    }
+
     @Test("Independent keys are processed without blocking each other")
     func independentKeysProcessConcurrently() async {
         let slowFake = FakeAPIClient(

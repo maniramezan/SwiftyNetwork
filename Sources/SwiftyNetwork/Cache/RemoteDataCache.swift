@@ -103,7 +103,11 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
-        try HTTPStatusValidator.validate(statusCode: httpResponse.statusCode, data: data)
+        try HTTPStatusValidator.validate(
+            statusCode: httpResponse.statusCode,
+            data: data,
+            retryAfter: RetryAfter.parse(from: httpResponse)
+        )
         return data
     }
 }

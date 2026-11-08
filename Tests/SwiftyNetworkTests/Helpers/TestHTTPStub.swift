@@ -9,8 +9,8 @@ final class TestHTTPStub: Sendable {
             Response(outcome: .success(StubResponse(statusCode: statusCode, body: data)))
         }
 
-        static func status(_ code: Int, data: Data = Data()) -> Response {
-            success(data, statusCode: code)
+        static func status(_ code: Int, data: Data = Data(), headers: [String: String] = [:]) -> Response {
+            Response(outcome: .success(StubResponse(statusCode: code, headers: headers, body: data)))
         }
 
         static func failure(_ error: any Error) -> Response {
