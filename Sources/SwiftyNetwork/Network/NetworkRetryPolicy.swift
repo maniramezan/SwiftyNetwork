@@ -10,13 +10,13 @@ import SwiftCommons
 /// - Only idempotent methods are retried (``retryableMethods``: `GET`, `HEAD`,
 ///   `PUT`, `DELETE`). `POST` and `PATCH` are never replayed, not even on a
 ///   `429`, so a request that may have been processed is never duplicated.
-/// - Retried failures are `429` (``NetworkError/tooManyRequests(retryAfter:data:)``),
-///   5xx (``NetworkError/serverError(statusCode:data:)``), timeouts
+/// - Retried failures are `429` (``NetworkError/tooManyRequests(retryAfter:data:response:)``),
+///   5xx (``NetworkError/serverError(statusCode:data:retryAfter:response:)``), timeouts
 ///   (``NetworkError/timeout``) and lost connectivity
 ///   (``NetworkError/noInternetConnection``). Everything else, including
 ///   decoding failures and other 4xx responses, is reported immediately.
 /// - Waits use jittered exponential backoff capped at ``maxDelay``. When a
-///   `429` carries `Retry-After`, the client waits at least that long, bounded
+///   `429` or `503` carries `Retry-After`, the client waits at least that long, bounded
 ///   by ``maxRetryAfter`` so a huge value cannot park a request.
 /// - At most ``maxRetries`` retries follow the first attempt.
 /// - Waits are cancellation-aware: cancelling the calling task ends the wait
@@ -105,8 +105,8 @@ public struct NetworkRetryPolicy: Sendable {
     ///
     /// - Parameters:
     ///   - retry: The 1-based retry about to run.
-    ///   - error: The failure that triggered the retry. A `429` with `Retry-After`
-    ///     makes the delay at least that long, clamped to ``maxRetryAfter``.
+    ///   - error: The failure that triggered the retry. A `429` or `503` with
+    ///     `Retry-After` makes the delay at least that long, clamped to ``maxRetryAfter``.
     ///   - jitterGenerator: Produces a value in `0...1` sampled within ``jitterRange``.
     ///     Overridable for deterministic tests.
     /// - Returns: The delay in seconds.

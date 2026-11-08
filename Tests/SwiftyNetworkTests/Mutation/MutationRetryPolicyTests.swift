@@ -105,6 +105,20 @@ struct MutationRetryPolicyTests {
         #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(retryAfter: 10, data: Data())) == 10)
     }
 
+    @Test("A 503 Retry-After sets the delay like a 429 does")
+    func serviceUnavailableRetryAfterSetsDelay() {
+        let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1, maxRetryAfter: 30)
+
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.serverError(statusCode: 503, data: nil, retryAfter: 20))
+                == 20
+        )
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.serverError(statusCode: 503, data: nil, retryAfter: 600))
+                == 30
+        )
+    }
+
     @Test("A Retry-After shorter than the backoff never shortens the backoff")
     func retryAfterNeverShortensBackoff() {
         let policy = MutationRetryPolicy(baseDelay: 8, maxDelay: 8, jitterRange: 1...1)

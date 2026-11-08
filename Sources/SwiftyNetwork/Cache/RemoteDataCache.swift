@@ -59,7 +59,7 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
     ///   ``NetworkClient``: ``NetworkError/unauthorized(response:)`` (401),
     ///   ``NetworkError/forbidden(response:)`` (403), ``NetworkError/notFound`` (404),
     ///   ``NetworkError/timeout`` (408), otherwise
-    ///   ``NetworkError/serverError(statusCode:data:)``; ``NetworkError/timeout``,
+    ///   ``NetworkError/serverError(statusCode:data:retryAfter:response:)``; ``NetworkError/timeout``,
     ///   ``NetworkError/noInternetConnection``, or ``NetworkError/underlying(_:)``
     ///   for transport failures.
     public func data(for url: URL) async throws -> Data {
@@ -103,15 +103,7 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
-        let rejection =
-            httpResponse.statusCode == 401 || httpResponse.statusCode == 403
-            ? HTTPErrorResponse(httpResponse, body: data) : nil
-        try HTTPStatusValidator.validate(
-            statusCode: httpResponse.statusCode,
-            data: data,
-            retryAfter: RetryAfter.parse(from: httpResponse),
-            response: rejection
-        )
+        try HTTPStatusValidator.validate(httpResponse, data: data)
         return data
     }
 }

@@ -486,7 +486,7 @@ do {
     let user = try await client.request(endpoint, responseType: User.self)
 } catch NetworkError.unauthorized {
     // Handle authentication error
-} catch NetworkError.serverError(let statusCode, let data) {
+} catch NetworkError.serverError(let statusCode, let data, _, _) {
     // Handle server error with specific status code
 } catch NetworkError.decodingFailed(let underlying) {
     // Handle JSON decoding error
@@ -495,9 +495,9 @@ do {
 }
 ```
 
-`unauthorized` and `forbidden` carry the rejected response. Read its status, headers, and body through
-`NetworkError.response` to tell apart failures that share a status code, such as an API error `code` in
-the body or the `WWW-Authenticate` challenge:
+`unauthorized`, `forbidden`, `tooManyRequests`, and `serverError` carry the rejected response. Read its status,
+headers, and body through `NetworkError.response` to tell apart failures that share a status code, such as an
+API error `code` in the body, the `WWW-Authenticate` challenge, or `X-RateLimit-*` headers:
 
 ```swift
 struct APIErrorBody: Decodable { let code: String }
@@ -516,7 +516,8 @@ do {
 
 `catch NetworkError.unauthorized` without a binding still matches. Construct these errors in test doubles
 as `NetworkError.unauthorized()` or `NetworkError.forbidden(response: ...)`. The body is raw server data and
-may contain user information, so don't log it.
+may contain user information, so don't log it. `HTTPErrorResponse` prints only its status code, header names,
+and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
 Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count as transient. This is the same rule
@@ -524,15 +525,16 @@ Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count 
 
 ### Rate Limiting (429) and Retry-After
 
-A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(retryAfter:data:)`, not
+A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(retryAfter:data:response:)`, not
 `.serverError`. `retryAfter` is the parsed `Retry-After` header in seconds (both the delta-seconds and
-HTTP-date forms; `nil` if absent or malformed), and `data` keeps the response body (empty if the server sent none) so you can decode a
-problem+json document:
+HTTP-date forms; `nil` if absent or malformed), `data` keeps the response body (empty if the server sent none) so you
+can decode a problem+json document, and `response` keeps the headers, such as `X-RateLimit-Remaining`.
+A `503 Service Unavailable` carries `retryAfter` on `.serverError` the same way:
 
 ```swift
 do {
     _ = try await client.request(endpoint, responseType: User.self)
-} catch NetworkError.tooManyRequests(let retryAfter, let data) {
+} catch NetworkError.tooManyRequests(let retryAfter, let data, _) {
     let throttle = try? JSONDecoder().decode(Problem.self, from: data)
     showBanner("Slow down", retryIn: retryAfter)
 }
@@ -554,7 +556,7 @@ let client = NetworkClient(configuration: configuration)
 - Only `GET`, `HEAD`, `PUT` and `DELETE` are retried. `POST` and `PATCH` are never replayed, even on `429`.
 - Retried failures: `429`, 5xx, timeouts, and lost connectivity. Other 4xx responses and decoding failures
   are reported immediately.
-- Backoff is exponential with jitter, capped at `maxDelay`. A `429` `Retry-After` is honored (the wait is at
+- Backoff is exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is honored (the wait is at
   least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
 - Waits are cancellation-aware: cancelling the calling task ends the wait with `CancellationError`.
 - `maxRetries` bounds the retries after the first attempt, independently of `maxAuthRefreshAttempts`.
