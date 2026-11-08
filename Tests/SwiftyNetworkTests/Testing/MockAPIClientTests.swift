@@ -30,6 +30,31 @@ struct MockAPIClientTests {
         #expect(await client.requests(to: "/users/1").count == 1)
     }
 
+    @Test("The APIClient Encodable-body default encodes JSON and adds a Content-Type")
+    func encodableBodyThroughAnyAPIClient() async throws {
+        let mock = MockAPIClient()
+        await mock.stub(.post, "/likes", with: .empty)
+        let client: any APIClient = mock
+        let like = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+
+        try await client.request(LikeEndpoint(), body: like)
+
+        let recorded = try #require(await mock.requests(to: "/likes").first)
+        #expect(try recorded.decodedBody(as: TestUser.self) == like)
+        #expect(recorded.headers?["Content-Type"] == "application/json")
+    }
+
+    @Test("The APIClient Encodable-body default reports encoding failures as encodingFailed")
+    func encodableBodyEncodingFailure() async {
+        let client: any APIClient = MockAPIClient()
+
+        await #expect {
+            try await client.request(LikeEndpoint(), body: Double.nan)
+        } throws: { error in
+            (error as? NetworkError)?.classification == .encodingFailed
+        }
+    }
+
     @Test("Consumes queued responses in order and repeats the last one")
     func consumesQueuedResponsesInOrder() async throws {
         let client = MockAPIClient()
@@ -87,7 +112,7 @@ struct MockAPIClientTests {
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
         try await client.stub(.get, "/users/1", returning: user)
         let repository = GenericRepository<TestUser>(
-            networkDataSource: client,
+            client: client,
             localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<TestUser>())
         )
 

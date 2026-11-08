@@ -122,7 +122,8 @@ nearest ancestor permitting subdomains wins. Unlisted hosts use system trust.
 Pinning is not a host allowlist or redirect policy. Keep default trust validation
 enabled and plan overlapping pins for rotation.
 
-Logs use `os.Logger`, including in release builds, and default to warning level.
+Logs use `os.Logger`, including in release builds, and default to warning level. The level is package-wide
+(`LogLevel.current`); configurations do not carry one, so creating a client never changes logging.
 URLs and underlying errors are marked private, not structurally scrubbed.
 Instrumentation and error values can contain sensitive URLs and response bodies;
 applications must redact before exporting them. Use HTTPS for sensitive traffic,
@@ -131,7 +132,7 @@ handling when using custom authentication headers. See [SECURITY.md](SECURITY.md
 
 ## Extension points
 
-Prefer `any APIClient` in services and `NetworkDataSource` for repositories.
+Depend on `any APIClient` in services, repositories, and mutation queues.
 Provide custom `AuthorizationProvider`, `Cache`, `MutationStore`, and
 `NetworkInstrumentation` implementations at the relevant boundary. See
 [README.md](README.md) for integration and [GRAPHQL.md](GRAPHQL.md) for GraphQL.

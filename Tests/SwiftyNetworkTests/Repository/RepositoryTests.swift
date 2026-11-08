@@ -41,7 +41,7 @@ func testRepositoryReturnsCachedData() async throws {
     let cache = InMemoryCache<TestUser>()
     let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let network = MockNetworkDataSource(result: .success(TestUser(id: "2", name: "Net", email: "net@example.com")))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
     let key = CacheKey("repo-cache")
     let cached = TestUser(id: "cached", name: "Cache", email: "cache@example.com")
     await cache.setValue(cached, forKey: key)
@@ -59,7 +59,7 @@ func testRepositoryLoadsFromNetworkOnMiss() async throws {
     let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let networkUser = TestUser(id: "3", name: "Remote", email: "remote@example.com")
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
     let key = CacheKey("repo-miss")
 
     let fetched = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .returnCacheElseLoad)
@@ -78,7 +78,7 @@ func testRepositoryReloadIgnoringCache() async throws {
     let networkUser = TestUser(id: "4", name: "Fresh", email: "fresh@example.com")
     await cache.setValue(cached, forKey: CacheKey("reload"))
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
     let key = CacheKey("reload")
 
     let fetched = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .reloadIgnoringCache)
@@ -98,7 +98,7 @@ func testRepositoryReturnsCacheIfNotExpired() async throws {
     let now = Date()
     await cache.setValue(user, forKey: key, timestamp: now)
     let network = MockNetworkDataSource(result: .success(TestUser(id: "net", name: "Net", email: "net@example.com")))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
 
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
@@ -120,7 +120,7 @@ func testRepositoryRefreshesWhenExpired() async throws {
     await cache.setValue(expired, forKey: key, timestamp: Date(timeIntervalSince1970: 0))
     let networkUser = TestUser(id: "6", name: "New", email: "new@example.com")
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
 
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
@@ -139,7 +139,7 @@ func testRepositoryPropagatesNetworkError() async {
     let cache = InMemoryCache<TestUser>()
     let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let network = MockNetworkDataSource(result: .failure(TestRepositoryError.networkFailure))
-    let repository = GenericRepository(networkDataSource: network, localDataSource: local)
+    let repository = GenericRepository(client: network, localDataSource: local)
     let key = CacheKey("error")
 
     await #expect {
@@ -153,7 +153,7 @@ private enum TestRepositoryError: Error {
     case networkFailure
 }
 
-private actor MockNetworkDataSource: NetworkDataSource {
+private actor MockNetworkDataSource: APIClient {
     private let result: Result<TestUser, Error>
     private(set) var requestCount = 0
 

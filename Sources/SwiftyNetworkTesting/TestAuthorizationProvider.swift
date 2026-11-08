@@ -2,6 +2,12 @@ import SwiftyNetwork
 
 /// Scriptable authorization state that records refresh attempts and rejected credentials.
 public actor TestAuthorizationProvider: AuthorizationProvider {
+    /// The error thrown by a refresh scripted to fail.
+    public struct RefreshFailed: Error, Sendable, Equatable {
+        /// Creates the error.
+        public init() {}
+    }
+
     private var currentAuth: AuthorizationType
     private let refreshResult: Bool
     private let refreshedAuth: AuthorizationType?
@@ -16,7 +22,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     /// Creates an authorization spy.
     /// - Parameters:
     ///   - current: The initial authorization.
-    ///   - refreshResult: Whether refresh should succeed.
+    ///   - refreshResult: Whether refresh should succeed. A failed refresh throws ``RefreshFailed``.
     ///   - refreshedAuthorization: Optional replacement after successful refresh.
     ///   - shouldRefresh: Optional decision for whether a `401` response warrants a refresh.
     ///     When `nil`, every `401` is refreshed.
@@ -38,22 +44,16 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
         currentAuth
     }
 
-    /// Records a refresh attempt and applies the scripted result.
-    /// - Returns: The configured refresh success flag.
-    public func refreshAuthorizationIfNeeded() async -> Bool {
+    /// Records a rejection and applies the scripted refresh result.
+    /// - Parameter rejected: The credentials rejected by the server.
+    /// - Throws: ``RefreshFailed`` when the provider was created with `refreshResult: false`.
+    public func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+        rejectedAuthorizations.append(rejected)
         refreshCallCount += 1
-        if refreshResult, let refreshedAuth {
+        guard refreshResult else { throw RefreshFailed() }
+        if let refreshedAuth {
             currentAuth = refreshedAuth
         }
-        return refreshResult
-    }
-
-    /// Records a rejection and attempts the scripted refresh.
-    /// - Parameter rejected: The credentials rejected by the server.
-    /// - Returns: The configured refresh success flag.
-    public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
-        rejectedAuthorizations.append(rejected)
-        return await refreshAuthorizationIfNeeded()
     }
 
     /// Records the `401` response and applies the scripted decision.

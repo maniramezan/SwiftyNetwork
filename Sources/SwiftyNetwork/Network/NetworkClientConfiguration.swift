@@ -3,9 +3,9 @@ import Foundation
 /// Configuration settings for ``NetworkClient``.
 ///
 /// Use this value to inject test sessions, customize JSON coding strategies,
-/// configure authorization refresh, adjust timeouts, and control package logging.
-/// A configuration is copied into each request when it starts, so updating a
-/// client affects subsequent requests but not work already in flight.
+/// configure authorization refresh, retries, timeouts, and instrumentation.
+/// A client keeps the configuration it was created with; create a new client
+/// to change it. Set the package-wide log level with ``LogLevel/current``.
 ///
 /// Example:
 /// ```swift
@@ -13,22 +13,28 @@ import Foundation
 /// decoder.dateDecodingStrategy = .iso8601
 ///
 /// let provider = OAuthAuthorizationProvider(initialAccessToken: "token") {
-///     await refreshAccessToken()
+///     try await refreshAccessToken()
 /// }
 ///
 /// let configuration = NetworkClientConfiguration(
 ///     decoder: decoder,
 ///     authorizationProvider: provider,
-///     timeoutInterval: 15,
-///     logLevel: .info
+///     timeoutInterval: 15
 /// )
 /// let client = NetworkClient(configuration: configuration)
+/// ```
+///
+/// To pin TLS certificates, pass a session from ``SSLPinningConfiguration/makeSession(configuration:delegateQueue:)``:
+/// ```swift
+/// let configuration = NetworkClientConfiguration(session: pinning.makeSession())
 /// ```
 public struct NetworkClientConfiguration: Sendable {
     /// The URL session to use for network requests.
     ///
     /// Inject a custom session for tests, custom cache policies, proxy settings,
-    /// or `URLProtocol` interception. Defaults to `URLSession.shared`.
+    /// `URLProtocol` interception, or TLS pinning
+    /// (``SSLPinningConfiguration/makeSession(configuration:delegateQueue:)``).
+    /// Defaults to `URLSession.shared`.
     public var session: URLSession
 
     /// The JSON decoder for parsing responses.
@@ -48,13 +54,21 @@ public struct NetworkClientConfiguration: Sendable {
     /// When an endpoint's ``NetworkEndpoint/authorization`` is ``AuthorizationType/none``,
     /// the client asks this provider for authorization and can call it again to
     /// refresh credentials after a `401` response.
-    public var authorizationProvider: AuthorizationProvider?
+    public var authorizationProvider: (any AuthorizationProvider)?
 
     /// Maximum number of authorization-refresh attempts after receiving a 401.
     ///
     /// This is **not** a general retry policy; see ``retryPolicy`` for retrying
     /// transient failures.
     public var maxAuthRefreshAttempts: Int
+
+    /// Delay applied before replaying a request after a successful auth refresh.
+    ///
+    /// This applies only to the `401` refresh path. It is unrelated to ``retryPolicy``,
+    /// which controls backoff for transient failures.
+    ///
+    /// Set this to `0` in tests or when the API can be retried immediately.
+    public var authRefreshDelay: TimeInterval
 
     /// Opt-in retry policy for transient failures of idempotent requests.
     ///
@@ -69,23 +83,6 @@ public struct NetworkClientConfiguration: Sendable {
     ///
     /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
     public var timeoutInterval: TimeInterval
-
-    /// Delay applied before replaying a request after a successful auth refresh.
-    ///
-    /// This applies only to the `401` refresh path. It is unrelated to ``retryPolicy``,
-    /// which controls backoff for transient failures.
-    ///
-    /// Set this to `0` in tests or when the API can be retried immediately.
-    public var authRefreshDelay: TimeInterval
-
-    /// Verbosity for SwiftyNetwork's internal logger.
-    ///
-    /// Setting this updates the package-wide log level when a client is created
-    /// or its configuration is replaced. When `nil` (the default), the current
-    /// package-wide level — ``LogLevel/warning`` unless changed — is left
-    /// untouched, so creating additional clients never resets logging chosen by
-    /// another configuration.
-    public var logLevel: LogLevel?
 
     /// Observer for request timing, retries, and outcomes.
     ///
@@ -103,87 +100,29 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - encoder: The JSON encoder to use.
     ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
-    ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
     ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
-    ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
-    ///     leaves the package-wide level unchanged.
-    ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
+    ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
+    ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     public init(
         session: URLSession = .shared,
         decoder: JSONDecoder = JSONDecoder(),
         encoder: JSONEncoder = JSONEncoder(),
-        authorizationProvider: AuthorizationProvider? = nil,
+        authorizationProvider: (any AuthorizationProvider)? = nil,
         maxAuthRefreshAttempts: Int = 1,
-        timeoutInterval: TimeInterval = 30,
         authRefreshDelay: TimeInterval = 1.0,
-        logLevel: LogLevel? = nil,
-        instrumentation: (any NetworkInstrumentation)? = nil,
-        retryPolicy: NetworkRetryPolicy? = nil
+        retryPolicy: NetworkRetryPolicy? = nil,
+        timeoutInterval: TimeInterval = 30,
+        instrumentation: (any NetworkInstrumentation)? = nil
     ) {
         self.session = session
         self.decoder = decoder
         self.encoder = encoder
         self.authorizationProvider = authorizationProvider
         self.maxAuthRefreshAttempts = max(0, maxAuthRefreshAttempts)
-        self.timeoutInterval = timeoutInterval
         self.authRefreshDelay = authRefreshDelay
-        self.logLevel = logLevel
-        self.instrumentation = instrumentation
         self.retryPolicy = retryPolicy
-    }
-
-    /// Creates a new network client configuration backed by an SSL-pinned `URLSession`.
-    ///
-    /// Use this initializer when you need certificate or public-key pinning. Pinning is
-    /// applied only to hosts listed in `sslPinning`; all other hosts use normal
-    /// `URLSession` trust handling.
-    ///
-    /// - Parameters:
-    ///   - sslPinning: Host pinning policies to enforce.
-    ///   - sessionConfiguration: The base URL session configuration. Defaults to `.default`.
-    ///   - delegateQueue: Queue used for URL session delegate callbacks. Defaults to the system queue.
-    ///   - decoder: The JSON decoder to use.
-    ///   - encoder: The JSON encoder to use.
-    ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
-    ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
-    ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
-    ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
-    ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
-    ///     leaves the package-wide level unchanged.
-    ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
-    ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
-    public init(
-        sslPinning: SSLPinningConfiguration,
-        sessionConfiguration: URLSessionConfiguration = .default,
-        delegateQueue: OperationQueue? = nil,
-        decoder: JSONDecoder = JSONDecoder(),
-        encoder: JSONEncoder = JSONEncoder(),
-        authorizationProvider: AuthorizationProvider? = nil,
-        maxAuthRefreshAttempts: Int = 1,
-        timeoutInterval: TimeInterval = 30,
-        authRefreshDelay: TimeInterval = 1.0,
-        logLevel: LogLevel? = nil,
-        instrumentation: (any NetworkInstrumentation)? = nil,
-        retryPolicy: NetworkRetryPolicy? = nil
-    ) {
-        let delegate = SSLPinningURLSessionDelegate(configuration: sslPinning)
-        let session = URLSession(
-            configuration: sessionConfiguration,
-            delegate: delegate,
-            delegateQueue: delegateQueue
-        )
-        self.init(
-            session: session,
-            decoder: decoder,
-            encoder: encoder,
-            authorizationProvider: authorizationProvider,
-            maxAuthRefreshAttempts: maxAuthRefreshAttempts,
-            timeoutInterval: timeoutInterval,
-            authRefreshDelay: authRefreshDelay,
-            logLevel: logLevel,
-            instrumentation: instrumentation,
-            retryPolicy: retryPolicy
-        )
+        self.timeoutInterval = timeoutInterval
+        self.instrumentation = instrumentation
     }
 }

@@ -23,7 +23,7 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
 
 - **Isolation over serialization.** Every test builds its own client/cache/queue
   and owns its HTTP stub. Endpoint `test-id` values distinguish routes within that stub. Add `.serialized` only for truly global state
-  (for example `Logger.setLevel`).
+  (for example `LogLevel.current`).
 - **No timing-based synchronization.** Never `Task.sleep` to "let something
   happen". Use TestCommons `AsyncGate`, `CacheOperationGate.queuedOperationCount`, or await an
   event from a stream (`firstEvent(in:where:)`, `collectEvents(_:count:)`) -- both wrap

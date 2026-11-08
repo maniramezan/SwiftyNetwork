@@ -1,6 +1,6 @@
 import SwiftyNetwork
 
 let repository = GenericRepository(
-    networkDataSource: NetworkClient.shared,
+    client: NetworkClient.shared,
     localDataSource: local
 )

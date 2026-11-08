@@ -92,7 +92,10 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     case encodingFailed(underlying: any Error & Sendable)
 
     /// The configured ``AuthorizationProvider`` failed to refresh credentials after a `401`.
-    case authorizationRefreshFailed
+    ///
+    /// - Parameter underlying: The error thrown by
+    ///   ``AuthorizationProvider/refreshAuthorization(rejecting:)``.
+    case authorizationRefreshFailed(underlying: any Error & Sendable)
 
     /// A lower-level error that does not map to a more specific ``NetworkError`` case.
     case underlying(any Error & Sendable)
@@ -128,8 +131,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "Failed to decode response: \(underlying.localizedDescription)"
         case .encodingFailed(let underlying):
             return "Failed to encode request: \(underlying.localizedDescription)"
-        case .authorizationRefreshFailed:
-            return "Failed to refresh authorization credentials."
+        case .authorizationRefreshFailed(let underlying):
+            return "Failed to refresh authorization credentials: \(underlying.localizedDescription)"
         case .underlying(let error):
             return "An underlying error occurred: \(error.localizedDescription)"
         }
