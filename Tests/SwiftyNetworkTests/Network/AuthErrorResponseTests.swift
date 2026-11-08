@@ -41,6 +41,26 @@ struct HTTPErrorResponseTests {
         }
     }
 
+    @Test("Snapshots status, headers, and body from an HTTPURLResponse")
+    func snapshotsHTTPURLResponse() throws {
+        let url = try #require(URL(string: "https://api.test.com/x"))
+        let httpResponse = try #require(
+            HTTPURLResponse(
+                url: url,
+                statusCode: 403,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["X-Request-Id": "abc", "Content-Type": "application/json"]
+            )
+        )
+        let body = errorBody("registration_required")
+
+        let response = HTTPErrorResponse(httpResponse, body: body)
+
+        #expect(response.statusCode == 403)
+        #expect(response.header("x-request-id") == "abc")
+        #expect(response.body == body)
+    }
+
     @Test("Only 401 and 403 errors carry a response")
     func responseAccessorIsLimitedToAuthErrors() {
         let response = HTTPErrorResponse(statusCode: 401)
@@ -109,6 +129,63 @@ struct NetworkClientAuthErrorResponseTests {
             #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
         }
         #expect(await provider.refreshCallCount == 1)
+    }
+
+    @Test("A 401 for endpoint-supplied authorization carries the response and skips the provider")
+    func endpointAuthorizationUnauthorizedSkipsProvider() async throws {
+        struct BearerEndpoint: NetworkEndpoint {
+            let testId: String
+            let baseURL = "https://api.test.com"
+            var path: String { "/me" }
+            var method: HTTPMethod { .get }
+            var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
+            var authorization: AuthorizationType { .bearer(token: "endpoint-token") }
+        }
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let provider = TestAuthorizationProvider(current: .bearer(token: "provider"), refreshResult: true)
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: stub.session,
+                authorizationProvider: provider,
+                maxAuthRefreshAttempts: 1,
+                retryDelay: 0
+            )
+        )
+        let testId = "auth-response-endpoint-auth"
+        stub.setResponses([.status(401, data: errorBody("authentication_failed"))], for: testId)
+
+        do {
+            _ = try await client.request(BearerEndpoint(testId: testId), responseType: TestUser.self)
+            Issue.record("Expected a 401 to throw")
+        } catch NetworkError.unauthorized(let response) {
+            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "authentication_failed"))
+        }
+        #expect(await provider.inspectedResponses.isEmpty)
+        #expect(await provider.refreshCallCount == 0)
+    }
+
+    @Test("The provider is not consulted once the refresh budget is spent")
+    func providerNotConsultedWhenBudgetIsZero() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let provider = TestAuthorizationProvider(current: .bearer(token: "token"), refreshResult: true)
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: stub.session,
+                authorizationProvider: provider,
+                maxAuthRefreshAttempts: 0,
+                retryDelay: 0
+            )
+        )
+        let testId = "auth-response-zero-budget"
+        stub.setResponses([.status(401, data: errorBody("authentication_failed"))], for: testId)
+
+        await #expect(throws: NetworkError.self) {
+            try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+        }
+        #expect(await provider.inspectedResponses.isEmpty)
+        #expect(await provider.refreshCallCount == 0)
     }
 
     @Test("A 403 keeps its body and never triggers a refresh")

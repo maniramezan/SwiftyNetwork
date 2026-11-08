@@ -160,7 +160,7 @@ defer { stub.invalidate() }
 stub.session                              // Inject into the client/cache
 
 // Auth testing
-TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:)
+TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:shouldRefresh:)
 
 // Scripted APIClient (no URLSession) -- prefer for MutationQueue / repository / service tests
 let client = MockAPIClient()                              // from SwiftyNetworkTesting
