@@ -56,7 +56,8 @@ that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy
 consults through `retryOrFail` after any failed attempt. It retries `GET`/`HEAD`/`PUT`/`DELETE` only, on 429, 5xx,
 timeout and lost connectivity, with capped jittered backoff and a clamped `Retry-After`. Refresh and policy retries
 have independent budgets (`refreshAttempt`, `retryAttempt`). `HTTPStatusValidator` maps 429 to
-`NetworkError.tooManyRequests`, with `RetryAfter` parsing the header (delta-seconds and HTTP-date) for 429 and 503.
+`NetworkError.tooManyRequests`, other 4xx to `.clientError`, and 5xx to `.serverError`; `HTTPErrorResponse` parses
+`Retry-After` (delta-seconds and HTTP-date) for 429 and 503.
 Endpoint-specific authorization does not trigger provider refresh. Attempt counts
 include auth replays. Instrumentation callbacks are awaited and therefore add to
 request latency; observers should do bounded work. Durations use `ContinuousClock`

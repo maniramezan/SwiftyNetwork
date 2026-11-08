@@ -9,17 +9,6 @@ enum RetryAfter {
     /// The header field name.
     static let headerName = "Retry-After"
 
-    /// Parses the `Retry-After` header of `response`.
-    ///
-    /// - Parameters:
-    ///   - response: The HTTP response whose headers are inspected (name lookup is case-insensitive).
-    ///   - now: The reference instant for the HTTP-date form. Overridable for tests.
-    /// - Returns: The delay in seconds, or `nil` when the header is absent or malformed.
-    static func parse(from response: HTTPURLResponse, now: Date = Date()) -> TimeInterval? {
-        guard let value = response.value(forHTTPHeaderField: headerName) else { return nil }
-        return parse(value, now: now)
-    }
-
     /// Parses a raw `Retry-After` header value.
     ///
     /// - Parameters:

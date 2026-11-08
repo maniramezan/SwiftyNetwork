@@ -25,7 +25,7 @@ under test, then assert on ``MockAPIClient/recordedRequests``:
 ```swift
 let client = MockAPIClient()
 try await client.stub(.get, "/users/1", returning: User(id: "1", name: "Ada"))
-await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 
 let queue = MutationQueue(client: client, retryPolicy: .immediate())
 await queue.enqueue(MutationRequest(endpoint: LikeEndpoint(id: "1")), key: "like:1")

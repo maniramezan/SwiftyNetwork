@@ -16,7 +16,7 @@ import SwiftyNetwork
 /// ```swift
 /// let client = MockAPIClient()
 /// try await client.stub(.get, "/users/1", returning: User(id: "1", name: "Ada"))
-/// await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+/// await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 ///
 /// let service = UserService(client: client)
 /// let user = try await service.user(id: "1")
