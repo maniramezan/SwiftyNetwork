@@ -301,8 +301,9 @@ client. Custom providers get the same behavior by implementing `refreshAuthoriza
 
 Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
 shouldn't block the UI on the network round trip and shouldn't be silently lost to a transient
-failure. `NetworkClient` deliberately doesn't retry transient/5xx errors on its own; `MutationQueue`
-is the dedicated retry loop for this class of call, with exponential backoff, coalescing by key,
+failure. `NetworkClient` doesn't retry transient/5xx errors unless you opt in (see
+[Retrying Idempotent Requests](#retrying-idempotent-requests)); `MutationQueue`
+is the dedicated retry loop for this class of call, which also replays non-idempotent requests, with exponential backoff, coalescing by key,
 and status reporting.
 
 ```swift
@@ -490,8 +491,50 @@ do {
 ```
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
-Timeouts, lost connectivity, malformed responses, and 5xx statuses count as transient. This is the same rule
+Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count as transient. This is the same rule
 `MutationRetryPolicy.default` uses.
+
+### Rate Limiting (429) and Retry-After
+
+A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(retryAfter:data:)`, not
+`.serverError`. `retryAfter` is the parsed `Retry-After` header in seconds (both the delta-seconds and
+HTTP-date forms; `nil` if absent or malformed), and `data` keeps the response body so you can decode a
+problem+json document:
+
+```swift
+do {
+    _ = try await client.request(endpoint, responseType: User.self)
+} catch NetworkError.tooManyRequests(let retryAfter, let data) {
+    let throttle = data.flatMap { try? JSONDecoder().decode(Problem.self, from: $0) }
+    showBanner("Slow down", retryIn: retryAfter)
+}
+```
+
+`error.retryAfter` and `error.serverErrorData` give the same values without a `switch`.
+
+### Retrying Idempotent Requests
+
+`NetworkClient` never retries transient failures by default. Opt in with a `NetworkRetryPolicy`:
+
+```swift
+let configuration = NetworkClientConfiguration(
+    retryPolicy: NetworkRetryPolicy(maxRetries: 2, baseDelay: 0.5, maxDelay: 8, maxRetryAfter: 30)
+)
+let client = NetworkClient(configuration: configuration)
+```
+
+- Only `GET`, `HEAD`, `PUT` and `DELETE` are retried. `POST` and `PATCH` are never replayed, even on `429`.
+- Retried failures: `429`, 5xx, timeouts, and lost connectivity. Other 4xx responses and decoding failures
+  are reported immediately.
+- Backoff is exponential with jitter, capped at `maxDelay`. A `429` `Retry-After` is honored (the wait is at
+  least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
+- Waits are cancellation-aware: cancelling the calling task ends the wait with `CancellationError`.
+- `maxRetries` bounds the retries after the first attempt, independently of `maxAuthRefreshAttempts`.
+  Each retry emits `requestRetried` to your `NetworkInstrumentation`.
+
+If the client sits behind a `MutationQueue`, its `MutationRetryPolicy` also retries; enabling both makes
+the attempts multiply, so prefer one. `MutationRetryPolicy` honors `Retry-After` too (bounded by its
+`maxRetryAfter`, default 300s), so a throttled mutation waits as long as the server asked instead of failing.
 
 ## Configuration
 
@@ -504,7 +547,8 @@ let configuration = NetworkClientConfiguration(
     encoder: JSONEncoder(),
     authorizationProvider: authProvider,
     maxAuthRefreshAttempts: 3,
-    timeoutInterval: 30
+    timeoutInterval: 30,
+    retryPolicy: nil
 )
 
 let client = NetworkClient(configuration: configuration)

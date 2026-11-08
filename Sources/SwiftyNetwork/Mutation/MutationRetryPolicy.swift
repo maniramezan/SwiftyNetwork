@@ -4,11 +4,13 @@ import SwiftCommons
 /// Governs whether and how long ``MutationQueue`` waits before retrying a
 /// failed mutation.
 ///
-/// ``NetworkClient`` deliberately does not retry transient network or 5xx
-/// errors -- that's a per-call decision the caller has to make (see its
-/// configuration docs). `MutationRetryPolicy` is that dedicated retry loop
-/// for the mutation queue: exponential backoff with jitter, bounded by
-/// ``maxAttempts`` and ``maxDelay``.
+/// ``NetworkClient`` does not retry transient failures unless you opt in with
+/// ``NetworkClientConfiguration/retryPolicy`` (idempotent requests only).
+/// `MutationRetryPolicy` is the dedicated retry loop for the mutation queue,
+/// which also replays non-idempotent requests: exponential backoff with
+/// jitter, bounded by ``maxAttempts`` and ``maxDelay``. A `429` response with
+/// a `Retry-After` header makes the queue wait at least that long, bounded by
+/// ``maxRetryAfter``.
 ///
 /// Example:
 /// ```swift
@@ -32,10 +34,18 @@ public struct MutationRetryPolicy: Sendable {
     /// avoid many queued clients retrying in lockstep.
     public var jitterRange: ClosedRange<Double>
 
+    /// The upper bound on how long a server-supplied `Retry-After` is honored, in seconds.
+    ///
+    /// Applies to ``NetworkError/tooManyRequests(retryAfter:data:)``. This is
+    /// the one deliberate exception to ``maxDelay``: a mutation hitting `429`
+    /// waits as long as the server asked, up to this bound, rather than
+    /// retrying early and being throttled again.
+    public var maxRetryAfter: TimeInterval
+
     /// Decides whether a given error is worth retrying at all.
     ///
     /// Defaults to retrying only errors that look transient: timeouts, no
-    /// connectivity, malformed responses, and 5xx server errors. Client
+    /// connectivity, malformed responses, `429` rate limiting, and 5xx server errors. Client
     /// errors (4xx other than what `NetworkClient` already handles via auth
     /// refresh), encoding/decoding failures, and invalid URLs are not
     /// retried since a retry can't change their outcome.
@@ -52,6 +62,7 @@ public struct MutationRetryPolicy: Sendable {
     ///   - baseDelay: Delay before the first retry, in seconds. Defaults to 1.
     ///   - maxDelay: Upper bound on retry delay, in seconds. Defaults to 60.
     ///   - jitterRange: Multiplicative jitter range applied to the computed delay. Defaults to `0.5...1.5`.
+    ///   - maxRetryAfter: Upper bound on an honored `Retry-After`, in seconds. Defaults to 300.
     ///   - isRetryable: Predicate deciding whether an error should be retried.
     ///     Defaults to ``defaultIsRetryable(_:)``.
     public init(
@@ -59,12 +70,14 @@ public struct MutationRetryPolicy: Sendable {
         baseDelay: TimeInterval = 1,
         maxDelay: TimeInterval = 60,
         jitterRange: ClosedRange<Double> = 0.5...1.5,
+        maxRetryAfter: TimeInterval = 300,
         isRetryable: @escaping @Sendable (any Error) -> Bool = MutationRetryPolicy.defaultIsRetryable
     ) {
         self.maxAttempts = max(0, maxAttempts)
         self.baseDelay = max(0, baseDelay)
         self.maxDelay = max(self.baseDelay, maxDelay)
         self.jitterRange = jitterRange
+        self.maxRetryAfter = max(0, maxRetryAfter)
         self.isRetryable = isRetryable
     }
 
@@ -76,7 +89,7 @@ public struct MutationRetryPolicy: Sendable {
     ///
     /// - Parameter error: The error thrown by the mutation's network call.
     /// - Returns: `true` for timeouts, missing connectivity, malformed
-    ///   responses, and 5xx server errors; `false` for everything else,
+    ///   responses, `429` rate limiting, and 5xx server errors; `false` for everything else,
     ///   including non-``NetworkError`` errors.
     public static func defaultIsRetryable(_ error: any Error) -> Bool {
         (error as? NetworkError)?.isTransient ?? false
@@ -109,5 +122,29 @@ public struct MutationRetryPolicy: Sendable {
             // Preserve the queue's hard cap after jitter as well as before it.
             return min(max(0, delay), maxDelay)
         }
+    }
+
+    /// Computes the wait before a retry, honoring a `429` `Retry-After`.
+    ///
+    /// Equivalent to ``delay(forAttempt:jitterGenerator:)`` unless `error` is
+    /// ``NetworkError/tooManyRequests(retryAfter:data:)`` with a `Retry-After`,
+    /// in which case the result is at least that long, clamped to ``maxRetryAfter``.
+    ///
+    /// - Parameters:
+    ///   - attempt: The 1-based retry attempt number about to run.
+    ///   - error: The failure that triggered the retry.
+    ///   - jitterGenerator: Produces a value in `0...1` used to sample within ``jitterRange``.
+    /// - Returns: The delay in seconds.
+    public func delay(
+        forAttempt attempt: Int,
+        after error: any Error,
+        jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
+    ) -> TimeInterval {
+        let backoff = delay(forAttempt: attempt, jitterGenerator: jitterGenerator)
+        return RetryAfter.delay(
+            backoff: backoff,
+            retryAfter: (error as? NetworkError)?.retryAfter,
+            cap: maxRetryAfter
+        )
     }
 }

@@ -10,10 +10,13 @@ enum HTTPStatusValidator {
     ///
     /// - Parameters:
     ///   - statusCode: The HTTP status code of the response.
-    ///   - data: The response body, retained for ``NetworkError/serverError(statusCode:data:)``.
+    ///   - data: The response body, retained for ``NetworkError/serverError(statusCode:data:)``
+    ///     and ``NetworkError/tooManyRequests(retryAfter:data:)``.
+    ///   - retryAfter: The parsed `Retry-After` delay, attached to a `429` error.
     /// - Throws: ``NetworkError/unauthorized``, ``NetworkError/forbidden``, ``NetworkError/notFound``,
-    ///   ``NetworkError/timeout``, or ``NetworkError/serverError(statusCode:data:)``.
-    static func validate(statusCode: Int, data: Data) throws {
+    ///   ``NetworkError/timeout``, ``NetworkError/tooManyRequests(retryAfter:data:)``, or
+    ///   ``NetworkError/serverError(statusCode:data:)``.
+    static func validate(statusCode: Int, data: Data, retryAfter: TimeInterval? = nil) throws {
         switch statusCode {
         case 200..<300:
             Logger.debug("Request successful with status \(statusCode)")
@@ -29,6 +32,9 @@ enum HTTPStatusValidator {
         case 408:
             Logger.warning("Request timeout (408)")
             throw NetworkError.timeout
+        case 429:
+            Logger.warning("Too many requests (429)")
+            throw NetworkError.tooManyRequests(retryAfter: retryAfter, data: data)
         default:
             Logger.error("Server error with status \(statusCode)")
             throw NetworkError.serverError(statusCode: statusCode, data: data)

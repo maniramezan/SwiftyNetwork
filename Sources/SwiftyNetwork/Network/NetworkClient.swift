@@ -3,10 +3,12 @@ import SwiftCommons
 
 /// A thread-safe network client that handles HTTP requests with auth refresh on 401.
 ///
-/// ``NetworkClient`` does not perform general retries on transient errors. It
-/// will, however, refresh authorization once on 401 (up to
-/// ``NetworkClientConfiguration/maxAuthRefreshAttempts``) and retry the
-/// original request with the new credentials.
+/// ``NetworkClient`` refreshes authorization once on 401 (up to
+/// ``NetworkClientConfiguration/maxAuthRefreshAttempts``) and retries the
+/// original request with the new credentials. It does not retry transient
+/// failures unless you opt in with ``NetworkClientConfiguration/retryPolicy``,
+/// which retries idempotent requests on `429`, 5xx, timeouts and lost
+/// connectivity (see ``NetworkRetryPolicy``).
 ///
 /// Example:
 /// ```swift
@@ -69,7 +71,7 @@ public actor NetworkClient: NetworkDataSource {
     }
 
     /// Returns the cumulative number of request **attempts** made by this client,
-    /// including retries triggered by auth refresh.
+    /// including retries triggered by auth refresh or ``NetworkClientConfiguration/retryPolicy``.
     ///
     /// Example:
     /// ```swift
@@ -102,6 +104,7 @@ public actor NetworkClient: NetworkDataSource {
             endpoint,
             responseType: responseType,
             refreshAttempt: 0,
+            retryAttempt: 0,
             configuration: configuration,
             requestID: UUID()
         )
@@ -139,6 +142,7 @@ public actor NetworkClient: NetworkDataSource {
             wrapped,
             responseType: responseType,
             refreshAttempt: 0,
+            retryAttempt: 0,
             configuration: configuration,
             requestID: UUID()
         )
@@ -150,11 +154,12 @@ public actor NetworkClient: NetworkDataSource {
         _ endpoint: any NetworkEndpoint,
         responseType: T.Type,
         refreshAttempt: Int,
+        retryAttempt: Int,
         configuration: NetworkClientConfiguration,
         requestID: UUID
     ) async throws -> T {
         requestAttemptCount += 1
-        let attempt = refreshAttempt + 1
+        let attempt = refreshAttempt + retryAttempt + 1
         Logger.debug("Starting request (attempt \(attempt))")
 
         let url = try EndpointURLBuilder.url(
@@ -186,8 +191,15 @@ public actor NetworkClient: NetworkDataSource {
         do {
             (data, httpResponse) = try await send(request, session: configuration.session)
         } catch let error as NetworkError {
-            await trace.failed(error)
-            throw error
+            return try await retryOrFail(
+                error,
+                endpoint: endpoint,
+                responseType: responseType,
+                refreshAttempt: refreshAttempt,
+                retryAttempt: retryAttempt,
+                configuration: configuration,
+                trace: trace
+            )
         }
 
         if httpResponse.statusCode == 401 {
@@ -195,6 +207,7 @@ public actor NetworkClient: NetworkDataSource {
                 endpoint: endpoint,
                 responseType: responseType,
                 refreshAttempt: refreshAttempt,
+                retryAttempt: retryAttempt,
                 rejectedAuthorization: providerAuthorization,
                 configuration: configuration,
                 trace: trace
@@ -202,7 +215,11 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         do {
-            try HTTPStatusValidator.validate(statusCode: httpResponse.statusCode, data: data)
+            try HTTPStatusValidator.validate(
+                statusCode: httpResponse.statusCode,
+                data: data,
+                retryAfter: RetryAfter.parse(from: httpResponse)
+            )
             let decoded = try await Self.decodeResponse(
                 data: data,
                 responseType: responseType,
@@ -211,9 +228,66 @@ public actor NetworkClient: NetworkDataSource {
             await trace.completed(statusCode: httpResponse.statusCode)
             return decoded
         } catch let error as NetworkError {
+            return try await retryOrFail(
+                error,
+                endpoint: endpoint,
+                responseType: responseType,
+                refreshAttempt: refreshAttempt,
+                retryAttempt: retryAttempt,
+                configuration: configuration,
+                trace: trace
+            )
+        }
+    }
+
+    /// Retries the request when ``NetworkClientConfiguration/retryPolicy`` allows it;
+    /// otherwise reports `error` to observers and rethrows it.
+    ///
+    /// The wait is a cancellable sleep, so cancelling the calling task ends the
+    /// wait and surfaces `CancellationError`.
+    private func retryOrFail<T: Decodable & Sendable>(
+        _ error: NetworkError,
+        endpoint: any NetworkEndpoint,
+        responseType: T.Type,
+        refreshAttempt: Int,
+        retryAttempt: Int,
+        configuration: NetworkClientConfiguration,
+        trace: RequestTrace
+    ) async throws -> T {
+        guard let policy = configuration.retryPolicy,
+            retryAttempt < policy.maxRetries,
+            policy.shouldRetry(error, method: endpoint.method)
+        else {
             await trace.failed(error)
             throw error
         }
+
+        let delay = policy.delay(forRetry: retryAttempt + 1, after: error)
+        Logger.info(
+            "Retrying \(endpoint.method.rawValue) after \(error.classification) in \(delay)s "
+                + "(retry \(retryAttempt + 1) of \(policy.maxRetries))"
+        )
+        if delay > 0 {
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                // Cancelled while waiting: close out this attempt for observers.
+                Logger.info("Retry wait cancelled")
+                await trace.failed(.underlying(AnySendableError(error)))
+                throw error
+            }
+        }
+
+        await trace.retrying()
+
+        return try await performRequest(
+            endpoint,
+            responseType: responseType,
+            refreshAttempt: refreshAttempt,
+            retryAttempt: retryAttempt + 1,
+            configuration: configuration,
+            requestID: trace.requestID
+        )
     }
 
     /// Executes `request`, mapping every transport failure to a ``NetworkError``.
@@ -304,6 +378,7 @@ public actor NetworkClient: NetworkDataSource {
         endpoint: any NetworkEndpoint,
         responseType: T.Type,
         refreshAttempt: Int,
+        retryAttempt: Int,
         rejectedAuthorization: AuthorizationType?,
         configuration: NetworkClientConfiguration,
         trace: RequestTrace
@@ -342,6 +417,7 @@ public actor NetworkClient: NetworkDataSource {
             endpoint,
             responseType: responseType,
             refreshAttempt: refreshAttempt + 1,
+            retryAttempt: retryAttempt,
             configuration: configuration,
             requestID: trace.requestID
         )

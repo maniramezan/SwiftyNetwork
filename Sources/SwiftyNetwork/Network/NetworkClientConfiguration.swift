@@ -52,9 +52,18 @@ public struct NetworkClientConfiguration: Sendable {
 
     /// Maximum number of authorization-refresh attempts after receiving a 401.
     ///
-    /// This is **not** a general retry policy. ``NetworkClient`` does not
-    /// retry transient network or 5xx errors automatically.
+    /// This is **not** a general retry policy; see ``retryPolicy`` for retrying
+    /// transient failures.
     public var maxAuthRefreshAttempts: Int
+
+    /// Opt-in retry policy for transient failures of idempotent requests.
+    ///
+    /// `nil` by default, in which case ``NetworkClient`` never retries a
+    /// transient network, `429` or 5xx failure. When set, `GET`, `HEAD`, `PUT`
+    /// and `DELETE` requests are retried on `429` (honoring `Retry-After`), 5xx,
+    /// timeouts and lost connectivity, with jittered exponential backoff.
+    /// `POST` and `PATCH` are never retried. See ``NetworkRetryPolicy``.
+    public var retryPolicy: NetworkRetryPolicy?
 
     /// The timeout interval for requests, in seconds.
     ///
@@ -96,6 +105,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
+    ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
     public init(
         session: URLSession = .shared,
         decoder: JSONDecoder = JSONDecoder(),
@@ -105,7 +115,8 @@ public struct NetworkClientConfiguration: Sendable {
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
         logLevel: LogLevel? = nil,
-        instrumentation: (any NetworkInstrumentation)? = nil
+        instrumentation: (any NetworkInstrumentation)? = nil,
+        retryPolicy: NetworkRetryPolicy? = nil
     ) {
         self.session = session
         self.decoder = decoder
@@ -116,6 +127,7 @@ public struct NetworkClientConfiguration: Sendable {
         self.retryDelay = retryDelay
         self.logLevel = logLevel
         self.instrumentation = instrumentation
+        self.retryPolicy = retryPolicy
     }
 
     /// Creates a new network client configuration backed by an SSL-pinned `URLSession`.
@@ -137,6 +149,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - logLevel: Verbosity for the internal logger. Defaults to `nil`, which
     ///     leaves the package-wide level unchanged.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
+    ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
     public init(
         sslPinning: SSLPinningConfiguration,
         sessionConfiguration: URLSessionConfiguration = .default,
@@ -148,7 +161,8 @@ public struct NetworkClientConfiguration: Sendable {
         timeoutInterval: TimeInterval = 30,
         retryDelay: TimeInterval = 1.0,
         logLevel: LogLevel? = nil,
-        instrumentation: (any NetworkInstrumentation)? = nil
+        instrumentation: (any NetworkInstrumentation)? = nil,
+        retryPolicy: NetworkRetryPolicy? = nil
     ) {
         let delegate = SSLPinningURLSessionDelegate(configuration: sslPinning)
         let session = URLSession(
@@ -165,7 +179,8 @@ public struct NetworkClientConfiguration: Sendable {
             timeoutInterval: timeoutInterval,
             retryDelay: retryDelay,
             logLevel: logLevel,
-            instrumentation: instrumentation
+            instrumentation: instrumentation,
+            retryPolicy: retryPolicy
         )
     }
 }
