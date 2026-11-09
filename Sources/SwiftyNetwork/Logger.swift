@@ -39,6 +39,24 @@ public enum LogLevel: Int, Sendable, Comparable {
     }
 }
 
+// MARK: - Package-Wide Level
+
+extension LogLevel {
+    /// The package-wide verbosity of SwiftyNetwork's logs.
+    ///
+    /// Defaults to ``warning``. This one setting covers every client, cache, and
+    /// mutation queue in the process; configurations no longer carry a level.
+    ///
+    /// Example:
+    /// ```swift
+    /// LogLevel.current = .debug
+    /// ```
+    public static var current: LogLevel {
+        get { Logger.level }
+        set { Logger.setLevel(newValue) }
+    }
+}
+
 // MARK: - Level Bridging
 
 extension LogLevel {

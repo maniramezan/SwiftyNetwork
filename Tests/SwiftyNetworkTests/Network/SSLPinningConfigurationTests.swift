@@ -388,8 +388,8 @@ struct SSLPinningConfigurationTests {
         #expect(p521SPKI == p521Header + p521RawKey)
     }
 
-    @Test("Pinned session initializer preserves request configuration")
-    func testPinnedSessionInitializerPreservesRequestConfiguration() async throws {
+    @Test("A pinned session passes requests to unlisted hosts through and keeps request configuration")
+    func testPinnedSessionPreservesRequestConfiguration() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
         let pin = SSLPinningConfiguration.Pin.certificate(Data([1, 2, 3]))
@@ -399,13 +399,11 @@ struct SSLPinningConfigurationTests {
         let authorizationProvider = TestAuthorizationProvider(current: .apiKey(key: "key"), refreshResult: false)
 
         let configuration = NetworkClientConfiguration(
-            sslPinning: pinning,
-            sessionConfiguration: sessionConfiguration,
+            session: pinning.makeSession(configuration: sessionConfiguration),
             authorizationProvider: authorizationProvider,
             maxAuthRefreshAttempts: -1,
-            timeoutInterval: 12,
             authRefreshDelay: 0,
-            logLevel: .info
+            timeoutInterval: 12
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "ssl", name: "Pinned", email: "pin@example.com")
@@ -418,7 +416,7 @@ struct SSLPinningConfigurationTests {
         #expect(configuration.maxAuthRefreshAttempts == 0)
         #expect(configuration.timeoutInterval == 12)
         #expect(configuration.authRefreshDelay == 0)
-        #expect(configuration.logLevel == .info)
+        #expect(configuration.session.delegate is SSLPinningURLSessionDelegate)
         #expect(response == user)
         configuration.session.invalidateAndCancel()
     }

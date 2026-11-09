@@ -147,7 +147,7 @@ func createUserRepository() -> GenericRepository<User> {
     
     // Create and return repository
     return GenericRepository(
-        networkDataSource: networkClient,
+        client: networkClient,
         localDataSource: localDataSource
     )
 }
@@ -162,6 +162,13 @@ func fetchUser(client: any APIClient, baseURL: String, userId: String) async thr
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
     return try await client.request(endpoint, responseType: User.self)
 }
+```
+
+`APIClient` also sends `Encodable` JSON bodies, so code that only holds an `any APIClient` (and
+`MockAPIClient` in tests) can post typed payloads. `NetworkClient` encodes them with its configured encoder:
+
+```swift
+let post = try await client.request(CreatePostEndpoint(), body: draft, responseType: Post.self)
 ```
 
 ### Layered Caching with a Custom Persistent Cache
@@ -205,7 +212,7 @@ func createLayeredRepository() -> GenericRepository<User> {
     let localDataSource = CacheBasedLocalDataSource(cache: layeredCache)
 
     return GenericRepository(
-        networkDataSource: NetworkClient.shared,
+        client: NetworkClient.shared,
         localDataSource: localDataSource
     )
 }
@@ -267,9 +274,9 @@ func fetchUserWithExpiration(
 /// Example showing OAuth authentication setup.
 func createAuthenticatedClient(accessToken: String) -> NetworkClient {
     let authProvider = OAuthAuthorizationProvider(initialAccessToken: accessToken) {
-        // In a real app, this would refresh the token using a refresh token
-        // For this example, we just return nil to indicate refresh failure
-        return nil
+        // Exchange your refresh token for a new access token, or throw.
+        // The client surfaces the error as NetworkError.authorizationRefreshFailed(underlying:).
+        try await tokenService.refreshAccessToken()
     }
     
     let configuration = NetworkClientConfiguration(
@@ -295,7 +302,8 @@ do {
 `OAuthAuthorizationProvider` coalesces concurrent refreshes, and a `401` for a token that another request
 already replaced retries with the new token instead of refreshing again. That matters for servers that
 rotate refresh tokens. Call `updateAccessToken(_:)` after sign-in to swap the token without rebuilding the
-client. Custom providers get the same behavior by implementing `refreshAuthorization(rejecting:)`.
+client. Custom providers implement `refreshAuthorization(rejecting:)`: return when newer credentials are
+available, or throw, and the client reports `NetworkError.authorizationRefreshFailed(underlying:)` with your error.
 
 A provider can also veto a refresh by implementing `shouldRefreshAuthorization(after:)`. The client passes it
 the `401` response (status, headers, and body) before refreshing; return `false` for a `401` that a new token
@@ -375,7 +383,7 @@ func makePinnedClient() throws -> NetworkClient {
     )
 
     let configuration = NetworkClientConfiguration(
-        sslPinning: pinning,
+        session: pinning.makeSession(),
         timeoutInterval: 30
     )
     return NetworkClient(configuration: configuration)
@@ -592,11 +600,22 @@ let configuration = NetworkClientConfiguration(
     encoder: JSONEncoder(),
     authorizationProvider: authProvider,
     maxAuthRefreshAttempts: 3,
-    timeoutInterval: 30,
-    retryPolicy: nil
+    retryPolicy: nil,
+    timeoutInterval: 30
 )
 
 let client = NetworkClient(configuration: configuration)
+```
+
+A client keeps its configuration for its lifetime; create a new client to change it.
+
+### Logging
+
+SwiftyNetwork logs through `os.Logger` under the `SwiftyNetwork` subsystem at `.warning` by default. The level is
+package-wide, so set it once at launch rather than per client:
+
+```swift
+LogLevel.current = .debug
 ```
 
 ### Custom JSON Decoding
@@ -614,7 +633,7 @@ let configuration = NetworkClientConfiguration(decoder: decoder)
 SwiftyNetwork is built around several key protocols and types:
 
 - **`NetworkEndpoint`**: Defines API endpoints
-- **`NetworkDataSource`**: Abstract network request interface
+- **`APIClient`**: Abstract network request interface
 - **`Cache`**: Generic caching interface
 - **`LocalDataSource`**: Local storage abstraction
 - **`Repository`**: Combines network and local data sources
@@ -670,7 +689,7 @@ import Testing
     let client = MockAPIClient()
     try await client.stub(.get, "/users/123", returning: User(id: "123", name: "Ada", email: "ada@example.com"))
     let repository = GenericRepository(
-        networkDataSource: client,
+        client: client,
         localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<User>())
     )
     // ...

@@ -2,6 +2,8 @@ import SwiftyNetwork
 import TestCommons
 
 actor GatedAuthorizationProvider: AuthorizationProvider {
+    struct CannotRefresh: Error {}
+
     private(set) var callCount = 0
     nonisolated let release = AsyncGate()
 
@@ -11,5 +13,5 @@ actor GatedAuthorizationProvider: AuthorizationProvider {
         return .none
     }
 
-    func refreshAuthorizationIfNeeded() async -> Bool { false }
+    func refreshAuthorization(rejecting rejected: AuthorizationType) async throws { throw CannotRefresh() }
 }

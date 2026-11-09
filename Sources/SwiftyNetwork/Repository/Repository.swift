@@ -126,7 +126,7 @@ public struct CacheBasedLocalDataSource<E: Sendable>: LocalDataSource {
 /// Example:
 /// ```swift
 /// let repository = GenericRepository<User>(
-///     networkDataSource: NetworkClient(),
+///     client: NetworkClient(),
 ///     localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<User>())
 /// )
 /// let user = try await repository.fetch(
@@ -166,13 +166,13 @@ public protocol Repository: Sendable {
 /// let cache = InMemoryCache<User>(maxSize: 100)
 /// let localDataSource = CacheBasedLocalDataSource(cache: cache)
 /// let repository = GenericRepository<User>(
-///     networkDataSource: NetworkClient(),
+///     client: NetworkClient(),
 ///     localDataSource: localDataSource
 /// )
 /// ```
 public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
 
-    private let networkDataSource: any NetworkDataSource
+    private let client: any APIClient
     private let localRead: @Sendable (CacheKey) async -> Entity?
     private let localWrite: @Sendable (Entity, CacheKey) async -> Void
     private let localTimestamp: @Sendable (CacheKey) async -> Date?
@@ -183,13 +183,13 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     /// providing better flexibility for users of the repository.
     ///
     /// - Parameters:
-    ///   - networkDataSource: The remote data source for network requests.
+    ///   - client: The client that performs network requests.
     ///   - localDataSource: The local data source for caching.
     public init<L: LocalDataSource>(
-        networkDataSource: some NetworkDataSource,
+        client: some APIClient,
         localDataSource: L
     ) where L.Entity == Entity {
-        self.networkDataSource = networkDataSource
+        self.client = client
         self.localRead = { key in await localDataSource.read(for: key) }
         self.localWrite = { entity, key in await localDataSource.write(entity, for: key) }
         self.localTimestamp = { key in await localDataSource.timestamp(for: key) }
@@ -255,7 +255,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
         endpoint: any NetworkEndpoint,
         cacheKey: CacheKey
     ) async throws -> Entity {
-        let freshEntity = try await networkDataSource.request(endpoint, responseType: Entity.self)
+        let freshEntity = try await client.request(endpoint, responseType: Entity.self)
         await localWrite(freshEntity, cacheKey)
         return freshEntity
     }

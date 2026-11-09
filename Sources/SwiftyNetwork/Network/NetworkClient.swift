@@ -20,15 +20,14 @@ import SwiftCommons
 /// let client = NetworkClient()
 /// let user = try await client.request(UserEndpoint(id: "123"), responseType: User.self)
 /// ```
-public actor NetworkClient: NetworkDataSource {
+public actor NetworkClient: APIClient {
 
-    private var configuration: NetworkClientConfiguration
-    private var requestAttemptCount = 0
+    private let configuration: NetworkClientConfiguration
 
     /// Shared client with default configuration.
     ///
-    /// Suitable for simple apps. For testability or multiple distinct
-    /// configurations, create dedicated ``NetworkClient`` instances.
+    /// Suitable for simple apps. For testability, authorization, or multiple
+    /// distinct configurations, create dedicated ``NetworkClient`` instances.
     ///
     /// Example:
     /// ```swift
@@ -38,47 +37,17 @@ public actor NetworkClient: NetworkDataSource {
 
     /// Creates a new network client.
     ///
+    /// The client keeps `configuration` for its lifetime; create a new client to change it.
+    ///
     /// Example:
     /// ```swift
-    /// let configuration = NetworkClientConfiguration(timeoutInterval: 10, logLevel: .debug)
+    /// let configuration = NetworkClientConfiguration(timeoutInterval: 10)
     /// let client = NetworkClient(configuration: configuration)
     /// ```
     ///
     /// - Parameter configuration: The configuration to use.
     public init(configuration: NetworkClientConfiguration = NetworkClientConfiguration()) {
         self.configuration = configuration
-        if let logLevel = configuration.logLevel {
-            Logger.setLevel(logLevel)
-        }
-    }
-
-    /// Replaces the active configuration atomically.
-    ///
-    /// Existing in-flight requests continue with the configuration captured when
-    /// they started. New requests use `newConfiguration`.
-    ///
-    /// Example:
-    /// ```swift
-    /// await client.updateConfiguration(NetworkClientConfiguration(logLevel: .info))
-    /// ```
-    ///
-    /// - Parameter newConfiguration: The new configuration to apply.
-    public func updateConfiguration(_ newConfiguration: NetworkClientConfiguration) {
-        self.configuration = newConfiguration
-        if let logLevel = newConfiguration.logLevel {
-            Logger.setLevel(logLevel)
-        }
-    }
-
-    /// Returns the cumulative number of request **attempts** made by this client,
-    /// including retries triggered by auth refresh or ``NetworkClientConfiguration/retryPolicy``.
-    ///
-    /// Example:
-    /// ```swift
-    /// let attempts = await client.attemptCount()
-    /// ```
-    public func attemptCount() async -> Int {
-        requestAttemptCount
     }
 
     // MARK: - Public Request API
@@ -158,7 +127,6 @@ public actor NetworkClient: NetworkDataSource {
         configuration: NetworkClientConfiguration,
         requestID: UUID
     ) async throws -> T {
-        requestAttemptCount += 1
         let attempt = refreshAttempt + retryAttempt + 1
         Logger.debug("Starting request (attempt \(attempt))")
 
@@ -399,10 +367,17 @@ public actor NetworkClient: NetworkDataSource {
         }
 
         Logger.info("Attempting to refresh authorization", category: .auth)
-        guard await provider.refreshAuthorization(rejecting: rejectedAuthorization) else {
-            Logger.error("Authorization refresh failed", category: .auth)
-            await trace.failed(.authorizationRefreshFailed)
-            throw NetworkError.authorizationRefreshFailed
+        do {
+            try await provider.refreshAuthorization(rejecting: rejectedAuthorization)
+        } catch is CancellationError {
+            Logger.info("Authorization refresh cancelled", category: .auth)
+            await trace.failed(.underlying(CancellationError()))
+            throw CancellationError()
+        } catch {
+            Logger.error("Authorization refresh failed", error: error, category: .auth)
+            let failure = NetworkError.authorizationRefreshFailed(underlying: error)
+            await trace.failed(failure)
+            throw failure
         }
         Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
 
