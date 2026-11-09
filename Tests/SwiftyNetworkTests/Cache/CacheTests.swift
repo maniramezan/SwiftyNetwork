@@ -84,10 +84,11 @@ func testCacheKeyHashable() {
 
 @Test("CachePolicy decision logic")
 func testCachePolicyDecisionLogic() {
-    #expect(CachePolicy.returnCacheElseLoad.shouldUseCachedData(cacheAge: 999))
-    #expect(CachePolicy.reloadIgnoringCache.shouldUseCachedData(cacheAge: 0) == false)
-    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: 10).shouldUseCachedData(cacheAge: 10))
-    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: 10).shouldUseCachedData(cacheAge: 11) == false)
+    #expect(CachePolicy.returnCacheElseLoad.shouldUseCachedData(cacheAge: .seconds(999)))
+    #expect(CachePolicy.reloadIgnoringCache.shouldUseCachedData(cacheAge: .seconds(0)) == false)
+    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)).shouldUseCachedData(cacheAge: .seconds(10)))
+    #expect(
+        CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)).shouldUseCachedData(cacheAge: .seconds(11)) == false)
 }
 
 @Test("InMemoryCache stores, removes, and timestamps values")
@@ -325,7 +326,7 @@ func inMemoryCacheRemovesExpired() async {
     try? await Task.sleep(for: .milliseconds(100))
     await cache.setValue("new-value", forKey: key2)
 
-    await cache.removeExpiredEntries(maxAge: 0.05)
+    await cache.removeExpiredEntries(maxAge: .seconds(0.05))
 
     let oldValue = await cache.value(forKey: key1)
     let newValue = await cache.value(forKey: key2)
@@ -342,7 +343,7 @@ func inMemoryCacheRemovesOlderThan() async {
     await cache.setValue("value", forKey: key)
     try? await Task.sleep(for: .milliseconds(100))
 
-    await cache.removeEntries(olderThan: 0.05)
+    await cache.removeEntries(olderThan: .seconds(0.05))
 
     let value = await cache.value(forKey: key)
     #expect(value == nil)
@@ -619,7 +620,7 @@ func inMemoryCacheRemovalsReleaseCost() async {
     await cache.removeValue(forKey: "a")
     #expect(await cache.totalCost() == 4)
 
-    await cache.removeExpiredEntries(maxAge: 60)
+    await cache.removeExpiredEntries(maxAge: .seconds(60))
     #expect(await cache.totalCost() == 1)
 
     await cache.removeAll()

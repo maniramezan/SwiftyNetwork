@@ -33,7 +33,7 @@ struct NetworkInstrumentationTests {
         #expect(startedEvent.attempt == 1)
         #expect(completedEvent.attempt == 1)
         #expect(completedEvent.statusCode == 200)
-        #expect(completedEvent.duration >= 0)
+        #expect(completedEvent.duration >= .zero)
         #expect(completedEvent.method == .get)
     }
 
@@ -57,7 +57,7 @@ struct NetworkInstrumentationTests {
         #expect(failed.count == 1)
         #expect(failed.first?.error.classification == .serverError(statusCode: 500))
         #expect(failed.first?.requestID == started.first?.requestID)
-        #expect((failed.first?.duration ?? -1) >= 0)
+        #expect((failed.first?.duration ?? .seconds(-1)) >= .zero)
     }
 
     @Test("A transport failure emits requestFailed with the mapped NetworkError classification")
@@ -93,7 +93,7 @@ struct NetworkInstrumentationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            authRefreshDelay: 0,
+            authRefreshDelay: .zero,
             instrumentation: instrumentation
         )
         let client = NetworkClient(configuration: configuration)
@@ -129,7 +129,7 @@ struct NetworkInstrumentationTests {
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
-            authRefreshDelay: 0,
+            authRefreshDelay: .zero,
             instrumentation: instrumentation
         )
         let client = NetworkClient(configuration: configuration)

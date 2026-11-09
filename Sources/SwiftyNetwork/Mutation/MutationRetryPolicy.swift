@@ -24,11 +24,11 @@ public struct MutationRetryPolicy: Sendable {
 
     /// The delay before the first retry, in seconds. Each subsequent retry
     /// doubles the previous delay until ``maxDelay`` caps it.
-    public var baseDelay: TimeInterval
+    public var baseDelay: Duration
 
     /// The upper bound on delay between retries, in seconds, regardless of
     /// how many attempts have elapsed or how jitter scales the delay.
-    public var maxDelay: TimeInterval
+    public var maxDelay: Duration
 
     /// The multiplicative jitter range applied to the computed delay, to
     /// avoid many queued clients retrying in lockstep.
@@ -40,7 +40,7 @@ public struct MutationRetryPolicy: Sendable {
     /// the one deliberate exception to ``maxDelay``: a mutation hitting `429`
     /// waits as long as the server asked, up to this bound, rather than
     /// retrying early and being throttled again.
-    public var maxRetryAfter: TimeInterval
+    public var maxRetryAfter: Duration
 
     /// Decides whether a given error is worth retrying at all.
     ///
@@ -67,17 +67,17 @@ public struct MutationRetryPolicy: Sendable {
     ///     Defaults to ``defaultIsRetryable(_:)``.
     public init(
         maxAttempts: Int = 5,
-        baseDelay: TimeInterval = 1,
-        maxDelay: TimeInterval = 60,
+        baseDelay: Duration = .seconds(1),
+        maxDelay: Duration = .seconds(60),
         jitterRange: ClosedRange<Double> = 0.5...1.5,
-        maxRetryAfter: TimeInterval = 300,
+        maxRetryAfter: Duration = .seconds(300),
         isRetryable: @escaping @Sendable (any Error) -> Bool = MutationRetryPolicy.defaultIsRetryable
     ) {
         self.maxAttempts = max(0, maxAttempts)
-        self.baseDelay = max(0, baseDelay)
+        self.baseDelay = max(.zero, baseDelay)
         self.maxDelay = max(self.baseDelay, maxDelay)
         self.jitterRange = jitterRange
-        self.maxRetryAfter = max(0, maxRetryAfter)
+        self.maxRetryAfter = max(.zero, maxRetryAfter)
         self.isRetryable = isRetryable
     }
 
@@ -113,21 +113,20 @@ public struct MutationRetryPolicy: Sendable {
         forAttempt attempt: Int,
         after error: (any Error)? = nil,
         jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
-    ) -> TimeInterval {
+    ) -> Duration {
         // Negative multipliers can't produce a meaningful delay; clamp so the
         // shared backoff's non-negative jitter requirement always holds.
         let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
         let backoff = withoutActuallyEscaping(jitterGenerator) { jitterSource in
             let delay = RetryBackoff.exponential(
-                baseDelay: .seconds(baseDelay),
-                maxDelay: .seconds(maxDelay),
+                baseDelay: baseDelay,
+                maxDelay: maxDelay,
                 jitter: jitter,
                 jitterSource: jitterSource
             )
             .delay(forRetry: attempt)
-            .timeInterval
             // Preserve the queue's hard cap after jitter as well as before it.
-            return min(max(0, delay), maxDelay)
+            return min(max(.zero, delay), maxDelay)
         }
         return RetryAfter.delay(
             backoff: backoff,

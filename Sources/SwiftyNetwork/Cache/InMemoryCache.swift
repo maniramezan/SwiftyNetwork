@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 // MARK: - In-Memory Cache Implementation
 
@@ -146,16 +147,16 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
     // MARK: - Expiration Helpers
 
-    /// Removes entries older than `maxAge` seconds.
+    /// Removes entries older than `maxAge`.
     ///
     /// Example:
     /// ```swift
-    /// await cache.removeExpiredEntries(maxAge: 300)
+    /// await cache.removeExpiredEntries(maxAge: .seconds(300))
     /// ```
     ///
-    /// - Parameter maxAge: Maximum allowed age in seconds. Entries older than this will be removed.
-    public func removeExpiredEntries(maxAge: TimeInterval) async {
-        let cutoff = Date().addingTimeInterval(-maxAge)
+    /// - Parameter maxAge: Maximum allowed age. Entries older than this will be removed.
+    public func removeExpiredEntries(maxAge: Duration) async {
+        let cutoff = Date().addingTimeInterval(-maxAge.timeInterval)
         let removed = storage.removeAll { $0.timestamp <= cutoff }
         currentCost -= removed.reduce(0) { $0 + $1.cost }
     }
@@ -164,11 +165,11 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
     ///
     /// Example:
     /// ```swift
-    /// await cache.removeEntries(olderThan: 60)
+    /// await cache.removeEntries(olderThan: .seconds(60))
     /// ```
     ///
-    /// - Parameter maxAge: Age threshold in seconds. Items older than this are removed.
-    public func removeEntries(olderThan maxAge: TimeInterval) async {
+    /// - Parameter maxAge: Age threshold. Items older than this are removed.
+    public func removeEntries(olderThan maxAge: Duration) async {
         await removeExpiredEntries(maxAge: maxAge)
     }
 

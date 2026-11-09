@@ -13,7 +13,7 @@ import Foundation
 /// let user = try await repository.fetch(
 ///     using: UserEndpoint(id: "123"),
 ///     cacheKey: .user("123", resource: "profile"),
-///     policy: .returnCacheIfNotExpired(maxAge: 300)
+///     policy: .returnCacheIfNotExpired(maxAge: .seconds(300))
 /// )
 /// ```
 public enum CachePolicy: Sendable {
@@ -25,8 +25,8 @@ public enum CachePolicy: Sendable {
 
     /// Return cached data if not expired; otherwise fetch from remote and update cache.
     ///
-    /// - Parameter maxAge: Maximum age in seconds for cached data to be considered valid.
-    case returnCacheIfNotExpired(maxAge: TimeInterval)
+    /// - Parameter maxAge: Maximum age for cached data to be considered valid.
+    case returnCacheIfNotExpired(maxAge: Duration)
 
     /// Default caching policy.
     ///
@@ -43,15 +43,15 @@ public enum CachePolicy: Sendable {
     ///
     /// Example:
     /// ```swift
-    /// let policy = CachePolicy.returnCacheIfNotExpired(maxAge: 60)
-    /// if policy.shouldUseCachedData(cacheAge: 30) {
+    /// let policy = CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(60))
+    /// if policy.shouldUseCachedData(cacheAge: .seconds(30)) {
     ///     return cachedValue
     /// }
     /// ```
     ///
-    /// - Parameter cacheAge: The age of the cached data in seconds.
+    /// - Parameter cacheAge: The age of the cached data.
     /// - Returns: `true` if cached data should be used; `false` otherwise.
-    public func shouldUseCachedData(cacheAge: TimeInterval) -> Bool {
+    public func shouldUseCachedData(cacheAge: Duration) -> Bool {
         switch self {
         case .returnCacheElseLoad:
             return true

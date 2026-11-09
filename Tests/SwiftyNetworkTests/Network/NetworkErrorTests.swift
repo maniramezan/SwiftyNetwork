@@ -209,7 +209,7 @@ func testTooManyRequestsAccessors() {
     let body = Data(#"{"code":"throttled"}"#.utf8)
     let error = NetworkError.tooManyRequests(.status(429, retryAfter: 5, body: body))
 
-    #expect(error.retryAfter == 5)
+    #expect(error.retryAfter == .seconds(5))
     #expect(error.response?.body == body)
     #expect(error.errorDescription?.contains("Too many requests") == true)
     #expect(NetworkError.tooManyRequests(.status(429)).retryAfter == nil)
@@ -223,7 +223,7 @@ func testServerErrorRetryAfterAccessors() {
     let response = HTTPErrorResponse(statusCode: 503, headers: ["Retry-After": "30"], body: body)
     let error = NetworkError.serverError(response)
 
-    #expect(error.retryAfter == 30)
+    #expect(error.retryAfter == .seconds(30))
     #expect(error.response?.body == body)
     #expect(error.response == response)
     #expect(error.classification == .serverError(statusCode: 503))

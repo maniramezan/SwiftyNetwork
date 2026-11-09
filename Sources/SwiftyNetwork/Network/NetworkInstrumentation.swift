@@ -124,12 +124,12 @@ public struct NetworkRequestCompletion: Sendable {
     /// The HTTP status code returned.
     public let statusCode: Int
 
-    /// Monotonic elapsed seconds, including authorization, transport, and decoding.
+    /// Monotonic elapsed time, including authorization, transport, and decoding.
     /// Measurement starts after `requestStarted` returns and excludes the
     /// `requestCompleted` callback itself. System clock changes do not affect it.
-    public let duration: TimeInterval
+    public let duration: Duration
 
-    public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, statusCode: Int, duration: TimeInterval) {
+    public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, statusCode: Int, duration: Duration) {
         self.requestID = requestID
         self.url = url
         self.method = method
@@ -155,17 +155,17 @@ public struct NetworkRequestFailure: Sendable {
     /// See ``NetworkRequestAttempt/attempt``.
     public let attempt: Int
 
-    /// Monotonic elapsed seconds from after `requestStarted` returns until failure.
+    /// Monotonic elapsed time from after `requestStarted` returns until failure.
     /// Includes authorization and any failed auth refresh, but excludes the
     /// `requestFailed` callback itself. System clock changes do not affect it.
-    public let duration: TimeInterval
+    public let duration: Duration
 
     /// The error that terminated this attempt. Use ``NetworkError/classification``
     /// for a stable category to tag onto a span attribute.
     public let error: NetworkError
 
     public init(
-        requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, duration: TimeInterval, error: NetworkError
+        requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, duration: Duration, error: NetworkError
     ) {
         self.requestID = requestID
         self.url = url

@@ -9,6 +9,7 @@ extension MutationRetryPolicy {
     /// - Parameter maxAttempts: Maximum retry attempts after the initial failure. Defaults to 3.
     /// - Returns: A policy with zero backoff and no jitter.
     public static func immediate(maxAttempts: Int = 3) -> MutationRetryPolicy {
-        MutationRetryPolicy(maxAttempts: maxAttempts, baseDelay: 0, maxDelay: 0, jitterRange: 1...1, maxRetryAfter: 0)
+        MutationRetryPolicy(
+            maxAttempts: maxAttempts, baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .zero)
     }
 }
