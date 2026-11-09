@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// let queue = MutationQueue(client: NetworkClient.shared, store: InMemoryMutationStore())
+/// let queue = MutationQueue(client: authenticatedClient, store: InMemoryMutationStore())
 /// ```
 public actor InMemoryMutationStore: MutationStore {
     private var requestsByKey: [MutationKey: MutationRequest] = [:]

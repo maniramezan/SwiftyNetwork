@@ -34,7 +34,7 @@ Sources/SwiftyNetwork/
 │   ├── EncodedBodyEndpoint.swift    # Internal: body-override wrapper + HTTPHeaders helpers
 │   ├── HTTPMethod.swift             # HTTP verb enum
 │   ├── EmptyResponse.swift          # Decodable for bodiless responses
-│   ├── AuthorizationType.swift      # Auth header strategies (Codable)
+│   ├── AuthorizationType.swift      # Auth header strategies
 │   ├── AuthProvider.swift           # AuthorizationProvider protocol + OAuth actor
 │   ├── NetworkError.swift           # Error enum, classification, isTransient, URLError mapping
 │   ├── NetworkInstrumentation.swift # Observability hook + event types
@@ -281,7 +281,10 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - All actors use instance isolation -- no locks or GCD in production code
 - `TestHTTPStub` uses TestCommons `TestValueBox` and `ScriptedValues` for synchronous response routing
 - `MutationRequest` is `Codable` (not a closure) so a durable `MutationStore` can serialize
-  "which endpoint plus what body" and replay it after relaunch
+  "which endpoint plus what body" and replay it after relaunch. Its encoded form is a compatibility
+  contract: bump `MutationRequest.version` for any change and keep decoding older versions
+- `MutationRequest.authorization` is always `.none`; the queue's client authorizes through its provider.
+  `AuthorizationType` is not `Codable` -- don't reintroduce persisted credentials
 - Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
   non-suspending check-and-remove -- composing `load` then `remove` from outside reintroduces
   the race it exists to close
@@ -293,9 +296,8 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - Scrub sensitive headers before logging
 - `Logger` marks URLs and underlying error descriptions private (error type/domain/code stay public); redact sensitive values before exporting diagnostics
 - Validate URLs (scheme + host) in endpoints
-- `MutationRequest` can carry secrets via its captured `AuthorizationType` (bearer tokens, API
-  keys); a durable `MutationStore` implementation is responsible for encrypting persisted
-  mutations (e.g. Keychain-backed) -- SwiftyNetwork does not encrypt them itself
+- `MutationRequest` never captures authorization; headers and bodies are persisted as given, so a
+  durable `MutationStore` implementation should still encrypt persisted mutations
 
 ## Documentation Files
 
