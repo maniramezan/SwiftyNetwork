@@ -65,7 +65,7 @@ actor FakeAPIClient: APIClient {
     ) async throws -> T {
         let response = try await responder.respond(to: MutationRequest(endpoint: endpoint))
         guard let value = response as? T else {
-            throw NetworkError.invalidData
+            throw NetworkError.decodingFailed(underlying: URLError(.cannotDecodeContentData))
         }
         return value
     }

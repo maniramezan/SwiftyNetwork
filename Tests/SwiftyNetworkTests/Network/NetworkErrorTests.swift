@@ -44,9 +44,6 @@ func testAllNetworkErrorCases() {
     let invalidResponse = NetworkError.invalidResponse
     #expect(invalidResponse.errorDescription?.contains("response") == true)
 
-    let invalidData = NetworkError.invalidData
-    #expect(invalidData.errorDescription?.contains("data") == true)
-
     let authRefresh = NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired))
     #expect(
         authRefresh.errorDescription?.contains("authorization") == true
@@ -97,7 +94,6 @@ func testStatusMapping() {
 func testClassificationMapsEveryCase() {
     #expect(NetworkError.invalidURL(url: "x").classification == .invalidURL)
     #expect(NetworkError.invalidResponse.classification == .invalidResponse)
-    #expect(NetworkError.invalidData.classification == .invalidData)
     #expect(NetworkError.clientError(.status(422)).classification == .clientError(statusCode: 422))
     #expect(NetworkError.serverError(.status(503)).classification == .serverError(statusCode: 503))
     #expect(NetworkError.unexpectedStatus(.status(304)).classification == .unexpectedStatus(statusCode: 304))
@@ -120,7 +116,6 @@ func testIsTransientMatchesClassification() {
     let errors: [NetworkError] = [
         .invalidURL(url: "x"),
         .invalidResponse,
-        .invalidData,
         .serverError(.status(500)),
         .clientError(.status(499)),
         .unexpectedStatus(.status(304)),
@@ -140,11 +135,10 @@ func testIsTransientMatchesClassification() {
     }
 }
 
-@Test("isTransient is true only for timeouts, missing connectivity, invalid responses, 429, and 5xx errors")
+@Test("isTransient is true only for timeouts, missing connectivity, 429, and 5xx errors")
 func testIsTransientClassifiesTransientErrors() {
     #expect(NetworkError.timeout(nil).isTransient)
     #expect(NetworkError.noInternetConnection.isTransient)
-    #expect(NetworkError.invalidResponse.isTransient)
     #expect(NetworkError.serverError(.status(500)).isTransient)
     #expect(NetworkError.serverError(.status(503)).isTransient)
     #expect(NetworkError.tooManyRequests(.status(429, retryAfter: 5)).isTransient)
@@ -156,7 +150,7 @@ func testIsTransientClassifiesTransientErrors() {
     #expect(!NetworkError.forbidden(.status(403)).isTransient)
     #expect(!NetworkError.notFound(.status(404)).isTransient)
     #expect(!NetworkError.invalidURL(url: "x").isTransient)
-    #expect(!NetworkError.invalidData.isTransient)
+    #expect(!NetworkError.invalidResponse.isTransient)
     #expect(!NetworkError.decodingFailed(underlying: URLError(.badURL)).isTransient)
     #expect(!NetworkError.encodingFailed(underlying: URLError(.badURL)).isTransient)
     #expect(!NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)).isTransient)
@@ -202,6 +196,31 @@ func testMapURLErrorPreservesUnderlyingURLError() throws {
     }
     let urlError = try #require(underlying as? URLError)
     #expect(urlError.code == .cannotFindHost)
+}
+
+@Test("transportError turns a cancelled URLError into CancellationError only when the task is cancelled")
+func testTransportErrorTranslatesTaskCancellation() async {
+    let notCancelled = NetworkError.transportError(URLError(.cancelled))
+    guard case .underlying(let underlying) = notCancelled as? NetworkError else {
+        Issue.record("Expected .underlying for a cancelled URLError outside task cancellation, got \(notCancelled)")
+        return
+    }
+    #expect((underlying as? URLError)?.code == .cancelled)
+
+    let cancelled = await Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return NetworkError.transportError(URLError(.cancelled))
+    }.value
+    #expect(cancelled is CancellationError)
+}
+
+@Test("transportError passes CancellationError through and maps other errors")
+func testTransportErrorMapsOtherErrors() {
+    #expect(NetworkError.transportError(CancellationError()) is CancellationError)
+    #expect((NetworkError.transportError(URLError(.timedOut)) as? NetworkError)?.classification == .timeout)
+
+    struct Unrelated: Error {}
+    #expect((NetworkError.transportError(Unrelated()) as? NetworkError)?.classification == .underlying)
 }
 
 @Test("tooManyRequests exposes retryAfter and its response body, and describes itself")

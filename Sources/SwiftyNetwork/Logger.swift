@@ -10,8 +10,7 @@ import SwiftCommons
 ///
 /// Example:
 /// ```swift
-/// let configuration = NetworkClientConfiguration(logLevel: .debug)
-/// let client = NetworkClient(configuration: configuration)
+/// LogLevel.current = .debug
 /// ```
 public enum LogLevel: Int, Sendable, Comparable {
     /// Emit no log messages.
@@ -90,7 +89,7 @@ extension LogLevel {
 /// Messages are public and only built when their level is enabled; attached
 /// errors log their type, domain, and code publicly and their description
 /// privately. The active level is process-wide and can be changed via
-/// ``NetworkClientConfiguration/logLevel`` or ``Logger/setLevel(_:)``.
+/// ``LogLevel/current``.
 enum Logger {
     /// Subsystem identifier used for unified logging.
     static let subsystem = "SwiftyNetwork"
