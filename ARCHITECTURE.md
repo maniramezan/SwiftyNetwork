@@ -38,7 +38,8 @@ prefix trimming and SwiftCommons’ suffix trimming normalize endpoint paths.
 HTTP(S) scheme and host and assembles paths/query items. Standalone
 `makeURLRequest()` and `NetworkClient` share header, method, and body assembly.
 The standalone builder applies endpoint authorization; the client additionally
-falls back to its provider when endpoint authorization is `.none`. If the provider
+falls back to its provider when endpoint authorization is `.none` and the endpoint's
+`usesAuthorizationProvider` is `true` (the default). If the provider
 throws, the request fails with `authorizationUnavailable` and is never sent.
 
 Each client call captures its configuration before suspension. It executes
@@ -46,9 +47,15 @@ Each client call captures its configuration before suspension. It executes
 result into a `DecodedResponse` that also carries the `HTTPResponse`. `APIClient`
 has one decoding requirement, `response(for:responseType:)`; every `request` method is
 a protocol-extension convenience over it. Decoding `Data` returns the raw body, and
-`EmptyResponse` supports empty successful responses, including in protocol-based test doubles.
+`EmptyResponse` ignores the body of any successful response, including in protocol-based test doubles.
 The encoded-body overload uses the configured encoder and preserves an explicitly
 supplied Content-Type header.
+
+`sendAuthorized(_:errorBody:transport:)` runs this same 401 flow (`refreshAfterUnauthorized`) around a
+caller-supplied transport for requests `NetworkClient` cannot decode, such as streams. It reuses the redirect guard and
+instrumentation, maps statuses with `HTTPStatusValidator`, and does not apply `retryPolicy`. Its work ends at the
+response headers; callers map later stream errors with `NetworkError.mapTransportError(_:)`. It applies provider
+credentials to any URL, so it is for the app's own API only.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `authRefreshDelay` before replay. The client passes the exact provider authorization
@@ -119,7 +126,10 @@ conditionally remove completed requests using `MutationStore.removeIfCurrent`.
 That comparison and removal must be one atomic operation in custom stores.
 
 Persistence does not provide exactly-once delivery. Servers must enforce
-idempotency for operations that may be replayed. Durable stores must encrypt
+idempotency for operations that may be replayed; `MutationRequest.addingIdempotencyKey(_:header:)`
+stores a key in the persisted headers so every replay sends the same one. With `waitForConnectivity`,
+an offline failure waits for the closure instead of consuming a retry, so durable mutations survive
+long offline periods. Mutations for different keys are independent and unordered. Durable stores must encrypt
 captured credentials and sensitive bodies. The default store is memory-only.
 
 ## Security boundaries

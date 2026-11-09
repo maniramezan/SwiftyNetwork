@@ -17,7 +17,9 @@ import Foundation
 /// ``MutationQueue`` authorizes every attempt through its
 /// ``AuthorizationProvider``, including a replay after relaunch, and a `401`
 /// refreshes the token instead of replaying a stale one. Configure that
-/// provider on the client you pass to the queue.
+/// provider on the client you pass to the queue. A request captured from an
+/// endpoint whose ``NetworkEndpoint/usesAuthorizationProvider`` is `false` keeps
+/// that choice in ``usesAuthorizationProvider``.
 ///
 /// - Important: Headers and bodies are persisted as given. Don't put
 ///   secrets in them; a durable ``MutationStore`` should still store
@@ -33,7 +35,9 @@ import Foundation
 /// ```
 public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     /// The schema version this library writes and the newest it can read.
-    public static let version = 1
+    ///
+    /// Version 2 added ``usesAuthorizationProvider``. Version 1 payloads decode with it `true`.
+    public static let version = 2
 
     /// The base URL for the API.
     public var baseURL: String
@@ -48,6 +52,12 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     /// The request body, pre-encoded.
     public var body: Data?
 
+    /// Whether the queue's client authorizes this request with its ``AuthorizationProvider``.
+    ///
+    /// `true` unless the request was created with `false` or captured from an endpoint
+    /// that opted out.
+    public var usesAuthorizationProvider: Bool
+
     /// Always ``AuthorizationType/none``: the queue's client authorizes mutations
     /// through its ``AuthorizationProvider``.
     public var authorization: AuthorizationType { .none }
@@ -61,13 +71,16 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     ///   - queryItems: Query parameters to append to the URL. Defaults to `nil`.
     ///   - headers: Additional HTTP headers. Defaults to `nil`.
     ///   - body: The request body, pre-encoded. Defaults to `nil`.
+    ///   - usesAuthorizationProvider: Whether the client's ``AuthorizationProvider`` authorizes
+    ///     the request. Defaults to `true`.
     public init(
         baseURL: String,
         path: String,
         method: HTTPMethod,
         queryItems: [URLQueryItem]? = nil,
         headers: [String: String]? = nil,
-        body: Data? = nil
+        body: Data? = nil,
+        usesAuthorizationProvider: Bool = true
     ) {
         self.baseURL = baseURL
         self.path = path
@@ -75,6 +88,7 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         self.queryItems = queryItems
         self.headers = headers
         self.body = body
+        self.usesAuthorizationProvider = usesAuthorizationProvider
     }
 
     /// Captures an existing endpoint's fields into a replayable, `Codable` value.
@@ -91,7 +105,8 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
             method: endpoint.method,
             queryItems: endpoint.queryItems,
             headers: endpoint.headers,
-            body: endpoint.body
+            body: endpoint.body,
+            usesAuthorizationProvider: endpoint.usesAuthorizationProvider
         )
     }
 
@@ -121,7 +136,8 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
             method: endpoint.method,
             queryItems: endpoint.queryItems,
             headers: headers,
-            body: encodedBody
+            body: encodedBody,
+            usesAuthorizationProvider: endpoint.usesAuthorizationProvider
         )
     }
 
@@ -135,11 +151,53 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Idempotency
+
+extension MutationRequest {
+    /// The header ``addingIdempotencyKey(_:header:)`` sets by default.
+    public static let idempotencyKeyHeader = "Idempotency-Key"
+
+    /// Returns a copy that sends an idempotency key, so a server that supports them applies the
+    /// mutation at most once.
+    ///
+    /// ``MutationQueue`` replays a request after a timeout or a `5xx`, when the server may already
+    /// have applied it. The key is stored in ``headers``, so every replay sends the same key, including
+    /// one after the app relaunches with a durable ``MutationStore``. Enqueuing a new request for the same
+    /// ``MutationKey`` replaces the stored one, so a new desired state gets its own key.
+    ///
+    /// If `headers` already has `header`, compared case-insensitively, the copy keeps that value.
+    ///
+    /// Example:
+    /// ```swift
+    /// let request = try MutationRequest(endpoint: CreatePostEndpoint(), encodableBody: draft)
+    ///     .addingIdempotencyKey()
+    /// await queue.enqueue(request, key: "create-post:\(draft.localID)")
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - key: The idempotency key. Defaults to a new random UUID.
+    ///   - header: The header to send it in. Defaults to ``idempotencyKeyHeader``.
+    /// - Returns: A copy of this request with the idempotency key header.
+    public func addingIdempotencyKey(
+        _ key: String = UUID().uuidString,
+        header: String = MutationRequest.idempotencyKeyHeader
+    ) -> MutationRequest {
+        var copy = self
+        var headers = copy.headers ?? [:]
+        let hasHeader = headers.keys.contains { $0.caseInsensitiveCompare(header) == .orderedSame }
+        if !hasHeader {
+            headers[header] = key
+        }
+        copy.headers = headers
+        return copy
+    }
+}
+
 // MARK: - Codable
 
 extension MutationRequest {
     private enum CodingKeys: String, CodingKey {
-        case version, baseURL, path, method, queryItems, headers, body
+        case version, baseURL, path, method, queryItems, headers, body, usesAuthorizationProvider
     }
 
     /// `URLQueryItem` does not conform to `Codable` on all supported
@@ -180,6 +238,8 @@ extension MutationRequest {
             .map(\.queryItem)
         self.headers = try container.decodeIfPresent([String: String].self, forKey: .headers)
         self.body = try container.decodeIfPresent(Data.self, forKey: .body)
+        self.usesAuthorizationProvider =
+            try container.decodeIfPresent(Bool.self, forKey: .usesAuthorizationProvider) ?? true
     }
 
     /// Encodes the request with the current schema ``version``.
@@ -194,5 +254,6 @@ extension MutationRequest {
         try container.encodeIfPresent(queryItems?.map(CodableQueryItem.init), forKey: .queryItems)
         try container.encodeIfPresent(headers, forKey: .headers)
         try container.encodeIfPresent(body, forKey: .body)
+        try container.encode(usesAuthorizationProvider, forKey: .usesAuthorizationProvider)
     }
 }

@@ -19,7 +19,13 @@ SwiftyNetwork provides:
 - **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with shared ``NetworkError/classification`` for retry policies and telemetry alike.
 
 For tests and previews, the separate `SwiftyNetworkTesting` library product provides
-`MockAPIClient`, a scriptable ``APIClient`` that records every request.
+`MockAPIClient`, a scriptable ``APIClient`` that records every request, and
+`TestAuthorizationProvider`, a scriptable ``AuthorizationProvider`` that counts refreshes. Link it
+from test targets only, never from production targets.
+
+For streaming or other transports ``NetworkClient`` cannot model, use
+``NetworkClient/sendAuthorized(_:errorBody:transport:)`` to keep its authorization, `401` refresh-once,
+and redirect handling.
 
 ### Versioning
 
@@ -47,6 +53,7 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 - ``EmptyResponse``
 - ``NetworkError``
 - ``NetworkErrorClassification``
+- ``NetworkErrorCategory``
 - ``HTTPResponse``
 
 ### Instrumentation
@@ -93,6 +100,10 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 - ``MutationRetryPolicy``
 - ``MutationStore``
 - ``InMemoryMutationStore``
+
+### Guides
+
+- <doc:CustomDiskCache>
 
 ### Reachability
 

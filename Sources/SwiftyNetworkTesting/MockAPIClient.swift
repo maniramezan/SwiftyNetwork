@@ -182,7 +182,7 @@ public actor MockAPIClient: APIClient {
         if let raw = response.body as? T {
             return DecodedResponse(value: raw, response: response)
         }
-        if response.body.isEmpty, let empty = EmptyResponse() as? T {
+        if let empty = EmptyResponse() as? T {
             return DecodedResponse(value: empty, response: response)
         }
         do {

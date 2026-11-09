@@ -4,6 +4,8 @@ import Foundation
 ///
 /// Use ``EmptyResponse`` with endpoints that return `204 No Content`, an empty
 /// `200 OK` response, or any successful response where the body should be ignored.
+/// ``NetworkClient`` never decodes the body for it, so a `2xx` with a JSON or plain-text
+/// body (such as `OK`) succeeds too; read it from ``DecodedResponse/response`` if needed.
 /// ``NetworkClient/request(_:)`` uses this type internally for its no-return-value
 /// overload.
 ///
