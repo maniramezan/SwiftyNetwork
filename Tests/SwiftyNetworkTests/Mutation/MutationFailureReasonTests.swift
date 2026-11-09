@@ -13,6 +13,7 @@ struct MutationFailureReasonTests {
             (.timeout(.status(408)), .timedOut),
             (.unauthorized(.status(401)), .unauthorized),
             (.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)), .unauthorized),
+            (.authorizationUnavailable(underlying: URLError(.userAuthenticationRequired)), .unauthorized),
             (.forbidden(.status(403)), .rejected),
             (.notFound(.status(404)), .rejected),
             (.clientError(.status(400)), .rejected),

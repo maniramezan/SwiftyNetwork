@@ -88,6 +88,13 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The request body could not be encoded from the supplied `Encodable` value.
     case encodingFailed(underlying: any Error & Sendable)
 
+    /// The configured ``AuthorizationProvider`` could not supply authorization, so the
+    /// request was not sent.
+    ///
+    /// - Parameter underlying: The error thrown by
+    ///   ``AuthorizationProvider/currentAuthorization()``.
+    case authorizationUnavailable(underlying: any Error & Sendable)
+
     /// The configured ``AuthorizationProvider`` failed to refresh credentials after a `401`.
     ///
     /// - Parameter underlying: The error thrown by
@@ -126,6 +133,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "Failed to decode response: \(underlying.localizedDescription)"
         case .encodingFailed(let underlying):
             return "Failed to encode request: \(underlying.localizedDescription)"
+        case .authorizationUnavailable(let underlying):
+            return "No authorization credentials are available: \(underlying.localizedDescription)"
         case .authorizationRefreshFailed(let underlying):
             return "Failed to refresh authorization credentials: \(underlying.localizedDescription)"
         case .underlying(let error):
@@ -153,7 +162,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         case .timeout(let response):
             return response
         case .invalidURL, .invalidResponse, .noInternetConnection, .decodingFailed,
-            .encodingFailed, .authorizationRefreshFailed, .underlying:
+            .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed, .underlying:
             return nil
         }
     }
@@ -262,6 +271,8 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case decodingFailed
     /// The request body failed to encode.
     case encodingFailed
+    /// The configured ``AuthorizationProvider`` could not supply authorization.
+    case authorizationUnavailable
     /// The configured ``AuthorizationProvider`` failed to refresh credentials.
     case authorizationRefreshFailed
     /// A lower-level error with no more specific classification.
@@ -280,7 +291,7 @@ public enum NetworkErrorClassification: Sendable, Equatable {
         case .timeout, .noConnection, .tooManyRequests, .serverError:
             return true
         case .invalidURL, .invalidResponse, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
-            .decodingFailed, .encodingFailed, .authorizationRefreshFailed, .underlying:
+            .decodingFailed, .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed, .underlying:
             return false
         }
     }
@@ -323,6 +334,8 @@ extension NetworkError {
             return .decodingFailed
         case .encodingFailed:
             return .encodingFailed
+        case .authorizationUnavailable:
+            return .authorizationUnavailable
         case .authorizationRefreshFailed:
             return .authorizationRefreshFailed
         case .underlying:

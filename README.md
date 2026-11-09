@@ -294,6 +294,27 @@ rotate refresh tokens. Call `updateAccessToken(_:)` after sign-in to swap the to
 client. Custom providers implement `refreshAuthorization(rejecting:)`: return when newer credentials are
 available, or throw, and the client reports `NetworkError.authorizationRefreshFailed(underlying:)` with your error.
 
+`currentAuthorization()` can throw too, for example when the user is signed out or a proactive refresh of
+an expiring token failed. The client then fails the request with
+`NetworkError.authorizationUnavailable(underlying:)` carrying your error and never sends it. A provider that
+cannot fail can keep a non-throwing `currentAuthorization()`:
+
+```swift
+actor SessionAuthorizationProvider: AuthorizationProvider {
+    struct SignedOut: Error {}
+    private var token: String?
+
+    func currentAuthorization() async throws -> AuthorizationType {
+        guard let token else { throw SignedOut() }
+        return .bearer(token: token)
+    }
+
+    func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+        // Refresh `token`, or throw.
+    }
+}
+```
+
 A provider can also veto a refresh by implementing `shouldRefreshAuthorization(after:)`. The client passes it
 the `401` response (status, headers, and body) before refreshing; return `false` for a `401` that a new token
 cannot fix and the client throws `NetworkError.unauthorized` without refreshing or retrying. The default
@@ -342,7 +363,7 @@ A failed mutation's `MutationFailureReason.category` tells apart the outcomes a 
 | `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
 | `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
 | `.rejected` | The server refused it with a 4xx (other than 401/408); retrying won't help | Roll back; show `reason.response` details |
-| `.unauthorized` | `401` and the token could not be refreshed | Prompt sign-in |
+| `.unauthorized` | `401` and the token could not be refreshed, or the provider had no authorization | Prompt sign-in |
 | `.serverError` | The server failed with a 5xx (retried first) | Generic error |
 | `.cancelled` | `cancel(_:)` or `cancelAll()` ended it | Nothing |
 | `.other` | Encoding, decoding, invalid URL, or a non-`NetworkError` | Generic error |
