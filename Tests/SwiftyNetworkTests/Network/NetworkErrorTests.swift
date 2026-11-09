@@ -108,6 +108,9 @@ func testClassificationMapsEveryCase() {
     #expect(
         NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)).classification
             == .authorizationRefreshFailed)
+    #expect(
+        NetworkError.authorizationUnavailable(underlying: URLError(.userAuthenticationRequired)).classification
+            == .authorizationUnavailable)
     #expect(NetworkError.underlying(URLError(.badURL)).classification == .underlying)
 }
 
@@ -154,6 +157,7 @@ func testIsTransientClassifiesTransientErrors() {
     #expect(!NetworkError.decodingFailed(underlying: URLError(.badURL)).isTransient)
     #expect(!NetworkError.encodingFailed(underlying: URLError(.badURL)).isTransient)
     #expect(!NetworkError.authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)).isTransient)
+    #expect(!NetworkError.authorizationUnavailable(underlying: URLError(.userAuthenticationRequired)).isTransient)
     #expect(!NetworkError.underlying(URLError(.badURL)).isTransient)
 }
 
