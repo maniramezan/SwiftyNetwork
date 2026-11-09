@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// Comprehensive error types that can occur during network operations.
 ///

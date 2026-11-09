@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// Reports one HTTP attempt's lifecycle to an optional ``NetworkInstrumentation``.
 ///

@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// A thread-safe network client that handles HTTP requests with auth refresh on 401.
 ///
@@ -319,6 +319,7 @@ public actor NetworkClient: APIClient {
     }
 
     /// Encodes off the client actor, for the same reason as ``decodeResponse(data:responseType:decoder:)``.
+    @concurrent
     private static func encodeBody<Body: Encodable & Sendable>(
         _ body: Body,
         encoder: JSONEncoder
@@ -333,9 +334,10 @@ public actor NetworkClient: APIClient {
 
     /// Decodes off the client actor.
     ///
-    /// A `static` async function is nonisolated, so it runs on the global
-    /// concurrent executor. Large payloads therefore don't block other
-    /// requests on this client from starting or finishing while they decode.
+    /// `@concurrent` runs it on the global concurrent executor even if the module
+    /// adopts `NonisolatedNonsendingByDefault`. Large payloads therefore don't block
+    /// other requests on this client from starting or finishing while they decode.
+    @concurrent
     private static func decodeResponse<T: Decodable & Sendable>(
         data: Data,
         responseType: T.Type,

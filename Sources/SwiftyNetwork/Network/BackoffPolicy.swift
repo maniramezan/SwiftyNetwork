@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// Jittered exponential backoff shared by ``NetworkRetryPolicy`` and ``MutationRetryPolicy``.
 ///
