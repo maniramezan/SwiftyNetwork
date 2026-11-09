@@ -1,5 +1,4 @@
 import Foundation
-import SwiftCommons
 
 /// Governs whether and how long ``MutationQueue`` waits before retrying a
 /// failed mutation.
@@ -7,81 +6,66 @@ import SwiftCommons
 /// ``NetworkClient`` does not retry transient failures unless you opt in with
 /// ``NetworkClientConfiguration/retryPolicy`` (idempotent requests only).
 /// `MutationRetryPolicy` is the dedicated retry loop for the mutation queue,
-/// which also replays non-idempotent requests: exponential backoff with
-/// jitter, bounded by ``maxAttempts`` and ``maxDelay``. A `429` or `503` response with
-/// a `Retry-After` header makes the queue wait at least that long, bounded by
-/// ``maxRetryAfter``.
+/// which also replays non-idempotent requests. It has the same shape as
+/// ``NetworkRetryPolicy``: at most ``maxRetries`` retries after the first
+/// attempt, waits from a ``BackoffPolicy`` that honors `Retry-After` on a `429`
+/// or `503`, and ``shouldRetry(_:)`` to decide which failures are retried.
 ///
 /// Example:
 /// ```swift
-/// let policy = MutationRetryPolicy(maxAttempts: 5, baseDelay: 1, maxDelay: 60)
+/// let policy = MutationRetryPolicy(maxRetries: 5)
 /// let queue = MutationQueue(client: NetworkClient.shared, retryPolicy: policy)
 /// ```
 public struct MutationRetryPolicy: Sendable {
-    /// Maximum number of retry attempts after the initial failure before a
-    /// mutation is reported ``MutationStatus/failed(_:)``.
-    public var maxAttempts: Int
+    /// The default backoff: 1s doubling up to 60s, ±50% jitter, and `Retry-After` honored up to 300s.
+    public static let defaultBackoff = BackoffPolicy(
+        baseDelay: .seconds(1),
+        maxDelay: .seconds(60),
+        maxRetryAfter: .seconds(300)
+    )
 
-    /// The delay before the first retry, in seconds. Each subsequent retry
-    /// doubles the previous delay until ``maxDelay`` caps it.
-    public var baseDelay: Duration
+    /// The maximum number of retries after the first attempt before a mutation
+    /// is reported ``MutationStatus/failed(_:)``, so a mutation is sent at most
+    /// `maxRetries + 1` times.
+    public var maxRetries: Int
 
-    /// The upper bound on delay between retries, in seconds, regardless of
-    /// how many attempts have elapsed or how jitter scales the delay.
-    public var maxDelay: Duration
+    /// How long to wait before each retry.
+    public var backoff: BackoffPolicy
 
-    /// The multiplicative jitter range applied to the computed delay, to
-    /// avoid many queued clients retrying in lockstep.
-    public var jitterRange: ClosedRange<Double>
-
-    /// The upper bound on how long a server-supplied `Retry-After` is honored, in seconds.
+    /// Decides whether an error is worth retrying at all. Read through ``shouldRetry(_:)``.
     ///
-    /// Applies to ``NetworkError/tooManyRequests(_:)``. This is
-    /// the one deliberate exception to ``maxDelay``: a mutation hitting `429`
-    /// waits as long as the server asked, up to this bound, rather than
-    /// retrying early and being throttled again.
-    public var maxRetryAfter: Duration
+    /// Defaults to ``defaultShouldRetry(_:)``.
+    public var retryPredicate: @Sendable (any Error) -> Bool
 
-    /// Decides whether a given error is worth retrying at all.
-    ///
-    /// Defaults to retrying only errors that look transient: timeouts, no
-    /// connectivity, malformed responses, `429` rate limiting, and 5xx server errors. Client
-    /// errors (4xx other than what `NetworkClient` already handles via auth
-    /// refresh), encoding/decoding failures, and invalid URLs are not
-    /// retried since a retry can't change their outcome.
-    public var isRetryable: @Sendable (any Error) -> Bool
-
-    /// A reasonable general-purpose default: 5 attempts, 1s base delay
-    /// doubling up to a 60s cap, with ±50% jitter.
+    /// A general-purpose default: 5 retries with ``defaultBackoff``.
     public static let `default` = MutationRetryPolicy()
 
     /// Creates a retry policy.
     ///
     /// - Parameters:
-    ///   - maxAttempts: Maximum retry attempts after the initial failure. Defaults to 5.
-    ///   - baseDelay: Delay before the first retry, in seconds. Defaults to 1.
-    ///   - maxDelay: Upper bound on retry delay, in seconds. Defaults to 60.
-    ///   - jitterRange: Multiplicative jitter range applied to the computed delay. Defaults to `0.5...1.5`.
-    ///   - maxRetryAfter: Upper bound on an honored `Retry-After`, in seconds. Defaults to 300.
-    ///   - isRetryable: Predicate deciding whether an error should be retried.
-    ///     Defaults to ``defaultIsRetryable(_:)``.
+    ///   - maxRetries: Retries after the first attempt. Negative values are clamped to `0`. Defaults to 5.
+    ///   - backoff: How long to wait before each retry. Defaults to ``defaultBackoff``.
+    ///   - shouldRetry: Decides whether an error is worth retrying. Defaults to
+    ///     ``defaultShouldRetry(_:)``.
     public init(
-        maxAttempts: Int = 5,
-        baseDelay: Duration = .seconds(1),
-        maxDelay: Duration = .seconds(60),
-        jitterRange: ClosedRange<Double> = 0.5...1.5,
-        maxRetryAfter: Duration = .seconds(300),
-        isRetryable: @escaping @Sendable (any Error) -> Bool = MutationRetryPolicy.defaultIsRetryable
+        maxRetries: Int = 5,
+        backoff: BackoffPolicy = MutationRetryPolicy.defaultBackoff,
+        shouldRetry: @escaping @Sendable (any Error) -> Bool = MutationRetryPolicy.defaultShouldRetry
     ) {
-        self.maxAttempts = max(0, maxAttempts)
-        self.baseDelay = max(.zero, baseDelay)
-        self.maxDelay = max(self.baseDelay, maxDelay)
-        self.jitterRange = jitterRange
-        self.maxRetryAfter = max(.zero, maxRetryAfter)
-        self.isRetryable = isRetryable
+        self.maxRetries = max(0, maxRetries)
+        self.backoff = backoff
+        self.retryPredicate = shouldRetry
     }
 
-    /// The default transient-error classifier used by ``default``.
+    /// Whether a failed mutation should be retried.
+    ///
+    /// - Parameter error: The error thrown by the mutation's network call.
+    /// - Returns: The result of ``retryPredicate``.
+    public func shouldRetry(_ error: any Error) -> Bool {
+        retryPredicate(error)
+    }
+
+    /// The default retry rule: retry only errors that look transient.
     ///
     /// Delegates to ``NetworkError/isTransient``, the single source of truth
     /// for transient-error classification shared across the package (retry
@@ -90,48 +74,29 @@ public struct MutationRetryPolicy: Sendable {
     /// - Parameter error: The error thrown by the mutation's network call.
     /// - Returns: `true` for timeouts, missing connectivity, malformed
     ///   responses, `429` rate limiting, and 5xx server errors; `false` for everything else,
-    ///   including non-``NetworkError`` errors.
-    public static func defaultIsRetryable(_ error: any Error) -> Bool {
+    ///   including 4xx client errors and non-``NetworkError`` errors.
+    public static func defaultShouldRetry(_ error: any Error) -> Bool {
         (error as? NetworkError)?.isTransient ?? false
     }
 
-    /// Computes the wait before a retry attempt.
-    ///
-    /// The result is the jittered exponential backoff, capped at ``maxDelay``.
-    /// When `error` carries a `Retry-After` (``NetworkError/tooManyRequests(_:)``
-    /// or a `503` ``NetworkError/serverError(_:)``), the result
-    /// is at least that long, clamped to ``maxRetryAfter``.
+    /// Computes how long to wait before a retry.
     ///
     /// - Parameters:
-    ///   - attempt: The 1-based retry attempt number about to run.
-    ///   - error: The failure that triggered the retry, if any. Pass `nil` for the plain backoff.
-    ///   - jitterGenerator: Produces a value in `0...1` used to sample within
-    ///     ``jitterRange``. Overridable for deterministic tests; defaults to
-    ///     `Double.random(in: 0...1)`.
-    /// - Returns: The delay in seconds.
+    ///   - retry: The 1-based retry about to run.
+    ///   - error: The failure that triggered the retry. A ``NetworkError/retryAfter``, if any,
+    ///     sets a floor on the wait (see ``BackoffPolicy/delay(forRetry:retryAfter:jitterGenerator:)``).
+    ///   - jitterGenerator: Produces a value in `0...1` sampled within ``BackoffPolicy/jitterRange``.
+    ///     Overridable for deterministic tests.
+    /// - Returns: The wait before the retry.
     public func delay(
-        forAttempt attempt: Int,
+        forRetry retry: Int,
         after error: (any Error)? = nil,
         jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
     ) -> Duration {
-        // Negative multipliers can't produce a meaningful delay; clamp so the
-        // shared backoff's non-negative jitter requirement always holds.
-        let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
-        let backoff = withoutActuallyEscaping(jitterGenerator) { jitterSource in
-            let delay = RetryBackoff.exponential(
-                baseDelay: baseDelay,
-                maxDelay: maxDelay,
-                jitter: jitter,
-                jitterSource: jitterSource
-            )
-            .delay(forRetry: attempt)
-            // Preserve the queue's hard cap after jitter as well as before it.
-            return min(max(.zero, delay), maxDelay)
-        }
-        return RetryAfter.delay(
-            backoff: backoff,
+        backoff.delay(
+            forRetry: retry,
             retryAfter: (error as? NetworkError)?.retryAfter,
-            cap: maxRetryAfter
+            jitterGenerator: jitterGenerator
         )
     }
 }
