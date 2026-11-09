@@ -41,18 +41,17 @@ Sources/SwiftyNetwork/
 │   ├── NetworkMonitor.swift         # NWPathMonitor reachability actor
 │   └── SSLPinningConfiguration.swift  # Pins, host policies, trust evaluation
 ├── Cache/
-│   ├── Cache.swift                  # Cache, TimestampedCache, PersistentCache protocols
+│   ├── Cache.swift                  # Cache<Value> protocol, CacheEntry, value/setValue conveniences
 │   ├── CacheKey.swift               # Hashable, string-literal key with factories
 │   ├── CachePolicy.swift            # Strategy enum (cacheFirst, reload, expiration)
 │   ├── LRUStorage.swift             # Internal: O(1) LRU dictionary (value type)
 │   ├── InMemoryCache.swift          # Actor over LRUStorage with timestamps
-│   ├── AnyCache.swift               # Type-erased Sendable struct (conforms to Cache)
 │   ├── LayeredCache.swift           # Memory + persistent with promotion
 │   ├── CacheOperationGate.swift     # Internal: FIFO gate serializing compound cache ops
 │   ├── SingleFlightCache.swift      # Coalesces concurrent same-key fetches
 │   └── RemoteDataCache.swift        # URL-keyed byte cache on top of SingleFlightCache
 ├── Repository/
-│   └── Repository.swift             # LocalDataSource, CacheBasedLocalDataSource, GenericRepository
+│   └── Repository.swift             # Repository<Entity> protocol, GenericRepository (client + any Cache)
 └── Mutation/
     ├── MutationQueue.swift          # Actor: enqueue, background retry, coalescing, status via AsyncStream
     ├── MutationRequest.swift        # Codable NetworkEndpoint value type (endpoint + body), replayable
@@ -244,19 +243,20 @@ MutationQueue.enqueue(request, key) → store.save (coalescing point) → return
 ### Cache Hierarchy
 
 ```
-Cache (protocol) → TimestampedCache → InMemoryCache<T> (actor, O(1) LRU via LRUStorage)
-                 → PersistentCache (marker, you implement)
-                 → LayeredCache<T> (actor, memory + persistent, ops serialized by CacheOperationGate)
-                 → SingleFlightCache<Wrapped> (actor, dedupes concurrent misses per key)
-AnyCache<T> (type-erased Sendable struct)
-RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
+Cache<Value> (protocol: entry/setEntry/removeValue/removeAll)
+  → InMemoryCache<T> (actor, O(1) LRU via LRUStorage)
+  → LayeredCache<T> (actor, memory + optional persistent, ops serialized by CacheOperationGate)
+  → SingleFlightCache<Wrapped> (actor, dedupes concurrent misses per key)
+  → your disk cache (implement the four requirements)
+RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCache)
 ```
 
 ### Key Design Points
 
 - `NetworkEndpoint` is the only endpoint protocol (has defaults, used by NetworkClient)
 - `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
-- `AnyCache` conforms to `Cache` protocol -- struct with immutable `@Sendable` closures
+- Use `any Cache<T>` for type erasure; there is no `AnyCache`. Never add a separate timestamp read:
+  `entry(forKey:)` keeps the value and timestamp consistent
 - `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: .zero` in tests
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
   (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests

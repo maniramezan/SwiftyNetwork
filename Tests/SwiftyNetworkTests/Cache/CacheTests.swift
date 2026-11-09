@@ -58,12 +58,6 @@ func testCacheKeyFromComponents() {
     #expect(customSeparator.rawValue == "a/b")
 }
 
-@Test("CacheKey.user builds a namespaced key")
-func testCacheKeyUserConvenience() {
-    let key = CacheKey.user("123", resource: "settings")
-    #expect(key.rawValue == "user:123:settings")
-}
-
 @Test("CacheKey conforms to Hashable")
 func testCacheKeyHashable() {
     let key1 = CacheKey("test")
@@ -97,9 +91,9 @@ func testInMemoryCacheStoresAndRemoves() async {
     let key = CacheKey("mem-key")
     let timestamp = Date(timeIntervalSince1970: 100)
 
-    await cache.setValue("value", forKey: key, timestamp: timestamp)
+    await cache.setEntry(CacheEntry("value", timestamp: timestamp), forKey: key)
     #expect(await cache.value(forKey: key) == "value")
-    #expect(await cache.timestamp(forKey: key) == timestamp)
+    #expect(await cache.entry(forKey: key) == CacheEntry("value", timestamp: timestamp))
 
     await cache.removeValue(forKey: key)
     #expect(await cache.value(forKey: key) == nil)
@@ -109,26 +103,32 @@ func testInMemoryCacheStoresAndRemoves() async {
     #expect(await cache.value(forKey: key) == nil)
 }
 
-@Test("AnyCache forwards calls to underlying cache")
-func testAnyCacheForwardsCalls() async {
-    let cache = RecordingCache<String>()
-    let anyCache = AnyCache(cache)
+@Test("value(forKey:) and setValue(_:forKey:) go through the entry requirements of an existential cache")
+func testCacheConveniencesForwardThroughExistential() async {
+    let recording = RecordingCache<String>()
+    let cache: any Cache<String> = recording
     let key = CacheKey("any-cache")
-    let timestamp = Date(timeIntervalSince1970: 200)
 
-    await cache.setValue("value", forKey: key, timestamp: timestamp)
-    _ = await anyCache.value(forKey: key)
-    _ = await anyCache.timestamp(forKey: key)
-    await anyCache.setValue("value2", forKey: key)
-    await anyCache.removeValue(forKey: key)
-    await anyCache.removeAll()
+    let before = Date()
+    await cache.setValue("value", forKey: key)
+    #expect(await cache.value(forKey: key) == "value")
+    let entry = await cache.entry(forKey: key)
+    #expect(entry?.value == "value")
+    #expect((entry?.timestamp ?? .distantPast) >= before)
+    await cache.removeValue(forKey: key)
+    await cache.removeAll()
 
-    let calls = await cache.callCounts
-    #expect(calls.get == 1)
-    #expect(calls.timestamp == 1)
-    #expect(calls.set == 2)
+    let calls = await recording.callCounts
+    #expect(calls.get == 2)
+    #expect(calls.set == 1)
     #expect(calls.remove == 1)
     #expect(calls.removeAll == 1)
+}
+
+@Test("CacheEntry.age measures the time since the timestamp")
+func testCacheEntryAge() {
+    let entry = CacheEntry("value", timestamp: Date(timeIntervalSince1970: 100))
+    #expect(entry.age(at: Date(timeIntervalSince1970: 160)) == .seconds(60))
 }
 
 @Test("LayeredCache promotes persistent values with timestamps")
@@ -139,11 +139,11 @@ func testLayeredCachePromotesPersistentValue() async {
     let key = CacheKey("layered-value")
     let timestamp = Date(timeIntervalSince1970: 123)
 
-    await persistentCache.setValue("value", forKey: key, timestamp: timestamp)
+    await persistentCache.setEntry(CacheEntry("value", timestamp: timestamp), forKey: key)
 
     let value = await layeredCache.value(forKey: key)
-    let layeredTimestamp = await layeredCache.timestamp(forKey: key)
-    let memoryTimestamp = await memoryCache.timestamp(forKey: key)
+    let layeredTimestamp = await layeredCache.entry(forKey: key)?.timestamp
+    let memoryTimestamp = await memoryCache.entry(forKey: key)?.timestamp
 
     #expect(value == "value")
     #expect(layeredTimestamp == timestamp)
@@ -189,7 +189,7 @@ func testLayeredCacheMemoryOnlyInit() async {
     await layeredCache.setValue("value", forKey: key)
 
     #expect(await layeredCache.value(forKey: key) == "value")
-    #expect(await layeredCache.timestamp(forKey: key) != nil)
+    #expect(await layeredCache.entry(forKey: key) != nil)
 }
 
 @Test("LayeredCache with only a memory layer reports a miss for absent keys")
@@ -198,7 +198,7 @@ func testLayeredCacheMemoryOnlyMiss() async {
     let key = CacheKey("memory-only-miss")
 
     #expect(await layeredCache.value(forKey: key) == nil)
-    #expect(await layeredCache.timestamp(forKey: key) == nil)
+    #expect(await layeredCache.entry(forKey: key) == nil)
 }
 
 @Test("LayeredCache reports a miss when neither layer has the value")
@@ -209,33 +209,18 @@ func testLayeredCacheMissesBothLayers() async {
     let key = CacheKey("miss-both-layers")
 
     #expect(await layeredCache.value(forKey: key) == nil)
-    #expect(await layeredCache.timestamp(forKey: key) == nil)
+    #expect(await layeredCache.entry(forKey: key) == nil)
 }
 
-@Test("LayeredCache promotes persisted values without a timestamp using the current time")
-func testLayeredCachePromotesWithoutTimestamp() async {
-    let memoryCache = InMemoryCache<String>()
-    let persistentCache = NoTimestampPersistentCache<String>()
-    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: persistentCache)
-    let key = CacheKey("promote-no-timestamp")
+private actor TestPersistentCache<Value: Sendable>: Cache {
+    private var storage: [CacheKey: CacheEntry<Value>] = [:]
 
-    await persistentCache.setValue("value", forKey: key)
-
-    let value = await layeredCache.value(forKey: key)
-
-    #expect(value == "value")
-    #expect(await memoryCache.value(forKey: key) == "value")
-}
-
-private actor NoTimestampPersistentCache<Value: Sendable>: PersistentCache {
-    private var storage: [CacheKey: Value] = [:]
-
-    func value(forKey key: CacheKey) async -> Value? {
+    func entry(forKey key: CacheKey) async -> CacheEntry<Value>? {
         storage[key]
     }
 
-    func setValue(_ value: Value, forKey key: CacheKey) async {
-        storage[key] = value
+    func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async {
+        storage[key] = entry
     }
 
     func removeValue(forKey key: CacheKey) async {
@@ -245,57 +230,20 @@ private actor NoTimestampPersistentCache<Value: Sendable>: PersistentCache {
     func removeAll() async {
         storage.removeAll()
     }
-
-    func timestamp(forKey key: CacheKey) async -> Date? {
-        nil
-    }
 }
 
-private actor TestPersistentCache<Value: Sendable>: PersistentCache {
-    private var storage: [CacheKey: (Value, Date)] = [:]
+private actor RecordingCache<Value: Sendable>: Cache {
+    private var storage: [CacheKey: CacheEntry<Value>] = [:]
+    private(set) var callCounts = (get: 0, set: 0, remove: 0, removeAll: 0)
 
-    func value(forKey key: CacheKey) async -> Value? {
-        storage[key]?.0
-    }
-
-    func setValue(_ value: Value, forKey key: CacheKey) async {
-        storage[key] = (value, Date())
-    }
-
-    func setValue(_ value: Value, forKey key: CacheKey, timestamp: Date) async {
-        storage[key] = (value, timestamp)
-    }
-
-    func removeValue(forKey key: CacheKey) async {
-        storage.removeValue(forKey: key)
-    }
-
-    func removeAll() async {
-        storage.removeAll()
-    }
-
-    func timestamp(forKey key: CacheKey) async -> Date? {
-        storage[key]?.1
-    }
-}
-
-private actor RecordingCache<Value: Sendable>: TimestampedCache {
-    private var storage: [CacheKey: (Value, Date)] = [:]
-    private(set) var callCounts = (get: 0, set: 0, remove: 0, removeAll: 0, timestamp: 0)
-
-    func value(forKey key: CacheKey) async -> Value? {
+    func entry(forKey key: CacheKey) async -> CacheEntry<Value>? {
         callCounts.get += 1
-        return storage[key]?.0
+        return storage[key]
     }
 
-    func setValue(_ value: Value, forKey key: CacheKey) async {
+    func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async {
         callCounts.set += 1
-        storage[key] = (value, Date())
-    }
-
-    func setValue(_ value: Value, forKey key: CacheKey, timestamp: Date) async {
-        callCounts.set += 1
-        storage[key] = (value, timestamp)
+        storage[key] = entry
     }
 
     func removeValue(forKey key: CacheKey) async {
@@ -306,11 +254,6 @@ private actor RecordingCache<Value: Sendable>: TimestampedCache {
     func removeAll() async {
         callCounts.removeAll += 1
         storage.removeAll()
-    }
-
-    func timestamp(forKey key: CacheKey) async -> Date? {
-        callCounts.timestamp += 1
-        return storage[key]?.1
     }
 }
 
@@ -326,7 +269,7 @@ func inMemoryCacheRemovesExpired() async {
     try? await Task.sleep(for: .milliseconds(100))
     await cache.setValue("new-value", forKey: key2)
 
-    await cache.removeExpiredEntries(maxAge: .seconds(0.05))
+    await cache.removeEntries(olderThan: .seconds(0.05))
 
     let oldValue = await cache.value(forKey: key1)
     let newValue = await cache.value(forKey: key2)
@@ -490,45 +433,12 @@ func testLayeredCacheTimestampFallback() async {
     let timestamp = Date(timeIntervalSince1970: 500)
 
     // Only set in persistent layer
-    await persistentCache.setValue("value", forKey: key, timestamp: timestamp)
+    await persistentCache.setEntry(CacheEntry("value", timestamp: timestamp), forKey: key)
 
     // First call to value() promotes to memory, so timestamp should be available
     _ = await layeredCache.value(forKey: key)
-    let layeredTimestamp = await layeredCache.timestamp(forKey: key)
+    let layeredTimestamp = await layeredCache.entry(forKey: key)?.timestamp
     #expect(layeredTimestamp == timestamp)
-}
-
-// MARK: - AnyCache Edge Cases
-
-@Test("AnyCache wrapping InMemoryCache preserves values correctly")
-func testAnyCachePreservesValues() async {
-    let inner = InMemoryCache<String>()
-    let anyCache = AnyCache(inner)
-    let key = CacheKey("any-preserve")
-
-    await anyCache.setValue("hello", forKey: key)
-    let value = await anyCache.value(forKey: key)
-    #expect(value == "hello")
-
-    let ts = await anyCache.timestamp(forKey: key)
-    #expect(ts != nil)
-
-    await anyCache.removeValue(forKey: key)
-    #expect(await anyCache.value(forKey: key) == nil)
-}
-
-@Test("AnyCache removeAll clears all entries")
-func testAnyCacheRemoveAll() async {
-    let inner = InMemoryCache<Int>()
-    let anyCache = AnyCache(inner)
-
-    await anyCache.setValue(1, forKey: CacheKey("a"))
-    await anyCache.setValue(2, forKey: CacheKey("b"))
-
-    await anyCache.removeAll()
-
-    #expect(await anyCache.value(forKey: CacheKey("a")) == nil)
-    #expect(await anyCache.value(forKey: CacheKey("b")) == nil)
 }
 
 @Test("InMemoryCache evicts by access order, not insertion order")
@@ -613,14 +523,14 @@ func inMemoryCacheEvictsOversizedValue() async {
 func inMemoryCacheRemovalsReleaseCost() async {
     let cache = InMemoryCache<String>(maxCost: 100) { $0.count }
     await cache.setValue("12345", forKey: "a")
-    await cache.setValue("123", forKey: "b", timestamp: Date().addingTimeInterval(-600))
+    await cache.setEntry(CacheEntry("123", timestamp: Date().addingTimeInterval(-600)), forKey: "b")
     await cache.setValue("1", forKey: "c")
     #expect(await cache.totalCost() == 9)
 
     await cache.removeValue(forKey: "a")
     #expect(await cache.totalCost() == 4)
 
-    await cache.removeExpiredEntries(maxAge: .seconds(60))
+    await cache.removeEntries(olderThan: .seconds(60))
     #expect(await cache.totalCost() == 1)
 
     await cache.removeAll()

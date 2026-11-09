@@ -179,16 +179,14 @@ struct RemoteDataCacheTests {
     }
 }
 
-/// A minimal `PersistentCache` used to prove `RemoteDataCache` composes with
+/// A minimal disk-style `Cache` used to prove `RemoteDataCache` composes with
 /// any app-supplied disk layer via `LayeredCache`, rather than being tied to
 /// a specific storage mechanism.
-private actor TestDiskDataCache: PersistentCache {
-    typealias Value = Data
-    private var storage: [CacheKey: (Data, Date)] = [:]
+private actor TestDiskDataCache: Cache {
+    private var storage: [CacheKey: CacheEntry<Data>] = [:]
 
-    func value(forKey key: CacheKey) async -> Data? { storage[key]?.0 }
-    func setValue(_ value: Data, forKey key: CacheKey) async { storage[key] = (value, Date()) }
+    func entry(forKey key: CacheKey) async -> CacheEntry<Data>? { storage[key] }
+    func setEntry(_ entry: CacheEntry<Data>, forKey key: CacheKey) async { storage[key] = entry }
     func removeValue(forKey key: CacheKey) async { storage.removeValue(forKey: key) }
     func removeAll() async { storage.removeAll() }
-    func timestamp(forKey key: CacheKey) async -> Date? { storage[key]?.1 }
 }

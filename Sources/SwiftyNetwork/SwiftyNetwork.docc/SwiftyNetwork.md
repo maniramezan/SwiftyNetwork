@@ -56,11 +56,9 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 ### Caching
 
 - ``Cache``
-- ``TimestampedCache``
-- ``PersistentCache``
+- ``CacheEntry``
 - ``InMemoryCache``
 - ``LayeredCache``
-- ``AnyCache``
 - ``CacheKey``
 - ``CachePolicy``
 - ``SingleFlightCache``
@@ -70,8 +68,6 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 
 - ``Repository``
 - ``GenericRepository``
-- ``LocalDataSource``
-- ``CacheBasedLocalDataSource``
 
 ### Mutations
 
