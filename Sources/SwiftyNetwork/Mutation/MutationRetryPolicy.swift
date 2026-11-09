@@ -72,9 +72,9 @@ public struct MutationRetryPolicy: Sendable {
     /// policies and telemetry code alike).
     ///
     /// - Parameter error: The error thrown by the mutation's network call.
-    /// - Returns: `true` for timeouts, missing connectivity, malformed
-    ///   responses, `429` rate limiting, and 5xx server errors; `false` for everything else,
-    ///   including 4xx client errors and non-``NetworkError`` errors.
+    /// - Returns: `true` for timeouts, missing connectivity, `429` rate limiting, and 5xx
+    ///   server errors; `false` for everything else, including 4xx client errors, a
+    ///   response that is not HTTP, and non-``NetworkError`` errors.
     public static func defaultShouldRetry(_ error: any Error) -> Bool {
         (error as? NetworkError)?.isTransient ?? false
     }

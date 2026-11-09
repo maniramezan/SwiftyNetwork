@@ -158,6 +158,9 @@ public actor NetworkClient: APIClient {
         let httpResponse: HTTPURLResponse
         do {
             (data, httpResponse) = try await send(request, session: configuration.session)
+        } catch let error as CancellationError {
+            await trace.failed(.underlying(error))
+            throw error
         } catch let error as NetworkError {
             return try await retryOrFail(
                 error,
@@ -255,18 +258,21 @@ public actor NetworkClient: APIClient {
         )
     }
 
-    /// Executes `request`, mapping every transport failure to a ``NetworkError``.
+    /// Executes `request`, mapping every transport failure to a ``NetworkError``,
+    /// or to `CancellationError` when the calling task was cancelled.
     private func send(_ request: URLRequest, session: URLSession) async throws -> (Data, HTTPURLResponse) {
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
-        } catch let error as URLError {
-            Logger.error("URL error during request", error: error)
-            throw NetworkError.mapURLError(error)
         } catch {
-            Logger.error("Unexpected error during request", error: error)
-            throw NetworkError.underlying(AnySendableError(error))
+            let mapped = NetworkError.transportError(error)
+            if mapped is CancellationError {
+                Logger.info("Request cancelled")
+            } else {
+                Logger.error("Transport error during request", error: error)
+            }
+            throw mapped
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -318,10 +324,7 @@ public actor NetworkClient: APIClient {
         responseType: T.Type,
         decoder: JSONDecoder
     ) async throws -> T {
-        if data.isEmpty, responseType == EmptyResponse.self {
-            guard let emptyResponse = EmptyResponse() as? T else {
-                throw NetworkError.invalidData
-            }
+        if data.isEmpty, let emptyResponse = EmptyResponse() as? T {
             return emptyResponse
         }
 

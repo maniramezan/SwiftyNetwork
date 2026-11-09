@@ -69,15 +69,11 @@ public struct NetworkRetryPolicy: Sendable {
     ///   - error: The failure of the attempt that just ran.
     ///   - method: The HTTP method of the request.
     /// - Returns: `true` only for an idempotent ``retryableMethods`` request whose
-    ///   failure is ``NetworkError/isTransient`` other than a malformed response:
-    ///   `429`, a 5xx status, a timeout, or lost connectivity.
+    ///   failure is ``NetworkError/isTransient``: `429`, a 5xx status, a timeout,
+    ///   or lost connectivity.
     public func shouldRetry(_ error: NetworkError, method: HTTPMethod) -> Bool {
         guard Self.retryableMethods.contains(method) else { return false }
-        // Derived from NetworkError.isTransient so the two rules cannot drift.
-        // A malformed response is the one transient case excluded: for an
-        // idempotent request it usually signals a broken server or proxy,
-        // not a condition a replay will fix.
-        return error.isTransient && error.classification != .invalidResponse
+        return error.isTransient
     }
 
     /// Computes how long to wait before a retry.

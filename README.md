@@ -400,11 +400,15 @@ certificates or keys change. Pinning is enforced only for configured hosts; all 
 `URLSession` trust handling.
 
 ```swift
+enum PinConfigurationError: Error {
+    case invalidPin
+}
+
 func makePinnedClient() throws -> NetworkClient {
     guard let apiPublicKeyPin = SSLPinningConfiguration.Pin.publicKeySHA256(
         base64Encoded: "BASE64_ENCODED_SHA256_PUBLIC_KEY_HASH"
     ) else {
-        throw NetworkError.invalidData
+        throw PinConfigurationError.invalidPin
     }
 
     let pinning = SSLPinningConfiguration(
@@ -576,8 +580,19 @@ may contain user information, so don't log it. `HTTPErrorResponse` prints only i
 and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
-Timeouts, lost connectivity, malformed responses, `429`, and 5xx statuses count as transient. This is the same rule
-`MutationRetryPolicy.default` uses.
+Timeouts, lost connectivity, `429`, and 5xx statuses count as transient. This is the same rule
+`NetworkRetryPolicy` and `MutationRetryPolicy.default` use.
+
+Cancelling the calling task always surfaces as `CancellationError`, whether it lands while the request is on
+the wire, during a retry wait, or during an auth refresh. It is never wrapped in a `NetworkError`:
+
+```swift
+do {
+    let user = try await client.request(endpoint, responseType: User.self)
+} catch is CancellationError {
+    // The view went away; nothing to show
+}
+```
 
 ### Rate Limiting (429) and Retry-After
 
