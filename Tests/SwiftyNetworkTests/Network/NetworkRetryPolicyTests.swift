@@ -28,13 +28,12 @@ struct NetworkRetryPolicyTests {
         }
     }
 
-    @Test("shouldRetry matches NetworkError.isTransient for every error except invalidResponse")
+    @Test("shouldRetry matches NetworkError.isTransient for every error")
     func shouldRetryIsDerivedFromIsTransient() {
         let policy = NetworkRetryPolicy()
         let errors: [NetworkError] = [
             .invalidURL(url: "x"),
             .invalidResponse,
-            .invalidData,
             .clientError(.status(499)),
             .serverError(.status(500)),
             .serverError(.status(503)),
@@ -50,11 +49,8 @@ struct NetworkRetryPolicyTests {
             .underlying(URLError(.badURL)),
         ]
         for error in errors {
-            let expected = error.isTransient && error.classification != .invalidResponse
-            #expect(policy.shouldRetry(error, method: .get) == expected, "\(error)")
+            #expect(policy.shouldRetry(error, method: .get) == error.isTransient, "\(error)")
         }
-        #expect(NetworkError.invalidResponse.isTransient)
-        #expect(!policy.shouldRetry(.invalidResponse, method: .get))
     }
 
     @Test("Never retries POST, PATCH or OPTIONS, even on 429")
@@ -78,7 +74,6 @@ struct NetworkRetryPolicyTests {
             .forbidden(.status(403)),
             .notFound(.status(404)),
             .invalidResponse,
-            .invalidData,
             .invalidURL(url: "x"),
             .decodingFailed(underlying: URLError(.badURL)),
             .encodingFailed(underlying: URLError(.badURL)),

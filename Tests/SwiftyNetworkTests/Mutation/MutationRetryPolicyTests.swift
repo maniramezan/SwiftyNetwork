@@ -14,12 +14,11 @@ struct MutationRetryPolicyTests {
         #expect(MutationRetryPolicy.defaultBackoff.maxRetryAfter == .seconds(300))
     }
 
-    @Test("Default policy retries timeouts, missing connectivity, invalid responses, 429, and 5xx errors")
+    @Test("Default policy retries timeouts, missing connectivity, 429, and 5xx errors")
     func defaultRetriesTransientErrors() {
         let policy = MutationRetryPolicy.default
         #expect(policy.shouldRetry(NetworkError.timeout(nil)))
         #expect(policy.shouldRetry(NetworkError.noInternetConnection))
-        #expect(policy.shouldRetry(NetworkError.invalidResponse))
         #expect(policy.shouldRetry(NetworkError.serverError(.status(500))))
         #expect(policy.shouldRetry(NetworkError.serverError(.status(503))))
         #expect(policy.shouldRetry(NetworkError.tooManyRequests(.status(429, retryAfter: 5))))
@@ -33,7 +32,9 @@ struct MutationRetryPolicyTests {
         #expect(!policy.shouldRetry(NetworkError.notFound(.status(404))))
         #expect(!policy.shouldRetry(NetworkError.clientError(.status(422))))
         #expect(!policy.shouldRetry(NetworkError.invalidURL(url: "bad")))
+        #expect(!policy.shouldRetry(NetworkError.invalidResponse))
         #expect(!policy.shouldRetry(URLError(.badURL)))
+        #expect(!policy.shouldRetry(CancellationError()))
     }
 
     @Test("defaultShouldRetry delegates to NetworkError.isTransient, the shared classification source of truth")
