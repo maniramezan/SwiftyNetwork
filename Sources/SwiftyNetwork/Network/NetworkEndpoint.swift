@@ -39,7 +39,33 @@ public protocol NetworkEndpoint: Sendable {
     var headers: [String: String]? { get }
 
     /// The authorization to apply to this endpoint. Defaults to ``AuthorizationType/none``.
+    ///
+    /// With ``AuthorizationType/none``, ``NetworkClient`` uses its configured
+    /// ``AuthorizationProvider`` instead, unless ``usesAuthorizationProvider`` is `false`.
     var authorization: AuthorizationType { get }
+
+    /// Whether ``NetworkClient`` may authorize this endpoint with its configured
+    /// ``AuthorizationProvider``. Defaults to `true`.
+    ///
+    /// Return `false` for endpoints that must not carry the user's credentials, such as sign-in,
+    /// sign-up, or token refresh, public endpoints, and other services' URLs. The request is then sent
+    /// with only this endpoint's own ``authorization``, and a `401` throws
+    /// ``NetworkError/unauthorized(_:)`` without a refresh.
+    ///
+    /// The refresh endpoint must opt out if the provider's refresh calls the same client. Otherwise it
+    /// is sent with the expired token, and a `401` from it would ask the provider to refresh again
+    /// while the provider is still refreshing.
+    ///
+    /// Example:
+    /// ```swift
+    /// struct RefreshTokenEndpoint: NetworkEndpoint {
+    ///     let baseURL = "https://api.example.com"
+    ///     let path = "/oauth/token"
+    ///     let method: HTTPMethod = .post
+    ///     var usesAuthorizationProvider: Bool { false }
+    /// }
+    /// ```
+    var usesAuthorizationProvider: Bool { get }
 
     /// The request body, pre-encoded. Defaults to `nil`.
     ///
@@ -57,6 +83,9 @@ extension NetworkEndpoint {
 
     /// Default authorization strategy for endpoints that rely on client-level auth or no auth.
     public var authorization: AuthorizationType { .none }
+
+    /// Returns `true`, so the client's ``AuthorizationProvider`` authorizes the endpoint.
+    public var usesAuthorizationProvider: Bool { true }
 
     /// Default request body for endpoints that do not send pre-encoded data.
     public var body: Data? { nil }

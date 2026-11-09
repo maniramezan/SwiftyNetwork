@@ -114,6 +114,39 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
   Exhaustive switches over ``NetworkError`` and ``NetworkErrorClassification`` need it.
 - ``NetworkErrorClassification/noInternetConnection`` replaces the 1.x `.noConnection` case,
   mirroring ``NetworkError/noInternetConnection``.
+- ``NetworkErrorClassification`` also gained ``NetworkErrorClassification/clientError(statusCode:)``,
+  ``NetworkErrorClassification/unexpectedStatus(statusCode:)``,
+  ``NetworkErrorClassification/authorizationUnavailable``, and
+  ``NetworkErrorClassification/secureConnectionFailed``. To read a status code, use
+  ``NetworkError/statusCode`` or `error.response?.statusCode`, not the classification.
+- `NetworkError.unauthorized()` with no argument is gone, because the case now carries the
+  response. Build one with `NetworkError.unauthorized(HTTPResponse(statusCode: 401))`. This also
+  applies to code written against the unreleased `feature/retry-and-mutation-failures` branch.
+- To choose what to show the user, use the new ``NetworkError/category``
+  (``NetworkErrorCategory``: `offline`, `timedOut`, `unauthorized`, `rateLimited`, `rejected`,
+  `serverError`, `insecureConnection`, `other`) instead of keeping your own mapping.
+  ``NetworkError/authorizationUnavailable(underlying:)`` is in `unauthorized`, with the `401` cases,
+  because both mean the user must sign in again. Use ``NetworkError/classification`` to tell them apart.
+  `429` is `rateLimited`, not `rejected`, because the same request can succeed later.
+- **Behavior change:** a TLS failure, including a rejected certificate pin, is still
+  ``NetworkError/underlying(_:)`` carrying the `URLError`, but its classification is now
+  ``NetworkErrorClassification/secureConnectionFailed`` instead of `underlying`, and its category is
+  `insecureConnection`.
+- To map an error thrown outside the client, such as one from a stream returned by
+  ``NetworkClient/sendAuthorized(_:errorBody:transport:)``, use ``NetworkError/mapTransportError(_:)``.
+- **Behavior change:** decoding ``EmptyResponse`` ignores the body. In 1.x, a `2xx` with a body that
+  was not JSON, such as `OK`, failed with `decodingFailed`, so ``NetworkClient/request(_:)`` and
+  ``MutationQueue`` reported a failure for a request the server had applied.
+
+```swift
+switch error.category {
+case .offline, .timedOut: showOfflineBanner()
+case .unauthorized: promptSignIn()
+case .rateLimited: showTryAgainLater(after: error.retryAfter)
+case .insecureConnection: showInsecureConnectionError()
+case .rejected, .serverError, .other: showGenericError()
+}
+```
 
 ### Authorization
 
@@ -124,17 +157,89 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
 - ``AuthorizationProvider/currentAuthorization()`` is `async throws`. Your non-throwing
   implementation still conforms. Throw when the user is signed out, and the client fails the
   request with ``NetworkError/authorizationUnavailable(underlying:)`` without sending it.
+  **Source change:** calling it through `any AuthorizationProvider` or a generic `some AuthorizationProvider`
+  now needs `try`. Calling it on your concrete non-throwing type does not.
 - ``OAuthAuthorizationProvider``'s refresh handler is `() async throws -> String`. Throw
   instead of returning `nil`; the client surfaces the error as
   ``NetworkError/authorizationRefreshFailed(underlying:)``.
 - ``AuthorizationProvider/shouldRefreshAuthorization(after:)`` is new (default `true`), so
   a provider can decline to refresh a `401` that a new token cannot fix.
 - ``AuthorizationType`` is no longer `Codable`.
+- To skip a refresh that another request already did, call
+  ``AuthorizationProvider/isCurrentAuthorization(_:)`` with `rejected` first.
+- To send a request that ``NetworkClient`` cannot model, such as a Server-Sent Events stream,
+  with the same authorization and refresh-once behavior, use
+  ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` instead of calling the provider yourself.
+  Use it only for your own API; the provider's credentials are applied to any URL.
+- An endpoint that must not carry the user's credentials, such as sign-in, token refresh, or a
+  public endpoint, returns `false` from ``NetworkEndpoint/usesAuthorizationProvider``. In 1.x there
+  was no way to opt out: `.none` always meant "use the provider". If your refresh handler calls the
+  same client, its endpoint must opt out; ``OAuthAuthorizationProvider`` now fails a refresh requested
+  from inside its own refresh with ``OAuthAuthorizationProvider/ReentrantRefreshError`` instead of
+  hanging.
+
+#### Converting a `Bool` refresh
+
+If your 1.x provider returned `true` when it refreshed and `false` when it could not,
+move the failure into a thrown error:
+
+```swift
+// 1.x
+func refreshAuthorizationIfNeeded() async -> Bool {
+    guard let refreshToken = store.refreshToken else { return false }
+    do {
+        store.accessToken = try await service.refresh(refreshToken)
+        return true
+    } catch {
+        return false
+    }
+}
+
+// 2.0
+struct SignedOut: Error {}
+
+func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+    guard await isCurrentAuthorization(rejected) else { return }
+    guard let refreshToken = store.refreshToken else { throw SignedOut() }
+    store.accessToken = try await service.refresh(refreshToken)
+}
+```
+
+The client wraps whatever you throw in ``NetworkError/authorizationRefreshFailed(underlying:)``
+and passes a `CancellationError` through unchanged. If you still need a `Bool` somewhere else,
+catch the error at that call site, and let cancellation propagate:
+
+```swift
+func refreshSucceeded(rejecting rejected: AuthorizationType) async throws -> Bool {
+    do {
+        try await provider.refreshAuthorization(rejecting: rejected)
+        return true
+    } catch is CancellationError {
+        throw CancellationError()
+    } catch {
+        return false
+    }
+}
+```
+
+Prefer ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` to hand-written wrappers like this one.
 
 ### Retries
 
 - ``NetworkRetryPolicy`` is new and off by default. Set
   ``NetworkClientConfiguration/retryPolicy`` to retry idempotent requests.
+  Its initializer takes a ``BackoffPolicy`` instead of separate delay settings:
+
+```swift
+// Unreleased feature branch
+NetworkRetryPolicy(maxRetries: 3, baseDelay: .seconds(1), maxDelay: .seconds(30), maxRetryAfter: .seconds(60))
+// 2.0
+NetworkRetryPolicy(
+    maxRetries: 3,
+    backoff: BackoffPolicy(baseDelay: .seconds(1), maxDelay: .seconds(30), maxRetryAfter: .seconds(60))
+)
+```
+
 - Both retry policies take a ``BackoffPolicy``:
 
 ```swift
@@ -169,7 +274,19 @@ MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
 - ``MutationKey`` conforms to `RawRepresentable` and encodes as a raw JSON string instead
   of a keyed container.
 - ``MutationFailureReason`` has a ``MutationFailureReason/category`` (`offline`, `timedOut`,
-  `unauthorized`, `rejected`, `serverError`, `cancelled`, `other`) for choosing what to show.
+  `unauthorized`, `rateLimited`, `rejected`, `serverError`, `insecureConnection`, `cancelled`,
+  `other`) for choosing what to show.
+- ``MutationStatus`` gained ``MutationStatus/waitingForConnectivity``, so exhaustive switches over it
+  need the case. Only a queue created with `waitForConnectivity`
+  (``MutationQueue/init(client:store:retryPolicy:waitForConnectivity:)``) reports it. Pass
+  ``NetworkMonitor/waitUntilReachable()`` there when you use a durable ``MutationStore``, so an
+  offline mutation waits for the network instead of being dropped after its retries.
+- The ``MutationStatus/succeeded`` event carries the server's response in
+  ``MutationQueue/MutationEvent/response``.
+- ``MutationRequest/addingIdempotencyKey(_:header:)`` stores an idempotency key with the request, so
+  every replay of a `POST` or `PATCH` sends the same one.
+- ``MutationRequest`` keeps an endpoint's ``NetworkEndpoint/usesAuthorizationProvider`` and encodes it.
+  Payloads saved without it decode as `true`.
 
 ### Caching
 
@@ -190,7 +307,8 @@ actor DiskCache<Value: Sendable>: Cache {
   `value(forKey:)` and `setValue(_:forKey:)` come from a protocol extension; delete your
   implementations. Replace `timestamp(forKey:)` with `entry(forKey:)?.timestamp`, and
   `setValue(_:forKey:timestamp:)` with `setEntry(CacheEntry(value, timestamp: date), forKey:)`.
-- `PersistentCache` and `TimestampedCache` are gone. Conform your disk cache to ``Cache``.
+- `PersistentCache` and `TimestampedCache` are gone. Conform your disk cache to ``Cache``;
+  <doc:CustomDiskCache> shows one that keeps the write time and the last-use time apart.
 - `AnyCache(cache)` is gone. Use `any Cache<Value>`.
 - `LocalDataSource` and `CacheBasedLocalDataSource` are gone. Pass the cache straight to the
   repository: `GenericRepository(client: client, cache: InMemoryCache<User>())`.

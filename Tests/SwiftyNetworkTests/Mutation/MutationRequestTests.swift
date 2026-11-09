@@ -103,7 +103,7 @@ struct MutationRequestTests {
 
     @Test("Rejects a payload from a newer schema version")
     func rejectsNewerVersion() {
-        let future = Data(#"{"version":2,"baseURL":"https://api.test.com","path":"/x","method":"POST"}"#.utf8)
+        let future = Data(#"{"version":3,"baseURL":"https://api.test.com","path":"/x","method":"POST"}"#.utf8)
 
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(MutationRequest.self, from: future)

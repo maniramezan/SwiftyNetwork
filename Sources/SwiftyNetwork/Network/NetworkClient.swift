@@ -10,6 +10,9 @@ internal import SwiftCommons
 /// which retries idempotent requests on `429`, 5xx, timeouts and lost
 /// connectivity (see ``NetworkRetryPolicy``).
 ///
+/// For transports it cannot model, such as streaming, use
+/// ``sendAuthorized(_:errorBody:transport:)`` to get the same authorization and refresh behavior.
+///
 /// Example:
 /// ```swift
 /// struct User: Decodable, Sendable {
@@ -22,7 +25,7 @@ internal import SwiftCommons
 /// ```
 public actor NetworkClient: APIClient {
 
-    private let configuration: NetworkClientConfiguration
+    let configuration: NetworkClientConfiguration
 
     /// Shared client with default configuration.
     ///
@@ -306,7 +309,8 @@ public actor NetworkClient: APIClient {
     }
 
     /// Applies endpoint authorization, falling back to the configured provider
-    /// when the endpoint declares ``AuthorizationType/none``.
+    /// when the endpoint declares ``AuthorizationType/none`` and allows it with
+    /// ``NetworkEndpoint/usesAuthorizationProvider``.
     ///
     /// - Returns: The provider-supplied authorization that was applied, or `nil`
     ///   when the endpoint's own authorization was used. Only provider
@@ -317,7 +321,9 @@ public actor NetworkClient: APIClient {
         from endpoint: any NetworkEndpoint,
         configuration: NetworkClientConfiguration
     ) async throws -> AuthorizationType? {
-        if case .none = endpoint.authorization, let provider = configuration.authorizationProvider {
+        if case .none = endpoint.authorization, endpoint.usesAuthorizationProvider,
+            let provider = configuration.authorizationProvider
+        {
             let providerAuthorization = try await provider.currentAuthorization()
             providerAuthorization.apply(to: &request)
             return providerAuthorization
@@ -354,7 +360,8 @@ public actor NetworkClient: APIClient {
         if let raw = data as? T {
             return raw
         }
-        if data.isEmpty, let emptyResponse = EmptyResponse() as? T {
+        // EmptyResponse means "ignore the body", so a 2xx with any body, even plain text, succeeds.
+        if let emptyResponse = EmptyResponse() as? T {
             return emptyResponse
         }
 
@@ -382,47 +389,20 @@ public actor NetworkClient: APIClient {
         configuration: NetworkClientConfiguration,
         trace: RequestTrace
     ) async throws -> DecodedResponse<T> {
-        guard let provider = configuration.authorizationProvider,
-            let rejectedAuthorization,
-            refreshAttempt < configuration.maxAuthRefreshAttempts
-        else {
-            Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
-            let error = NetworkError.unauthorized(response)
-            await trace.failed(error)
-            throw error
-        }
-
-        guard await provider.shouldRefreshAuthorization(after: response) else {
-            Logger.info("Authorization provider declined to refresh for this 401", category: .auth)
-            let error = NetworkError.unauthorized(response)
-            await trace.failed(error)
-            throw error
-        }
-
-        Logger.info("Attempting to refresh authorization", category: .auth)
         do {
-            try await provider.refreshAuthorization(rejecting: rejectedAuthorization)
-        } catch is CancellationError {
-            Logger.info("Authorization refresh cancelled", category: .auth)
-            await trace.failed(.underlying(CancellationError()))
-            throw CancellationError()
+            try await refreshAfterUnauthorized(
+                response: response,
+                rejectedAuthorization: rejectedAuthorization,
+                refreshAttempt: refreshAttempt,
+                configuration: configuration
+            )
+        } catch let error as NetworkError {
+            await trace.failed(error)
+            throw error
         } catch {
-            Logger.error("Authorization refresh failed", error: error, category: .auth)
-            let failure = NetworkError.authorizationRefreshFailed(underlying: error)
-            await trace.failed(failure)
-            throw failure
-        }
-        Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
-
-        if configuration.authRefreshDelay > .zero {
-            Logger.debug("Waiting \(configuration.authRefreshDelay) before retry")
-            do {
-                try await Task.sleep(for: configuration.authRefreshDelay)
-            } catch {
-                // Cancelled while waiting: close out this attempt for observers.
-                await trace.failed(.underlying(AnySendableError(error)))
-                throw error
-            }
+            // Cancelled while refreshing or waiting: close out this attempt for observers.
+            await trace.failed(.underlying(AnySendableError(error)))
+            throw error
         }
 
         await trace.retrying()
@@ -435,5 +415,51 @@ public actor NetworkClient: APIClient {
             configuration: configuration,
             requestID: trace.requestID
         )
+    }
+
+    /// Runs the `401` refresh-once flow shared by endpoint requests and
+    /// ``sendAuthorized(_:errorBody:transport:)``: decide, refresh, then wait
+    /// ``NetworkClientConfiguration/authRefreshDelay``.
+    ///
+    /// Returns normally when the caller should replay the request with the newer authorization.
+    ///
+    /// - Throws: ``NetworkError/unauthorized(_:)`` when no refresh is possible or the provider
+    ///   declined it, ``NetworkError/authorizationRefreshFailed(underlying:)`` when the provider
+    ///   threw, or `CancellationError` when the calling task was cancelled.
+    func refreshAfterUnauthorized(
+        response: HTTPResponse,
+        rejectedAuthorization: AuthorizationType?,
+        refreshAttempt: Int,
+        configuration: NetworkClientConfiguration
+    ) async throws {
+        guard let provider = configuration.authorizationProvider,
+            let rejectedAuthorization,
+            refreshAttempt < configuration.maxAuthRefreshAttempts
+        else {
+            Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
+            throw NetworkError.unauthorized(response)
+        }
+
+        guard await provider.shouldRefreshAuthorization(after: response) else {
+            Logger.info("Authorization provider declined to refresh for this 401", category: .auth)
+            throw NetworkError.unauthorized(response)
+        }
+
+        Logger.info("Attempting to refresh authorization", category: .auth)
+        do {
+            try await provider.refreshAuthorization(rejecting: rejectedAuthorization)
+        } catch is CancellationError {
+            Logger.info("Authorization refresh cancelled", category: .auth)
+            throw CancellationError()
+        } catch {
+            Logger.error("Authorization refresh failed", error: error, category: .auth)
+            throw NetworkError.authorizationRefreshFailed(underlying: error)
+        }
+        Logger.info("Authorization refreshed successfully; retrying request", category: .auth)
+
+        if configuration.authRefreshDelay > .zero {
+            Logger.debug("Waiting \(configuration.authRefreshDelay) before retry")
+            try await Task.sleep(for: configuration.authRefreshDelay)
+        }
     }
 }

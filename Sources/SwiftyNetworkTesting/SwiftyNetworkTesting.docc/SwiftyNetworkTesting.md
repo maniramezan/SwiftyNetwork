@@ -52,6 +52,16 @@ unless you set a fallback with ``MockAPIClient/setFallback(_:)``.
 Inject these spies into your network configuration to observe credential refresh
 and request lifecycle events without defining app-specific copies.
 
+`TestAuthorizationProvider` covers the usual hand-written fixture: a fixed bearer token
+(`current: .bearer(token: "t")`), a refresh counter (`refreshCallCount`), the credentials the server
+rejected (`rejectedAuthorizations`), and a refresh outcome you can change after creation:
+
+```swift
+let provider = TestAuthorizationProvider(current: .bearer(token: "old"), refreshResult: false)
+await provider.setRefreshedAuthorization(.bearer(token: "new"))
+await provider.setRefreshResult(true)
+```
+
 ### Retry policies
 
 Both policies have a zero-wait `.immediate()` form built on `BackoffPolicy.immediate`, which also

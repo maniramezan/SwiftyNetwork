@@ -138,6 +138,30 @@ public actor NetworkMonitor {
         broadcaster.makeStream()
     }
 
+    /// Returns once the network is reachable, starting monitoring if needed.
+    ///
+    /// Returns at once when ``status`` is already ``NetworkReachability/reachable``. It also returns
+    /// without the network becoming reachable when the calling task is cancelled or
+    /// ``stopMonitoring()`` is called, so check ``isReachable`` afterwards if that matters.
+    ///
+    /// Pass it to ``MutationQueue/init(client:store:retryPolicy:waitForConnectivity:)`` so offline
+    /// mutations wait for the network instead of using up their retries.
+    ///
+    /// Example:
+    /// ```swift
+    /// let queue = MutationQueue(client: client, store: fileStore) {
+    ///     await NetworkMonitor.shared.waitUntilReachable()
+    /// }
+    /// ```
+    public func waitUntilReachable() async {
+        startMonitoring()
+        if currentStatus == .reachable { return }
+        Logger.debug("Waiting for the network to become reachable", category: .network)
+        for await status in updates where status == .reachable {
+            return
+        }
+    }
+
     // MARK: - Private
 
     private func update(_ newStatus: NetworkReachability) {

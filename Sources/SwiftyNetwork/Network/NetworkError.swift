@@ -211,18 +211,48 @@ public enum NetworkError: Error, LocalizedError, Sendable {
 }
 
 extension NetworkError {
+    /// Maps an error thrown by `URLSession` to the error ``NetworkClient`` would throw for it.
+    ///
+    /// Use it for errors that reach you outside ``NetworkClient``, so they get the same
+    /// ``category`` and ``classification`` as the client's own. The common case is a stream
+    /// returned by ``NetworkClient/sendAuthorized(_:errorBody:transport:)``: the client maps
+    /// errors only until the response headers arrive, so a connection that drops while you read
+    /// the stream throws a raw `URLError`.
+    ///
+    /// - A ``NetworkError`` is returned unchanged.
+    /// - A `CancellationError`, or `URLError.cancelled` while the current task is cancelled,
+    ///   becomes `CancellationError`.
+    /// - A `URLError` maps as ``NetworkClient`` maps it, for example to
+    ///   ``noInternetConnection`` or ``timeout(_:)``.
+    /// - Anything else is wrapped in ``underlying(_:)``.
+    ///
+    /// Example:
+    /// ```swift
+    /// do {
+    ///     for try await line in bytes.lines { handle(line) }
+    /// } catch {
+    ///     throw NetworkError.mapTransportError(error)
+    /// }
+    /// ```
+    ///
+    /// - Parameter error: The error to map.
+    /// - Returns: `CancellationError` for task cancellation, otherwise a ``NetworkError``.
+    public static func mapTransportError(_ error: any Error) -> any Error {
+        transportError(error)
+    }
+
     /// Maps any error thrown by `URLSession` to what SwiftyNetwork rethrows.
     ///
     /// Task cancellation surfaces as `CancellationError`, the same error a
     /// cancelled retry or auth-refresh wait throws, so callers have one shape
     /// to check. `URLSession` reports a cancelled task as `URLError.cancelled`,
     /// but so does a rejected TLS pin; only the former is translated, by
-    /// checking `Task.isCancelled`.
+    /// checking `Task.isCancelled`. A ``NetworkError`` passes through unchanged.
     ///
     /// - Parameter error: The error thrown by `URLSession`.
     /// - Returns: `CancellationError` for task cancellation, otherwise a ``NetworkError``.
     static func transportError(_ error: any Error) -> any Error {
-        if error is CancellationError {
+        if error is CancellationError || error is NetworkError {
             return error
         }
         guard let urlError = error as? URLError else {
@@ -275,6 +305,13 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case authorizationUnavailable
     /// The configured ``AuthorizationProvider`` failed to refresh credentials.
     case authorizationRefreshFailed
+    /// The TLS connection could not be trusted: the server's certificate was rejected, the TLS
+    /// handshake failed, or a certificate pin from ``SSLPinningConfiguration`` rejected the server.
+    ///
+    /// The error is ``NetworkError/underlying(_:)`` carrying the `URLError`. `URLSession` reports a
+    /// rejected pin, like any cancelled authentication challenge, as `URLError.cancelled` while the
+    /// calling task is not cancelled, so that code is classified here too.
+    case secureConnectionFailed
     /// A lower-level error with no more specific classification.
     case underlying
 
@@ -284,15 +321,118 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     /// server errors -- conditions a retry can plausibly resolve. `false` for
     /// everything else: 4xx client errors (other than what ``NetworkClient``
     /// already handles via auth refresh), a response that is not HTTP (usually
-    /// a broken server or proxy), and encoding/decoding failures, since a retry
-    /// can't change their outcome.
+    /// a broken server or proxy), encoding/decoding failures, and an untrusted
+    /// TLS connection, since a retry can't change their outcome.
     public var isTransient: Bool {
         switch self {
         case .timeout, .noInternetConnection, .tooManyRequests, .serverError:
             return true
         case .invalidURL, .invalidResponse, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
-            .decodingFailed, .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed, .underlying:
+            .decodingFailed, .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed,
+            .secureConnectionFailed, .underlying:
             return false
+        }
+    }
+
+    /// The `URLError` codes classified as ``secureConnectionFailed``.
+    static let secureConnectionFailureCodes: Set<URLError.Code> = [
+        .cancelled,
+        .secureConnectionFailed,
+        .serverCertificateHasBadDate,
+        .serverCertificateUntrusted,
+        .serverCertificateHasUnknownRoot,
+        .serverCertificateNotYetValid,
+        .clientCertificateRejected,
+        .clientCertificateRequired,
+        .appTransportSecurityRequiresSecureConnection,
+    ]
+}
+
+/// A coarse category of a ``NetworkError`` for choosing what to tell the user.
+///
+/// It collapses ``NetworkErrorClassification`` into the few cases a UI or telemetry
+/// pipeline treats differently, so apps need not keep their own mapping. It is the same
+/// grouping ``MutationFailureReason/category`` uses, minus cancellation, which
+/// ``NetworkClient`` reports as `CancellationError` rather than a ``NetworkError``.
+///
+/// Example:
+/// ```swift
+/// catch let error as NetworkError {
+///     switch error.category {
+///     case .offline, .timedOut:
+///         showBanner("You're offline.")
+///     case .unauthorized:
+///         promptSignIn()
+///     case .rateLimited:
+///         showBanner("Too many requests. Try again in a moment.")
+///     case .insecureConnection:
+///         showBanner("Can't connect securely to the server.")
+///     case .rejected, .serverError, .other:
+///         showBanner("Something went wrong.")
+///     }
+/// }
+/// ```
+public enum NetworkErrorCategory: Sendable, Equatable {
+    /// The device had no usable connection (``NetworkError/noInternetConnection``).
+    case offline
+
+    /// The request timed out (``NetworkError/timeout(_:)``), at the transport layer or with a `408`.
+    /// The server may or may not have processed it.
+    case timedOut
+
+    /// The user has no valid credentials: the server answered `401` and authorization could not be
+    /// refreshed (``NetworkError/unauthorized(_:)`` or ``NetworkError/authorizationRefreshFailed(underlying:)``),
+    /// or the provider had no authorization to send (``NetworkError/authorizationUnavailable(underlying:)``).
+    ///
+    /// ``NetworkError/authorizationUnavailable(underlying:)`` counts as unauthorized because both mean
+    /// the same to the user: sign in again. Switch on ``NetworkError/classification`` to tell them apart.
+    case unauthorized
+
+    /// The server answered `429 Too Many Requests` (``NetworkError/tooManyRequests(_:)``).
+    ///
+    /// Unlike ``rejected``, the same request can succeed later: wait for
+    /// ``NetworkError/retryAfter`` when the server sent one.
+    case rateLimited
+
+    /// The server rejected the request with a `4xx` status other than `401`, `408`, and `429`,
+    /// such as `400`, `403`, `404`, `409`, or `422`. Retrying the same request will not succeed
+    /// until something changes.
+    case rejected
+
+    /// The server failed with a `5xx` status.
+    case serverError
+
+    /// The connection could not be trusted
+    /// (``NetworkErrorClassification/secureConnectionFailed``): the server's certificate was
+    /// rejected, the TLS handshake failed, or a certificate pin rejected the server. Retrying
+    /// won't help; the network may be intercepting traffic.
+    case insecureConnection
+
+    /// Any other failure: an invalid URL, an unexpected status, an encoding or decoding failure, or
+    /// a lower-level error.
+    case other
+}
+
+extension NetworkErrorClassification {
+    /// The coarse ``NetworkErrorCategory`` of this classification.
+    public var category: NetworkErrorCategory {
+        switch self {
+        case .noInternetConnection:
+            return .offline
+        case .timeout:
+            return .timedOut
+        case .unauthorized, .authorizationUnavailable, .authorizationRefreshFailed:
+            return .unauthorized
+        case .tooManyRequests:
+            return .rateLimited
+        case .forbidden, .notFound, .clientError:
+            return .rejected
+        case .serverError:
+            return .serverError
+        case .secureConnectionFailed:
+            return .insecureConnection
+        case .invalidURL, .invalidResponse, .unexpectedStatus, .decodingFailed, .encodingFailed, .underlying:
+            return .other
         }
     }
 }
@@ -338,9 +478,21 @@ extension NetworkError {
             return .authorizationUnavailable
         case .authorizationRefreshFailed:
             return .authorizationRefreshFailed
-        case .underlying:
+        case .underlying(let error):
+            if let urlError = error as? URLError,
+                NetworkErrorClassification.secureConnectionFailureCodes.contains(urlError.code)
+            {
+                return .secureConnectionFailed
+            }
             return .underlying
         }
+    }
+
+    /// This error's coarse ``NetworkErrorCategory``, for choosing what to show the user.
+    ///
+    /// Equivalent to `classification.category`.
+    public var category: NetworkErrorCategory {
+        classification.category
     }
 
     /// Whether this error is generally worth retrying.

@@ -19,7 +19,7 @@ struct MutationFailureReasonTests {
             (.clientError(.status(400)), .rejected),
             (.clientError(.status(409)), .rejected),
             (.clientError(.status(422)), .rejected),
-            (.tooManyRequests(.status(429)), .rejected),
+            (.tooManyRequests(.status(429)), .rateLimited),
             (.serverError(.status(500)), .serverError),
             (.serverError(.status(503)), .serverError),
             (.unexpectedStatus(.status(304)), .other),
