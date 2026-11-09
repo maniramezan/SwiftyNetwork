@@ -289,9 +289,10 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
   `HTTPResponse` parses `Retry-After` for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
-- `NetworkError.transportError` is the single transport-error mapping for anything `URLSession` throws:
-  task cancellation becomes `CancellationError` (a `URLError.cancelled` while the task is not cancelled,
-  such as a rejected TLS pin, stays in `.underlying`); connectivity-loss codes map to
+- `NetworkError.transportError` is the single transport-error mapping for anything `URLSession` throws
+  (public as `NetworkError.mapTransportError(_:)`): a `NetworkError` passes through; task cancellation becomes
+  `CancellationError` (a `URLError.cancelled` while the task is not cancelled, such as a rejected TLS pin,
+  stays in `.underlying` and classifies as `.secureConnectionFailed`); connectivity-loss codes map to
   `.noInternetConnection` (transient); other `URLError`s are kept intact in `.underlying`
 - `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites.
   The public knob is `LogLevel.current`; never set the level from a client or configuration
@@ -302,7 +303,18 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
   "which endpoint plus what body" and replay it after relaunch. Its encoded form is a compatibility
   contract: bump `MutationRequest.version` for any change and keep decoding older versions
 - `MutationRequest.authorization` is always `.none`; the queue's client authorizes through its provider.
-  `AuthorizationType` is not `Codable` -- don't reintroduce persisted credentials
+  `AuthorizationType` is not `Codable` -- don't reintroduce persisted credentials. It persists
+  `usesAuthorizationProvider` (schema version 2) so an opted-out endpoint never gains credentials on replay
+- `NetworkEndpoint.usesAuthorizationProvider` (default `true`) is the only way to keep the provider's
+  credentials off an endpoint; `.none` alone means "use the provider". Wrapper endpoints such as
+  `EncodedBodyEndpoint` must forward it
+- `OAuthAuthorizationProvider` marks its refresh with a task-local; a refresh requested from inside the
+  handler throws `ReentrantRefreshError` instead of joining (and waiting on) its own in-flight task
+- `NetworkErrorCategory` and `MutationFailureReason.Category` must stay in step: 429 is `rateLimited`, TLS
+  and pin failures (`secureConnectionFailed`, including a non-task `URLError.cancelled`) are `insecureConnection`
+- Decoding `EmptyResponse` never reads the body (`NetworkClient` and `MockAPIClient`), so a plain-text 2xx succeeds
+- `MutationQueue(waitForConnectivity:)`: an offline failure waits instead of consuming a retry and reports
+  `.waitingForConnectivity`; the closure must return on cancellation. Success events carry the `HTTPResponse`
 - Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
   non-suspending check-and-remove -- composing `load` then `remove` from outside reintroduces
   the race it exists to close

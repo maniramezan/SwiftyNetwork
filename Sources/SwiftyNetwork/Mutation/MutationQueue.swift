@@ -15,6 +15,26 @@ internal import SwiftCommons
 /// -- it does not manage UI state. Optimistic updates and rollback on
 /// permanent failure remain the caller's responsibility.
 ///
+/// Mutations for different keys run independently and may finish in any order.
+/// Enqueue a dependent mutation (for example, a child of a record still being
+/// created) only after the event for the first one reports ``MutationStatus/succeeded``.
+///
+/// The queue replays `POST` and `PATCH` requests after a timeout or a `5xx`, when the
+/// server may already have applied them. If your API supports idempotency keys, send
+/// one with ``MutationRequest/addingIdempotencyKey(_:header:)`` so a replay can't apply
+/// the mutation twice.
+///
+/// By default, an offline failure counts as a retry like any other, so a mutation is
+/// dropped after ``MutationRetryPolicy/maxRetries`` attempts. With a durable
+/// ``MutationStore``, pass `waitForConnectivity` so offline mutations wait for the
+/// network instead:
+///
+/// ```swift
+/// let queue = MutationQueue(client: client, store: fileStore) {
+///     await NetworkMonitor.shared.waitUntilReachable()
+/// }
+/// ```
+///
 /// Example:
 /// ```swift
 /// let queue = MutationQueue(client: authenticatedClient)
@@ -43,21 +63,35 @@ public actor MutationQueue {
         public let key: MutationKey
         /// The new status for ``key``.
         public let status: MutationStatus
+        /// The server's response for a ``MutationStatus/succeeded`` event, including its body,
+        /// for example the identifier the server assigned to a created record. `nil` for every
+        /// other status.
+        ///
+        /// Example:
+        /// ```swift
+        /// if event.status == .succeeded, let created = try? event.response?.decodeBody(Post.self) {
+        ///     store.replaceDraft(id: event.key, with: created)
+        /// }
+        /// ```
+        public let response: HTTPResponse?
 
         /// Creates an event, for example to drive UI previews or test doubles.
         ///
         /// - Parameters:
         ///   - key: The logical mutation whose status changed.
         ///   - status: The new status.
-        public init(key: MutationKey, status: MutationStatus) {
+        ///   - response: The server's response, for a ``MutationStatus/succeeded`` event.
+        public init(key: MutationKey, status: MutationStatus, response: HTTPResponse? = nil) {
             self.key = key
             self.status = status
+            self.response = response
         }
     }
 
     private let client: any APIClient
     private let store: any MutationStore
     private let retryPolicy: MutationRetryPolicy
+    private let waitForConnectivity: (@Sendable () async -> Void)?
 
     /// A background task processing one key. The `id` lets a worker detect
     /// that it was cancelled and replaced, so it never touches the store or
@@ -82,14 +116,22 @@ public actor MutationQueue {
     ///     credentials of their own (see ``MutationRequest``).
     ///   - store: Where pending mutations are persisted. Defaults to a fresh ``InMemoryMutationStore``.
     ///   - retryPolicy: Governs retry attempts and backoff. Defaults to ``MutationRetryPolicy/default``.
+    ///   - waitForConnectivity: Returns once the network is reachable again, typically
+    ///     ``NetworkMonitor/waitUntilReachable()``. When set, an attempt that fails with
+    ///     ``NetworkError/noInternetConnection`` does not use up a retry: the mutation reports
+    ///     ``MutationStatus/waitingForConnectivity``, stays in the store, and is retried after this
+    ///     returns and the first backoff delay passes. It must also return when the calling task is
+    ///     cancelled. When `nil`, the default, offline failures count as retries.
     public init(
         client: any APIClient,
         store: any MutationStore = InMemoryMutationStore(),
-        retryPolicy: MutationRetryPolicy = .default
+        retryPolicy: MutationRetryPolicy = .default,
+        waitForConnectivity: (@Sendable () async -> Void)? = nil
     ) {
         self.client = client
         self.store = store
         self.retryPolicy = retryPolicy
+        self.waitForConnectivity = waitForConnectivity
     }
 
     /// Enqueues a mutation and returns immediately; the network call and any
@@ -227,7 +269,7 @@ public actor MutationQueue {
 
             Logger.debug("Executing mutation for key \(key) (attempt \(attempt + 1))", category: .mutation)
             do {
-                _ = try await client.request(request, responseType: EmptyResponse.self)
+                let result = try await client.response(for: request, responseType: EmptyResponse.self)
                 // Cancelled while on the wire: the queue already reported the
                 // cancellation, so ignore this outcome entirely.
                 guard isCurrentWorker(workerID, for: key) else { return }
@@ -236,7 +278,7 @@ public actor MutationQueue {
                 guard isCurrentWorker(workerID, for: key) else { return }
                 if removed {
                     Logger.debug("Mutation succeeded for key \(key)", category: .mutation)
-                    setStatus(.succeeded, for: key)
+                    setStatus(.succeeded, for: key, response: result.response)
                     return
                 }
                 // A newer value was enqueued while this call was in flight.
@@ -249,6 +291,22 @@ public actor MutationQueue {
                 setStatus(.pending, for: key)
             } catch {
                 guard isCurrentWorker(workerID, for: key) else { return }
+                if let waitForConnectivity, (error as? NetworkError)?.category == .offline {
+                    Logger.info("Mutation for key \(key) is waiting for connectivity", category: .mutation)
+                    setStatus(.waitingForConnectivity, for: key)
+                    await waitForConnectivity()
+                    guard isCurrentWorker(workerID, for: key) else { return }
+                    Logger.debug("Connectivity is back; retrying mutation for key \(key)", category: .mutation)
+                    // Networks flap right after reconnecting, so wait the first backoff delay.
+                    // This also keeps a closure that returns immediately from spinning.
+                    let delay = retryPolicy.delay(forRetry: 1)
+                    if delay > .zero {
+                        try? await Task.sleep(for: delay)
+                    }
+                    guard isCurrentWorker(workerID, for: key) else { return }
+                    setStatus(.pending, for: key)
+                    continue
+                }
                 attempt += 1
                 guard retryPolicy.shouldRetry(error), attempt <= retryPolicy.maxRetries else {
                     let removed = await store.removeIfCurrent(request, for: key)
@@ -284,8 +342,8 @@ public actor MutationQueue {
 
     // MARK: - Status Broadcasting
 
-    private func setStatus(_ status: MutationStatus, for key: MutationKey) {
+    private func setStatus(_ status: MutationStatus, for key: MutationKey, response: HTTPResponse? = nil) {
         latestStatusByKey[key] = status
-        eventBroadcaster.yield(MutationEvent(key: key, status: status))
+        eventBroadcaster.yield(MutationEvent(key: key, status: status, response: response))
     }
 }

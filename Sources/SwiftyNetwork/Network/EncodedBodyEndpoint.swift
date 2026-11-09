@@ -14,6 +14,7 @@ struct EncodedBodyEndpoint: NetworkEndpoint {
     var method: HTTPMethod { wrapped.method }
     var queryItems: [URLQueryItem]? { wrapped.queryItems }
     var authorization: AuthorizationType { wrapped.authorization }
+    var usesAuthorizationProvider: Bool { wrapped.usesAuthorizationProvider }
     var body: Data? { encodedBody }
     var headers: [String: String]? { HTTPHeaders.addingJSONContentTypeIfMissing(to: wrapped.headers) }
 }

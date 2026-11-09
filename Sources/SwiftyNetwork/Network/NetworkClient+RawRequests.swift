@@ -6,8 +6,8 @@ extension NetworkClient {
     /// refresh-once, redirect, and instrumentation behavior.
     ///
     /// Use it for transports ``NetworkClient`` cannot model, such as Server-Sent Events or other
-    /// streaming responses read with `URLSession.bytes(for:delegate:)`, downloads, or uploads.
-    /// The client does for your request what it does for an endpoint request:
+    /// streaming responses read with `URLSession.bytes(for:delegate:)`, downloads, or uploads, to
+    /// your own API. The client does for your request what it does for an endpoint request:
     ///
     /// 1. Asks the configured ``AuthorizationProvider`` for ``AuthorizationProvider/currentAuthorization()``
     ///    and applies it to a copy of `request`, replacing any header it sets. Without a provider,
@@ -38,6 +38,20 @@ extension NetworkClient {
     /// blindly; ``NetworkClientConfiguration/retryPolicy`` does not apply. It does not set a timeout:
     /// the `timeoutInterval` of `request` is used, so set a long one for a stream.
     ///
+    /// The client's work ends when the response headers arrive:
+    ///
+    /// - Instrumentation reports the attempt as completed then, not when you finish reading.
+    /// - Errors thrown while you read a streamed payload come straight from `URLSession`. Map them with
+    ///   ``NetworkError/mapTransportError(_:)`` to get the same ``NetworkError`` cases, as the
+    ///   example below does.
+    ///
+    /// Send only requests to your own API's origin. The provider's credentials are applied to any URL,
+    /// so a presigned upload or download URL, or another service's URL, would receive the user's
+    /// token, and such services often reject a request that carries one. Call `URLSession` directly for
+    /// those, and map its errors with ``NetworkError/mapTransportError(_:)``. Background
+    /// `URLSession`s are not supported, because they don't support the async methods or per-task
+    /// delegates this call relies on.
+    ///
     /// Example, a Server-Sent Events stream that survives an expired token:
     /// ```swift
     /// var request = URLRequest(url: eventsURL)
@@ -50,8 +64,12 @@ extension NetworkClient {
     ///     do { for try await byte in bytes { body.append(byte) } } catch {}
     ///     return body
     /// }
-    /// for try await line in bytes.lines {
-    ///     handle(line)
+    /// do {
+    ///     for try await line in bytes.lines {
+    ///         handle(line)
+    ///     }
+    /// } catch {
+    ///     throw NetworkError.mapTransportError(error)
     /// }
     /// ```
     ///
@@ -120,7 +138,7 @@ extension NetworkClient {
             do {
                 (payload, urlResponse) = try await transport(authorizedRequest, configuration.session, redirectGuard)
             } catch {
-                let mapped: any Error = error is NetworkError ? error : NetworkError.transportError(error)
+                let mapped = NetworkError.transportError(error)
                 if let networkError = mapped as? NetworkError {
                     Logger.error("Transport error during raw request", error: error)
                     await trace.failed(networkError)

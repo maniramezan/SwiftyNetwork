@@ -309,7 +309,8 @@ public actor NetworkClient: APIClient {
     }
 
     /// Applies endpoint authorization, falling back to the configured provider
-    /// when the endpoint declares ``AuthorizationType/none``.
+    /// when the endpoint declares ``AuthorizationType/none`` and allows it with
+    /// ``NetworkEndpoint/usesAuthorizationProvider``.
     ///
     /// - Returns: The provider-supplied authorization that was applied, or `nil`
     ///   when the endpoint's own authorization was used. Only provider
@@ -320,7 +321,9 @@ public actor NetworkClient: APIClient {
         from endpoint: any NetworkEndpoint,
         configuration: NetworkClientConfiguration
     ) async throws -> AuthorizationType? {
-        if case .none = endpoint.authorization, let provider = configuration.authorizationProvider {
+        if case .none = endpoint.authorization, endpoint.usesAuthorizationProvider,
+            let provider = configuration.authorizationProvider
+        {
             let providerAuthorization = try await provider.currentAuthorization()
             providerAuthorization.apply(to: &request)
             return providerAuthorization
@@ -357,7 +360,8 @@ public actor NetworkClient: APIClient {
         if let raw = data as? T {
             return raw
         }
-        if data.isEmpty, let emptyResponse = EmptyResponse() as? T {
+        // EmptyResponse means "ignore the body", so a 2xx with any body, even plain text, succeeds.
+        if let emptyResponse = EmptyResponse() as? T {
             return emptyResponse
         }
 

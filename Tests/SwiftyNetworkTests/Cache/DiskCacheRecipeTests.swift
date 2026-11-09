@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 
@@ -7,6 +8,7 @@ import Testing
 
 actor DiskCache<Value: Codable & Sendable>: Cache {
     private struct Envelope: Codable {
+        var key: String
         var timestamp: Date
         var value: Value
     }
@@ -26,7 +28,8 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
     func entry(forKey key: CacheKey) -> CacheEntry<Value>? {
         let url = fileURL(for: key)
         guard let data = try? Data(contentsOf: url),
-            let envelope = try? JSONDecoder().decode(Envelope.self, from: data)
+            let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+            envelope.key == key.rawValue
         else { return nil }
         // Touch only the modification date: it orders files for LRU eviction.
         // The write time stays in the envelope, so reads never change the entry's age.
@@ -35,9 +38,8 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
     }
 
     func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) {
-        guard let data = try? JSONEncoder().encode(Envelope(timestamp: entry.timestamp, value: entry.value)) else {
-            return
-        }
+        let envelope = Envelope(key: key.rawValue, timestamp: entry.timestamp, value: entry.value)
+        guard let data = try? JSONEncoder().encode(envelope) else { return }
         try? data.write(to: fileURL(for: key), options: .atomic)
         prune()
     }
@@ -50,9 +52,11 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
         for file in files() { try? fileManager.removeItem(at: file.url) }
     }
 
+    // A lowercase SHA-256 hex name: fixed length, and the same on case-insensitive volumes.
     private func fileURL(for key: CacheKey) -> URL {
-        let name = Data(key.rawValue.utf8).base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
+        let name = SHA256.hash(data: Data(key.rawValue.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
         return directory.appendingPathComponent(name).appendingPathExtension("json")
     }
 
@@ -127,6 +131,31 @@ struct DiskCacheRecipeTests {
         #expect(await cache.value(forKey: "a") != nil)
         #expect(await cache.value(forKey: "b") == nil)
         #expect(await cache.value(forKey: "c") != nil)
+    }
+
+    @Test("A key longer than the file-name limit is stored and read back")
+    func longKeyRoundTrips() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = try DiskCache<Int>(directory: directory)
+        let key = CacheKey("user:" + String(repeating: "q", count: 400))
+
+        await cache.setValue(7, forKey: key)
+
+        #expect(await cache.value(forKey: key) == 7)
+    }
+
+    @Test("Keys that differ only in case are stored separately")
+    func caseDistinctKeys() async throws {
+        let directory = makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = try DiskCache<Int>(directory: directory)
+
+        await cache.setValue(1, forKey: "user:ABC")
+        await cache.setValue(2, forKey: "user:abc")
+
+        #expect(await cache.value(forKey: "user:ABC") == 1)
+        #expect(await cache.value(forKey: "user:abc") == 2)
     }
 
     @Test("removeValue and removeAll delete entries")

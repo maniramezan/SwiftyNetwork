@@ -115,22 +115,35 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
 - ``NetworkErrorClassification/noInternetConnection`` replaces the 1.x `.noConnection` case,
   mirroring ``NetworkError/noInternetConnection``.
 - ``NetworkErrorClassification`` also gained ``NetworkErrorClassification/clientError(statusCode:)``,
-  ``NetworkErrorClassification/unexpectedStatus(statusCode:)``, and
-  ``NetworkErrorClassification/authorizationUnavailable``. To read a status code, use
+  ``NetworkErrorClassification/unexpectedStatus(statusCode:)``,
+  ``NetworkErrorClassification/authorizationUnavailable``, and
+  ``NetworkErrorClassification/secureConnectionFailed``. To read a status code, use
   ``NetworkError/statusCode`` or `error.response?.statusCode`, not the classification.
 - `NetworkError.unauthorized()` with no argument is gone, because the case now carries the
   response. Build one with `NetworkError.unauthorized(HTTPResponse(statusCode: 401))`. This also
   applies to code written against the unreleased `feature/retry-and-mutation-failures` branch.
 - To choose what to show the user, use the new ``NetworkError/category``
-  (``NetworkErrorCategory``: `offline`, `timedOut`, `unauthorized`, `rejected`, `serverError`,
-  `other`) instead of keeping your own mapping. ``NetworkError/authorizationUnavailable(underlying:)``
-  is in `unauthorized`, with the `401` cases, because both mean the user must sign in again. Use
-  ``NetworkError/classification`` to tell them apart.
+  (``NetworkErrorCategory``: `offline`, `timedOut`, `unauthorized`, `rateLimited`, `rejected`,
+  `serverError`, `insecureConnection`, `other`) instead of keeping your own mapping.
+  ``NetworkError/authorizationUnavailable(underlying:)`` is in `unauthorized`, with the `401` cases,
+  because both mean the user must sign in again. Use ``NetworkError/classification`` to tell them apart.
+  `429` is `rateLimited`, not `rejected`, because the same request can succeed later.
+- **Behavior change:** a TLS failure, including a rejected certificate pin, is still
+  ``NetworkError/underlying(_:)`` carrying the `URLError`, but its classification is now
+  ``NetworkErrorClassification/secureConnectionFailed`` instead of `underlying`, and its category is
+  `insecureConnection`.
+- To map an error thrown outside the client, such as one from a stream returned by
+  ``NetworkClient/sendAuthorized(_:errorBody:transport:)``, use ``NetworkError/mapTransportError(_:)``.
+- **Behavior change:** decoding ``EmptyResponse`` ignores the body. In 1.x, a `2xx` with a body that
+  was not JSON, such as `OK`, failed with `decodingFailed`, so ``NetworkClient/request(_:)`` and
+  ``MutationQueue`` reported a failure for a request the server had applied.
 
 ```swift
 switch error.category {
 case .offline, .timedOut: showOfflineBanner()
 case .unauthorized: promptSignIn()
+case .rateLimited: showTryAgainLater(after: error.retryAfter)
+case .insecureConnection: showInsecureConnectionError()
 case .rejected, .serverError, .other: showGenericError()
 }
 ```
@@ -157,6 +170,13 @@ case .rejected, .serverError, .other: showGenericError()
 - To send a request that ``NetworkClient`` cannot model, such as a Server-Sent Events stream,
   with the same authorization and refresh-once behavior, use
   ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` instead of calling the provider yourself.
+  Use it only for your own API; the provider's credentials are applied to any URL.
+- An endpoint that must not carry the user's credentials, such as sign-in, token refresh, or a
+  public endpoint, returns `false` from ``NetworkEndpoint/usesAuthorizationProvider``. In 1.x there
+  was no way to opt out: `.none` always meant "use the provider". If your refresh handler calls the
+  same client, its endpoint must opt out; ``OAuthAuthorizationProvider`` now fails a refresh requested
+  from inside its own refresh with ``OAuthAuthorizationProvider/ReentrantRefreshError`` instead of
+  hanging.
 
 #### Converting a `Bool` refresh
 
@@ -254,7 +274,19 @@ MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
 - ``MutationKey`` conforms to `RawRepresentable` and encodes as a raw JSON string instead
   of a keyed container.
 - ``MutationFailureReason`` has a ``MutationFailureReason/category`` (`offline`, `timedOut`,
-  `unauthorized`, `rejected`, `serverError`, `cancelled`, `other`) for choosing what to show.
+  `unauthorized`, `rateLimited`, `rejected`, `serverError`, `insecureConnection`, `cancelled`,
+  `other`) for choosing what to show.
+- ``MutationStatus`` gained ``MutationStatus/waitingForConnectivity``, so exhaustive switches over it
+  need the case. Only a queue created with `waitForConnectivity`
+  (``MutationQueue/init(client:store:retryPolicy:waitForConnectivity:)``) reports it. Pass
+  ``NetworkMonitor/waitUntilReachable()`` there when you use a durable ``MutationStore``, so an
+  offline mutation waits for the network instead of being dropped after its retries.
+- The ``MutationStatus/succeeded`` event carries the server's response in
+  ``MutationQueue/MutationEvent/response``.
+- ``MutationRequest/addingIdempotencyKey(_:header:)`` stores an idempotency key with the request, so
+  every replay of a `POST` or `PATCH` sends the same one.
+- ``MutationRequest`` keeps an endpoint's ``NetworkEndpoint/usesAuthorizationProvider`` and encodes it.
+  Payloads saved without it decode as `true`.
 
 ### Caching
 

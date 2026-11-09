@@ -21,7 +21,7 @@ struct NetworkErrorCategoryTests {
             (.authorizationRefreshFailed(underlying: Boom()), .unauthorized),
             (.forbidden(response(403)), .rejected),
             (.notFound(response(404)), .rejected),
-            (.tooManyRequests(response(429)), .rejected),
+            (.tooManyRequests(response(429)), .rateLimited),
             (.clientError(response(422)), .rejected),
             (.serverError(response(500)), .serverError),
             (.unexpectedStatus(response(302)), .other),
@@ -30,6 +30,10 @@ struct NetworkErrorCategoryTests {
             (.decodingFailed(underlying: Boom()), .other),
             (.encodingFailed(underlying: Boom()), .other),
             (.underlying(Boom()), .other),
+            (.underlying(URLError(.serverCertificateUntrusted)), .insecureConnection),
+            (.underlying(URLError(.secureConnectionFailed)), .insecureConnection),
+            (.underlying(URLError(.cancelled)), .insecureConnection),
+            (.underlying(URLError(.badServerResponse)), .other),
         ]
     )
     func category(error: NetworkError, expected: NetworkErrorCategory) {
@@ -41,6 +45,38 @@ struct NetworkErrorCategoryTests {
     func mutationCategoryUnchanged() {
         #expect(MutationFailureReason(NetworkError.underlying(CancellationError())).category == .cancelled)
         #expect(MutationFailureReason(NetworkError.noInternetConnection).category == .offline)
+    }
+
+    @Test("MutationFailureReason has the rate-limited and insecure-connection categories")
+    func mutationNewCategories() {
+        let rateLimited = MutationFailureReason(NetworkError.tooManyRequests(Self.response(429)))
+        let insecure = MutationFailureReason(NetworkError.underlying(URLError(.serverCertificateUntrusted)))
+        #expect(rateLimited.category == .rateLimited)
+        #expect(rateLimited.isTransient)
+        #expect(insecure.category == .insecureConnection)
+        #expect(!insecure.isTransient)
+    }
+
+    @Test("mapTransportError maps URLErrors like the client and passes NetworkError through")
+    func mapTransportError() {
+        let offline = NetworkError.mapTransportError(URLError(.networkConnectionLost)) as? NetworkError
+        let timedOut = NetworkError.mapTransportError(URLError(.timedOut)) as? NetworkError
+        let other = NetworkError.mapTransportError(Boom()) as? NetworkError
+        let passedThrough = NetworkError.mapTransportError(NetworkError.notFound(Self.response(404))) as? NetworkError
+        #expect(offline?.classification == .noInternetConnection)
+        #expect(timedOut?.classification == .timeout)
+        #expect(other?.classification == .underlying)
+        #expect(passedThrough?.statusCode == 404)
+        #expect(NetworkError.mapTransportError(CancellationError()) is CancellationError)
+    }
+
+    @Test("mapTransportError turns URLError.cancelled into CancellationError when the task is cancelled")
+    func mapTransportErrorCancelled() async {
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return NetworkError.mapTransportError(URLError(.cancelled))
+        }
+        #expect(await task.value is CancellationError)
     }
 }
 

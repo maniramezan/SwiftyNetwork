@@ -210,7 +210,7 @@ struct MutationQueueTests {
             guard event.key == "like:video:42" else { return false }
             switch event.status {
             case .succeeded, .failed: return true
-            case .pending, .retrying: return false
+            case .pending, .retrying, .waitingForConnectivity: return false
             }
         }
 

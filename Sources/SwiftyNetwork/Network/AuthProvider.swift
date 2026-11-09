@@ -114,6 +114,12 @@ extension AuthorizationProvider {
 /// that arrives *after* a refresh already replaced the rejected token reuses the
 /// new token instead of refreshing again (see ``refreshAuthorization(rejecting:)``).
 ///
+/// If the refresh handler calls the client this provider authorizes, give the refresh
+/// endpoint ``NetworkEndpoint/usesAuthorizationProvider`` `false`. Otherwise the call carries
+/// the expired token, and if it gets a `401` the client asks this provider to refresh from
+/// inside its own refresh. That nested refresh throws ``ReentrantRefreshError`` instead of
+/// waiting on itself forever.
+///
 /// Example:
 /// ```swift
 /// let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") {
@@ -124,6 +130,27 @@ extension AuthorizationProvider {
 /// let client = NetworkClient(configuration: configuration)
 /// ```
 public actor OAuthAuthorizationProvider: AuthorizationProvider {
+    /// Thrown by ``refreshAuthorization(rejecting:)`` when it is called from inside this
+    /// provider's own refresh handler.
+    ///
+    /// This happens when the refresh handler sends its request through a client that uses this
+    /// provider, and that request gets a `401`. Waiting for the refresh in progress would wait for
+    /// itself forever, so the nested call fails instead, and the client surfaces it as
+    /// ``NetworkError/authorizationRefreshFailed(underlying:)``. To avoid it, give the refresh
+    /// endpoint ``NetworkEndpoint/usesAuthorizationProvider`` `false`.
+    public struct ReentrantRefreshError: Error, Sendable, Equatable, CustomStringConvertible {
+        /// A description of the error.
+        public var description: String {
+            "The refresh handler sent a request that needed a refresh from the same provider"
+        }
+
+        /// Creates the error.
+        public init() {}
+    }
+
+    /// Providers whose refresh handler is running in the current task, to detect a nested refresh.
+    @TaskLocal private static var refreshingProviders: Set<ObjectIdentifier> = []
+
     private var accessToken: String
     private var credentialGeneration = UUID()
     private let refreshTokenHandler: @Sendable () async throws -> String
@@ -159,8 +186,17 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
     ///
     /// - Parameter rejected: The authorization the server answered with `401`.
     /// - Throws: The refresh handler's error, unless an explicit
-    ///   ``updateAccessToken(_:)`` superseded the refresh.
+    ///   ``updateAccessToken(_:)`` superseded the refresh, or ``ReentrantRefreshError`` when
+    ///   called from inside the refresh handler.
     public func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+        if Self.refreshingProviders.contains(ObjectIdentifier(self)) {
+            Logger.error(
+                "Refresh requested from inside the refresh handler; failing it instead of waiting on itself",
+                category: .auth
+            )
+            throw ReentrantRefreshError()
+        }
+
         if rejected != .bearer(token: accessToken) {
             Logger.debug("Rejected token was already replaced; skipping refresh", category: .auth)
             return
@@ -174,7 +210,10 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
         let generation = credentialGeneration
         let task = Task<Void, any Error> { [weak self] in
             guard let self else { throw CancellationError() }
-            try await self.performRefresh(generation: generation)
+            let refreshing = Self.refreshingProviders.union([ObjectIdentifier(self)])
+            try await Self.$refreshingProviders.withValue(refreshing) {
+                try await self.performRefresh(generation: generation)
+            }
         }
         inFlightRefresh = task
         defer { inFlightRefresh = nil }

@@ -359,6 +359,25 @@ returns `true`. `403` is never refreshed.
 Inside `refreshAuthorization(rejecting:)`, `guard await isCurrentAuthorization(rejected) else { return }` skips a
 refresh that another request already did.
 
+#### Endpoints without the user's credentials
+
+An endpoint whose `authorization` is `.none` gets the provider's credentials. Return `false` from
+`usesAuthorizationProvider` for sign-in, sign-up, token refresh, public endpoints, and other services' URLs. The
+request then carries only the endpoint's own `authorization`, and a `401` throws `unauthorized` without a refresh:
+
+```swift
+struct RefreshTokenEndpoint: NetworkEndpoint {
+    let baseURL = "https://api.example.com"
+    let path = "/oauth/token"
+    let method: HTTPMethod = .post
+    var usesAuthorizationProvider: Bool { false }
+}
+```
+
+If the refresh handler calls the same client, its endpoint must opt out. Otherwise it carries the expired token, and a
+`401` from it would ask the provider to refresh from inside its own refresh. `OAuthAuthorizationProvider` fails that
+nested refresh with `ReentrantRefreshError` rather than waiting on itself.
+
 ### Streaming and Other Transports
 
 `NetworkClient` decodes whole responses, so it cannot carry a Server-Sent Events stream. `sendAuthorized` runs a raw
@@ -373,12 +392,20 @@ let (bytes, _) = try await client.sendAuthorized(request) { request, session, de
     do { for try await byte in bytes { body.append(byte) } } catch {}
     return body
 }
-for try await line in bytes.lines {
-    handle(line)
+do {
+    for try await line in bytes.lines {
+        handle(line)
+    }
+} catch {
+    // The client's work ends at the response headers; map stream errors the same way it does.
+    throw NetworkError.mapTransportError(error)
 }
 ```
 
-It returns only for a `2xx`. It never retries transient failures and does not set a timeout.
+It returns only for a `2xx`. It never retries transient failures and does not set a timeout. Instrumentation reports
+the attempt as completed when the headers arrive. Use it only for your own API: the provider's credentials go to
+any URL, so call `URLSession` directly for presigned or third-party URLs, and map its errors with
+`NetworkError.mapTransportError(_:)`. Background sessions are not supported.
 
 ### Fire-and-Forget Mutations with MutationQueue
 
@@ -410,10 +437,27 @@ for await event in await queue.events() where event.key == "like:video:42" {
         break
     case .failed(let reason):
         handleLikeFailure(reason)
-    case .pending, .retrying:
+    case .pending, .retrying, .waitingForConnectivity:
         break
     }
 }
+```
+
+Mutations for different keys run independently and may finish in any order, so enqueue one that depends on
+another only after the first succeeds. The `.succeeded` event carries the server's response, for example the
+identifier of a created record:
+
+```swift
+if event.status == .succeeded, let post = try? event.response?.decodeBody(Post.self) {
+    store.replaceDraft(id: event.key, with: post)
+}
+```
+
+The queue replays `POST` and `PATCH` after a timeout or a 5xx, when the server may already have applied them. If your
+API supports idempotency keys, send one; it is stored with the request, so every replay sends the same key:
+
+```swift
+let request = try MutationRequest(endpoint: CreatePostEndpoint(), encodableBody: draft).addingIdempotencyKey()
 ```
 
 A failed mutation's `MutationFailureReason.category` tells apart the outcomes a UI handles differently:
@@ -422,9 +466,11 @@ A failed mutation's `MutationFailureReason.category` tells apart the outcomes a 
 | --- | --- | --- |
 | `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
 | `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
-| `.rejected` | The server refused it with a 4xx (other than 401/408); retrying won't help | Roll back; show `reason.response` details |
+| `.rateLimited` | `429` and retries ran out | Enqueue again later |
+| `.rejected` | The server refused it with a 4xx (other than 401/408/429); retrying won't help | Roll back; show `reason.response` details |
 | `.unauthorized` | `401` and the token could not be refreshed, or the provider had no authorization | Prompt sign-in |
 | `.serverError` | The server failed with a 5xx (retried first) | Generic error |
+| `.insecureConnection` | The TLS connection was untrusted, for example a rejected certificate pin | "Can't connect securely" |
 | `.cancelled` | `cancel(_:)` or `cancelAll()` ended it | Nothing |
 | `.other` | Encoding, decoding, invalid URL, or a non-`NetworkError` | Generic error |
 
@@ -443,7 +489,7 @@ func handleLikeFailure(_ reason: MutationFailureReason) {
         showError(try? reason.response?.decodeBody(APIError.self))
     case .unauthorized:
         promptSignIn()
-    case .serverError, .other:
+    case .rateLimited, .serverError, .insecureConnection, .other:
         showBanner("Couldn't save your like.")
     }
 }
@@ -457,9 +503,15 @@ body" directly and replay it on the next launch via `resumePendingMutations()`. 
 schema `version`, and decoding rejects a version newer than the library understands.
 
 ```swift
-let queue = MutationQueue(client: authenticatedClient, store: MyDurableMutationStore())
+let queue = MutationQueue(client: authenticatedClient, store: MyDurableMutationStore()) {
+    await NetworkMonitor.shared.waitUntilReachable()
+}
 await queue.resumePendingMutations() // call once at startup
 ```
+
+By default an offline failure uses up a retry like any other, so a mutation is dropped within a minute of
+going offline. With a durable store, pass `waitForConnectivity` as above: an offline attempt then reports
+`.waitingForConnectivity`, stays in the store, and is retried once the closure returns, without using up a retry.
 
 A `MutationRequest` never captures credentials: its `authorization` is always `.none`, so every attempt,
 including a replay after relaunch, is authorized by the client's `AuthorizationProvider`, and a `401`
@@ -704,9 +756,14 @@ to tell it apart from a `401`.
 switch error.category {
 case .offline, .timedOut: showOfflineBanner()
 case .unauthorized: promptSignIn()
+case .rateLimited: showTryAgainLater(after: error.retryAfter)
+case .insecureConnection: showInsecureConnectionError()
 case .rejected, .serverError, .other: showGenericError()
 }
 ```
+
+`.insecureConnection` covers an untrusted certificate, a failed TLS handshake, and a rejected certificate pin, which
+`URLSession` reports as `URLError.cancelled`.
 
 ### Rate Limiting (429) and Retry-After
 

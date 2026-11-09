@@ -14,7 +14,16 @@ public enum MutationStatus: Sendable, Equatable {
     /// - Parameter attempt: The 1-based number of the retry attempt about to run.
     case retrying(attempt: Int)
 
+    /// The device is offline, so the queue is waiting for connectivity before the next attempt.
+    ///
+    /// Reported only by a queue created with a `waitForConnectivity` closure
+    /// (``MutationQueue/init(client:store:retryPolicy:waitForConnectivity:)``). The mutation stays
+    /// in the store, and waiting does not use up a retry.
+    case waitingForConnectivity
+
     /// The mutation executed successfully and was removed from the queue.
+    ///
+    /// The ``MutationQueue/MutationEvent/response`` of this event carries the server's response.
     case succeeded
 
     /// The mutation failed permanently -- either a non-retryable error, or
@@ -46,7 +55,7 @@ public enum MutationStatus: Sendable, Equatable {
 ///         showError(try? reason.response?.decodeBody(APIError.self))
 ///     case .unauthorized:
 ///         promptSignIn()
-///     case .serverError, .other:
+///     case .rateLimited, .serverError, .insecureConnection, .other:
 ///         showBanner("Something went wrong. Try again later.")
 ///     }
 /// }
@@ -72,13 +81,21 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
         /// (``NetworkError/authorizationUnavailable(underlying:)``).
         case unauthorized
 
-        /// The server rejected the request with a `4xx` status other than `401` and `408`,
-        /// such as `400`, `403`, `404`, `409`, `422`, or `429` after retries ran out.
+        /// The server answered `429 Too Many Requests` and retries ran out.
+        /// Enqueuing the mutation again later may succeed.
+        case rateLimited
+
+        /// The server rejected the request with a `4xx` status other than `401`, `408`, and `429`,
+        /// such as `400`, `403`, `404`, `409`, or `422`.
         /// Retrying the same request will not succeed; ``response`` has the details.
         case rejected
 
         /// The server failed with a `5xx` status.
         case serverError
+
+        /// The TLS connection could not be trusted, for example because a certificate pin
+        /// rejected the server (``NetworkErrorCategory/insecureConnection``).
+        case insecureConnection
 
         /// Any other failure: an invalid URL, an unexpected status, an encoding or
         /// decoding failure, or an error that is not a ``NetworkError``.
@@ -140,8 +157,10 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
         case .offline: return .offline
         case .timedOut: return .timedOut
         case .unauthorized: return .unauthorized
+        case .rateLimited: return .rateLimited
         case .rejected: return .rejected
         case .serverError: return .serverError
+        case .insecureConnection: return .insecureConnection
         case .other: return .other
         }
     }

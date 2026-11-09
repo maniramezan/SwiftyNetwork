@@ -260,6 +260,117 @@ struct NetworkClientRawRequestTests {
             (error as? NetworkError)?.classification == .invalidURL
         }
     }
+
+    @Test("A cross-origin redirect drops the provider's credentials")
+    func redirectStripsCredentials() async throws {
+        let origin = "raw-origin-\(UUID().uuidString.lowercased()).test"
+        let other = "raw-other-\(UUID().uuidString.lowercased()).test"
+        let session = RedirectingURLProtocol.makeSession()
+        defer {
+            session.invalidateAndCancel()
+            RedirectingURLProtocol.unregister([origin, other])
+        }
+        let start = try #require(URL(string: "https://\(origin)/stream"))
+        let target = try #require(URL(string: "https://\(other)/stream"))
+        RedirectingURLProtocol.register(.redirect(to: target), for: start)
+        RedirectingURLProtocol.register(.ok(Data("ok".utf8)), for: target)
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: session,
+                authorizationProvider: TestAuthorizationProvider(current: .bearer(token: "t"), refreshResult: true),
+                authRefreshDelay: .zero
+            )
+        )
+
+        let result = try await client.sendAuthorized(URLRequest(url: start)) { request, session, delegate in
+            try await session.data(for: request, delegate: delegate)
+        }
+
+        #expect(result.payload == Data("ok".utf8))
+        let sent = RedirectingURLProtocol.requests(forHost: origin)
+        let redirected = RedirectingURLProtocol.requests(forHost: other)
+        #expect(sent.first?.value(forHTTPHeaderField: "Authorization") == "Bearer t")
+        #expect(redirected.count == 1)
+        #expect(redirected.first?.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
+    @Test("Cancelling the caller during the transport throws CancellationError and reports the failure")
+    func cancellationThrowsCancellationError() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let recorder = NetworkInstrumentationRecorder()
+        let client = makeClient(stub: stub, provider: nil, recorder: recorder)
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await client.sendAuthorized(makeRequest("cancel")) { _, _, _ -> (Data, URLResponse) in
+                // URLSession reports a cancelled task this way.
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw URLError(.cancelled)
+            }
+        }
+        #expect(await recorder.started.count == 1)
+        #expect(await recorder.failed.count == 1)
+        #expect(await recorder.completed.isEmpty)
+    }
+
+    @Test("URLError.cancelled without task cancellation, as from a rejected pin, is an insecure connection")
+    func rejectedPinIsInsecureConnection() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let client = makeClient(stub: stub, provider: nil)
+
+        await #expect {
+            _ = try await client.sendAuthorized(makeRequest("pin")) { _, _, _ -> (Data, URLResponse) in
+                throw URLError(.cancelled)
+            }
+        } throws: { error in
+            let networkError = error as? NetworkError
+            return networkError?.classification == .secureConnectionFailed
+                && networkError?.category == .insecureConnection
+        }
+    }
+
+    @Test("Instrumentation sees two attempts, one retry, and one completion across a refresh")
+    func instrumentationAcrossRefresh() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let id = UUID().uuidString
+        stub.setResponses([.status(401), .success(Data("ok".utf8))], for: id)
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "old"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "new")
+        )
+        let recorder = NetworkInstrumentationRecorder()
+        let client = makeClient(stub: stub, provider: provider, recorder: recorder)
+
+        _ = try await client.sendAuthorized(makeRequest(id)) { request, session, delegate in
+            try await session.data(for: request, delegate: delegate)
+        }
+
+        let started = await recorder.started
+        #expect(started.map(\.attempt) == [1, 2])
+        #expect(Set(started.map(\.requestID)).count == 1)
+        #expect(await recorder.retried.count == 1)
+        #expect(await recorder.completed.map(\.statusCode) == [200])
+        #expect(await recorder.failed.isEmpty)
+    }
+
+    @Test("A response that is not HTTP throws invalidResponse")
+    func nonHTTPResponse() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let client = makeClient(stub: stub, provider: nil)
+        let url = try #require(URL(string: "https://api.test.com/file"))
+
+        await #expect {
+            _ = try await client.sendAuthorized(URLRequest(url: url)) { _, _, _ in
+                (Data(), URLResponse(url: url, mimeType: nil, expectedContentLength: 0, textEncodingName: nil))
+            }
+        } throws: { error in
+            (error as? NetworkError)?.classification == .invalidResponse
+        }
+    }
 }
 
 extension URLRequest {

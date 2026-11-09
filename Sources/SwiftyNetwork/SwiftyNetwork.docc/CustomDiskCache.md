@@ -27,13 +27,19 @@ modification date.
 
 ## A complete example
 
-`DiskCache` stores each value as a JSON file in a directory. A read touches only the
+`DiskCache` stores each value as a JSON file in a directory, named by the SHA-256 hash of
+its key. A hash has a fixed length, so long keys stay under the file system's 255-byte name limit,
+and it is lowercase, so keys that differ only in case can't share a file on a case-insensitive
+volume, such as the macOS default. Each file also stores its key, and a read checks it. A read touches only the
 modification date. Writing prunes files that were not used within `maxAge`, then evicts the least recently used files
 until the directory is under `maxBytes`.
 
 ```swift
+import CryptoKit
+
 actor DiskCache<Value: Codable & Sendable>: Cache {
     private struct Envelope: Codable {
+        var key: String
         var timestamp: Date
         var value: Value
     }
@@ -53,7 +59,8 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
     func entry(forKey key: CacheKey) -> CacheEntry<Value>? {
         let url = fileURL(for: key)
         guard let data = try? Data(contentsOf: url),
-            let envelope = try? JSONDecoder().decode(Envelope.self, from: data)
+            let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+            envelope.key == key.rawValue
         else { return nil }
         // Touch only the modification date: it orders files for LRU eviction.
         // The write time stays in the envelope, so reads never change the entry's age.
@@ -62,9 +69,8 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
     }
 
     func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) {
-        guard let data = try? JSONEncoder().encode(Envelope(timestamp: entry.timestamp, value: entry.value)) else {
-            return
-        }
+        let envelope = Envelope(key: key.rawValue, timestamp: entry.timestamp, value: entry.value)
+        guard let data = try? JSONEncoder().encode(envelope) else { return }
         try? data.write(to: fileURL(for: key), options: .atomic)
         prune()
     }
@@ -77,9 +83,11 @@ actor DiskCache<Value: Codable & Sendable>: Cache {
         for file in files() { try? fileManager.removeItem(at: file.url) }
     }
 
+    // A lowercase SHA-256 hex name: fixed length, and the same on case-insensitive volumes.
     private func fileURL(for key: CacheKey) -> URL {
-        let name = Data(key.rawValue.utf8).base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
+        let name = SHA256.hash(data: Data(key.rawValue.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
         return directory.appendingPathComponent(name).appendingPathExtension("json")
     }
 
