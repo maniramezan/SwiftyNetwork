@@ -25,17 +25,16 @@ import SwiftCommons
 /// // Bound raw bytes rather than entry count.
 /// let images = InMemoryCache<Data>(maxBytes: 50 * 1024 * 1024)
 /// ```
-public actor InMemoryCache<T: Sendable>: TimestampedCache {
+public actor InMemoryCache<T: Sendable>: Cache {
 
-    /// Internal storage entry that contains the value and the time it was stored.
-    private struct CacheEntry {
-        let value: T
-        let timestamp: Date
+    /// Internal storage slot: the cached entry and its cost.
+    private struct Slot {
+        let entry: CacheEntry<T>
         let cost: Int
     }
 
     /// Entries in least-recently-used order. Access is protected by actor isolation.
-    private var storage = LRUStorage<CacheKey, CacheEntry>()
+    private var storage = LRUStorage<CacheKey, Slot>()
 
     /// Maximum number of entries allowed in the cache. When exceeded, least recently used entries are evicted.
     private let maxSize: Int?
@@ -89,39 +88,26 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
     // MARK: - Cache API
 
-    /// Retrieves a value for the given cache key, if present.
+    /// Retrieves the entry for the given cache key, if present.
     ///
-    /// Accessing a value marks it as most recently used for LRU eviction.
+    /// Accessing an entry marks it as most recently used for LRU eviction.
     ///
     /// - Parameter key: The cache key.
-    /// - Returns: The stored value, or `nil` if not found.
-    public func value(forKey key: CacheKey) async -> T? {
-        storage.value(forKey: key)?.value
+    /// - Returns: The stored value and its timestamp, or `nil` if not found.
+    public func entry(forKey key: CacheKey) async -> CacheEntry<T>? {
+        storage.value(forKey: key)?.entry
     }
 
-    /// Stores a value for the given cache key and records the current timestamp.
+    /// Stores an entry for the given cache key, keeping its timestamp.
     ///
-    /// If the cache has a `maxSize` and this write exceeds it, the least recently
-    /// used entry is evicted.
-    ///
-    /// - Parameters:
-    ///   - value: The value to store.
-    ///   - key: The cache key.
-    public func setValue(_ value: T, forKey key: CacheKey) async {
-        store(value, forKey: key, timestamp: Date())
-    }
-
-    /// Stores a value for the given cache key with an explicit timestamp.
-    ///
-    /// Use this when restoring values from persistence or preserving timestamps
-    /// during cache promotion.
+    /// If this write exceeds `maxSize` or `maxCost`, least recently used
+    /// entries are evicted.
     ///
     /// - Parameters:
-    ///   - value: The value to store.
+    ///   - entry: The value and timestamp to store.
     ///   - key: The cache key.
-    ///   - timestamp: The timestamp to record for the cached value.
-    public func setValue(_ value: T, forKey key: CacheKey, timestamp: Date) async {
-        store(value, forKey: key, timestamp: timestamp)
+    public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
+        store(entry, forKey: key)
     }
 
     /// Removes the value associated with the given key.
@@ -138,39 +124,20 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
         currentCost = 0
     }
 
-    /// Returns the timestamp when the value for the given key was stored.
-    /// - Parameter key: The cache key to inspect.
-    /// - Returns: The cache timestamp, or `nil` if there is no value for the key.
-    public func timestamp(forKey key: CacheKey) async -> Date? {
-        storage.peekValue(forKey: key)?.timestamp
-    }
-
     // MARK: - Expiration Helpers
 
-    /// Removes entries older than `maxAge`.
+    /// Removes entries stored at least `maxAge` ago.
     ///
     /// Example:
     /// ```swift
-    /// await cache.removeExpiredEntries(maxAge: .seconds(300))
+    /// await cache.removeEntries(olderThan: .seconds(300))
     /// ```
     ///
-    /// - Parameter maxAge: Maximum allowed age. Entries older than this will be removed.
-    public func removeExpiredEntries(maxAge: Duration) async {
-        let cutoff = Date().addingTimeInterval(-maxAge.timeInterval)
-        let removed = storage.removeAll { $0.timestamp <= cutoff }
-        currentCost -= removed.reduce(0) { $0 + $1.cost }
-    }
-
-    /// Convenience alias to match common naming: removes items older than the supplied age.
-    ///
-    /// Example:
-    /// ```swift
-    /// await cache.removeEntries(olderThan: .seconds(60))
-    /// ```
-    ///
-    /// - Parameter maxAge: Age threshold. Items older than this are removed.
+    /// - Parameter maxAge: Age threshold. Entries this old or older are removed.
     public func removeEntries(olderThan maxAge: Duration) async {
-        await removeExpiredEntries(maxAge: maxAge)
+        let cutoff = Date().addingTimeInterval(-maxAge.timeInterval)
+        let removed = storage.removeAll { $0.entry.timestamp <= cutoff }
+        currentCost -= removed.reduce(0) { $0 + $1.cost }
     }
 
     /// Returns the number of entries currently stored in the cache.
@@ -197,8 +164,8 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
 
     // MARK: - Private Helpers
 
-    private func store(_ value: T, forKey key: CacheKey, timestamp: Date) {
-        let entryCost = cost.map { max(0, $0(value)) } ?? 0
+    private func store(_ entry: CacheEntry<T>, forKey key: CacheKey) {
+        let entryCost = cost.map { max(0, $0(entry.value)) } ?? 0
         if let replaced = storage.removeValue(forKey: key) {
             currentCost -= replaced.cost
         }
@@ -212,7 +179,7 @@ public actor InMemoryCache<T: Sendable>: TimestampedCache {
             }
             guard entryCost <= maxCost else { return }
         }
-        storage.setValue(CacheEntry(value: value, timestamp: timestamp, cost: entryCost), forKey: key)
+        storage.setValue(Slot(entry: entry, cost: entryCost), forKey: key)
         currentCost += entryCost
         evictLRUIfNeeded()
     }

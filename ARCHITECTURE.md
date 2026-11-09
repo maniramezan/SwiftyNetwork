@@ -13,9 +13,9 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Authentication | `AuthProvider.swift`, `AuthorizationType.swift` | Inject credentials and coalesce overlapping OAuth refreshes |
 | TLS | `SSLPinningConfiguration.swift` | Optional certificate/SPKI pins with platform trust validation by default |
 | Observation | `NetworkInstrumentation.swift`, `NetworkMonitor.swift`, `Logger.swift` | Request events, reachability, unified logging |
-| Cache | `Cache.swift`, `AnyCache.swift`, `InMemoryCache.swift`, `LayeredCache.swift` | Storage protocols, type erasure, bounded memory, persistence composition |
+| Cache | `Cache.swift`, `InMemoryCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory, persistence composition |
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
-| Repository | `Repository.swift` | Coordinate local and network sources using `CachePolicy` |
+| Repository | `Repository.swift` | Coordinate a cache and the network using `CachePolicy` |
 | Mutations | `Mutation/` | Retry, coalesce, persist, and observe background mutations |
 | Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()`, `NetworkRetryPolicy.immediate()` |
 
@@ -67,9 +67,9 @@ transport, and decoding, excluding the initial and terminal instrumentation call
 ## Concurrency and ownership
 
 Actors protect mutable client, cache, OAuth, monitor, and mutation state.
-`AnyCache` is a struct holding immutable `@Sendable` closures; its Sendable
-conformance is compiler-checked. Cache protocols also support Sendable value
-implementations. `GenericRepository` holds Sendable forwarding closures.
+`Cache` has a primary associated type, so `LayeredCache` and `GenericRepository`
+store `any Cache<Value>` existentials instead of hand-written type erasure. Cache
+protocols also support Sendable value implementations.
 
 `NetworkMonitor` forwards path updates through one ordered stream and registers
 each `updates` continuation synchronously on the actor.
@@ -79,8 +79,8 @@ interleave. `SingleFlightCache` and `LayeredCache` serialize their storage opera
 awaits using an internal gate. Single-flight fetches run outside it and commit only
 while their flight identity remains current. Access underlying storage exclusively
 through the wrapper, and never call back into that wrapper from a storage method.
-Individual operations are ordered; separate value/timestamp calls still do not
-form a transaction. See [the review backlog](REVIEW.md) for remaining contracts.
+Individual operations are ordered, and `entry(forKey:)` returns a value and its
+timestamp as one snapshot. See [the review backlog](REVIEW.md) for remaining contracts.
 
 Shared OAuth refreshes and single-flight fetches use owned unstructured tasks
 because multiple independent callers share their lifetime. Mutation workers must
@@ -92,11 +92,12 @@ exceptions, not a pattern for new async APIs.
 
 ## Cache and repository flow
 
-`Cache` provides values and timestamps. `TimestampedCache` adds explicit timestamp
-writes. `PersistentCache` is a marker; apps implement actual persistence.
+`Cache` reads and writes whole `CacheEntry` values (value plus timestamp);
+`value(forKey:)` and `setValue(_:forKey:)` are protocol-extension conveniences.
+Apps implement persistence as an ordinary `Cache`.
 `InMemoryCache` keeps entries in `LRUStorage`, so reads, writes, and eviction are
 O(1) and eviction order is deterministic; age-based expiration scans storage (O(n)). `LayeredCache` reads memory first and promotes
-persistent values, preserving an available timestamp.
+persistent entries with their original timestamp.
 
 Repositories implement cache-first, reload, and maximum-age policies. Their read
 and timestamp calls are separate operations. Cache keys must identify the user,

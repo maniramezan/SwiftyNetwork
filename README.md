@@ -141,14 +141,10 @@ func createUserRepository() -> GenericRepository<User> {
     )
     let networkClient = NetworkClient(configuration: configuration)
     
-    // Create cache-based local data source
-    let cache = InMemoryCache<User>()
-    let localDataSource = CacheBasedLocalDataSource(cache: cache)
-    
-    // Create and return repository
+    // Any Cache works: InMemoryCache, LayeredCache, or your own disk cache
     return GenericRepository(
         client: networkClient,
-        localDataSource: localDataSource
+        cache: InMemoryCache<User>()
     )
 }
 ```
@@ -173,23 +169,24 @@ let post = try await client.request(CreatePostEndpoint(), body: draft, responseT
 
 ### Layered Caching with a Custom Persistent Cache
 
-Implement `PersistentCache` in your app to define on-disk behavior, then combine it with
-the built-in in-memory cache using `LayeredCache`.
+Implement `Cache` in your app to define on-disk behavior, then combine it with
+the built-in in-memory cache using `LayeredCache`. A cache stores and returns whole `CacheEntry` values
+(the value plus the time it was stored), so `LayeredCache` keeps the original timestamp when it promotes a
+disk hit into memory, and a repository reads a value and its age in one call.
 
 ```swift
-public actor UserDiskCache: PersistentCache {
-    public typealias Value = User
+public actor UserDiskCache: Cache {
     // Replace this storage with file-backed I/O in your app.
-    private var storage: [CacheKey: (User, Date)] = [:]
+    private var storage: [CacheKey: CacheEntry<User>] = [:]
 
     public init() {}
 
-    public func value(forKey key: CacheKey) async -> User? {
-        storage[key]?.0
+    public func entry(forKey key: CacheKey) async -> CacheEntry<User>? {
+        storage[key]
     }
 
-    public func setValue(_ value: User, forKey key: CacheKey) async {
-        storage[key] = (value, Date())
+    public func setEntry(_ entry: CacheEntry<User>, forKey key: CacheKey) async {
+        storage[key] = entry
     }
 
     public func removeValue(forKey key: CacheKey) async {
@@ -199,24 +196,16 @@ public actor UserDiskCache: PersistentCache {
     public func removeAll() async {
         storage.removeAll()
     }
-
-    public func timestamp(forKey key: CacheKey) async -> Date? {
-        storage[key]?.1
-    }
 }
 
 func createLayeredRepository() -> GenericRepository<User> {
-    let memoryCache = InMemoryCache<User>()
-    let diskCache = UserDiskCache()
-    let layeredCache = LayeredCache(memoryCache: memoryCache, persistentCache: diskCache)
-    let localDataSource = CacheBasedLocalDataSource(cache: layeredCache)
-
-    return GenericRepository(
-        client: NetworkClient.shared,
-        localDataSource: localDataSource
-    )
+    let layeredCache = LayeredCache(memoryCache: InMemoryCache<User>(), persistentCache: UserDiskCache())
+    return GenericRepository(client: NetworkClient.shared, cache: layeredCache)
 }
 ```
+
+`value(forKey:)` and `setValue(_:forKey:)` come for free from the protocol. Use `any Cache<User>` wherever
+you need to store or pass a cache without naming its concrete type.
 
 ### Fetching with Different Cache Strategies
 
@@ -225,7 +214,7 @@ func createLayeredRepository() -> GenericRepository<User> {
 func fetchUser(userId: String, baseURL: String) async throws -> User {
     let repository = createUserRepository()
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
-    let cacheKey = CacheKey.user(userId, resource: "profile")
+    let cacheKey = CacheKey(components: ["user", userId, "profile"])
     
     // Fetch with cache fallback - tries cache first, then network
     return try await repository.fetch(
@@ -239,7 +228,7 @@ func fetchUser(userId: String, baseURL: String) async throws -> User {
 func refreshUser(userId: String, baseURL: String) async throws -> User {
     let repository = createUserRepository()
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
-    let cacheKey = CacheKey.user(userId, resource: "profile")
+    let cacheKey = CacheKey(components: ["user", userId, "profile"])
     
     // Always fetch from network and update cache
     return try await repository.fetch(
@@ -257,7 +246,7 @@ func fetchUserWithExpiration(
 ) async throws -> User {
     let repository = createUserRepository()
     let endpoint = UserEndpoint(baseURL: baseURL, userId: userId)
-    let cacheKey = CacheKey.user(userId, resource: "profile")
+    let cacheKey = CacheKey(components: ["user", userId, "profile"])
     
     // Use cached data if not older than maxCacheAge, otherwise fetch from network
     return try await repository.fetch(
@@ -498,20 +487,15 @@ Events include full URLs and errors. Redact them before exporting.
 ```swift
 // Implement custom cache
 public actor MyCustomCache<T: Sendable>: Cache {
-    public typealias Value = T
-    
     // Your custom cache implementation here
-    public func value(forKey key: CacheKey) async -> T? { /* ... */ }
-    public func setValue(_ value: T, forKey key: CacheKey) async { /* ... */ }
+    public func entry(forKey key: CacheKey) async -> CacheEntry<T>? { /* ... */ }
+    public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async { /* ... */ }
     public func removeValue(forKey key: CacheKey) async { /* ... */ }
     public func removeAll() async { /* ... */ }
-    public func timestamp(forKey key: CacheKey) async -> Date? { /* ... */ }
 }
 
 // Use with repository
-let customCache = MyCustomCache<User>()
-let local = CacheBasedLocalDataSource(cache: customCache)
-// ... rest of repository setup
+let repository = GenericRepository(client: NetworkClient.shared, cache: MyCustomCache<User>())
 ```
 
 ## Cache Policies
@@ -687,9 +671,8 @@ SwiftyNetwork is built around several key protocols and types:
 
 - **`NetworkEndpoint`**: Defines API endpoints
 - **`APIClient`**: Abstract network request interface
-- **`Cache`**: Generic caching interface
-- **`LocalDataSource`**: Local storage abstraction
-- **`Repository`**: Combines network and local data sources
+- **`Cache`**: Generic caching interface storing `CacheEntry` values (value + timestamp)
+- **`Repository`**: Combines a network client and a cache
 - **`AuthorizationProvider`**: Handles authentication
 - **`SSLPinningConfiguration`**: Configures certificate and public-key pinning
 - **`MutationQueue`**: Fire-and-forget mutations with background retry and coalescing
@@ -741,10 +724,7 @@ import Testing
 @Test func repositoryCachesUsers() async throws {
     let client = MockAPIClient()
     try await client.stub(.get, "/users/123", returning: User(id: "123", name: "Ada", email: "ada@example.com"))
-    let repository = GenericRepository(
-        client: client,
-        localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<User>())
-    )
+    let repository = GenericRepository(client: client, cache: InMemoryCache<User>())
     // ...
 }
 ```

@@ -56,7 +56,7 @@ security audit or measured performance gains.
 | --- | --- | --- |
 | High | Credentialed requests accept arbitrary endpoint hosts and URLSession redirects; pinning applies only to listed hosts. | Design an opt-in allowed-origin and redirect policy covering custom API-key headers, scheme downgrade, and injected sessions. Test with a local redirect server. |
 | Medium | GraphQL error bodies and headers cannot always be recovered after HTTP mapping. `HTTPErrorResponse` now preserves status, headers, and body for every non-2xx error, and `Retry-After` for 429 and 503; successful responses are still not exposed. | Extend the response abstraction to successful responses; use that boundary for GraphQL errors, ETags, and content-type validation. Preserve current typed API behavior. |
-| Medium | Repositories read values and timestamps separately; concurrent requests are not coalesced at the repository boundary. | Explore atomic cache-entry reads and explicit repository fetch sharing without conflating cache policies or users. |
+| Medium | Concurrent requests are not coalesced at the repository boundary. (Value and timestamp now come from one `CacheEntry` read.) | Explore explicit repository fetch sharing without conflating cache policies or users. |
 | Medium | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording. | Document ownership and prohibit concurrent external coder reconfiguration; evaluate factory-based configuration in an API proposal. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
 
@@ -97,8 +97,8 @@ Use wrapped caches exclusively through their wrapper; direct mutations bypass
 these guarantees. Custom storage must not recursively call the same wrapper.
 Serialization covers all keys, so slow storage creates head-of-line blocking;
 per-key storage queues with a global removeAll barrier are a possible measured
-optimization, not required for correctness. Separate value/timestamp API calls
-still do not form an atomic snapshot for repository consumers.
+optimization, not required for correctness. `entry(forKey:)` returns a value and
+its timestamp as one snapshot for repository consumers.
 
 Cache-fix validation: the full suite ran 180 tests with 177 passing and the same
 three previously reproduced TLS failures. After adding the independent-key fetch

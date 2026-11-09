@@ -169,7 +169,7 @@ Use clear, imperative commit messages:
 ```
 Add support for custom cache implementations
 
-- Introduce PersistentCache protocol
+- Add a disk-backed Cache conformance
 - Add LayeredCache for memory + disk caching
 - Update documentation with examples
 

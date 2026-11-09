@@ -12,7 +12,7 @@ import Foundation
 /// ```swift
 /// let user = try await repository.fetch(
 ///     using: UserEndpoint(id: "123"),
-///     cacheKey: .user("123", resource: "profile"),
+///     cacheKey: "user:123:profile",
 ///     policy: .returnCacheIfNotExpired(maxAge: .seconds(300))
 /// )
 /// ```
