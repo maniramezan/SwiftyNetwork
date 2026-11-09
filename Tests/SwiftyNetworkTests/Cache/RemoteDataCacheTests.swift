@@ -111,7 +111,7 @@ struct RemoteDataCacheTests {
             _ = try await cache.data(for: url)
             Issue.record("Expected data(for:) to throw")
         } catch let error as NetworkError {
-            #expect(error.classification == .noConnection)
+            #expect(error.classification == .noInternetConnection)
         } catch {
             Issue.record("Expected a NetworkError, got \(error)")
         }

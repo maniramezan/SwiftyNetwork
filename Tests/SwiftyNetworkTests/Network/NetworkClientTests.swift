@@ -236,13 +236,19 @@ struct NetworkClientIntegrationTests {
         let client = NetworkClient(configuration: configuration)
         let testId = "no-body-empty-response"
         stub.setResponses(
-            [.status(204)],
+            [.status(204), .status(204), .status(204)],
             for: testId
         )
 
         let endpoint = makeEndpointWithTestId(testId)
 
         try await client.request(endpoint)
+        let httpResponse = try await client.response(for: endpoint)
+        #expect(httpResponse.statusCode == 204)
+        #expect(httpResponse.body.isEmpty)
+
+        let bodyResponse = try await client.response(for: endpoint, body: ["key": "value"])
+        #expect(bodyResponse.statusCode == 204)
     }
 
     @Test("NetworkClient maps URL errors")

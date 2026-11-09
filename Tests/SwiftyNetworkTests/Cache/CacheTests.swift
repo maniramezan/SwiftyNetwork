@@ -85,6 +85,15 @@ func testCachePolicyDecisionLogic() {
         CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)).shouldUseCachedData(cacheAge: .seconds(11)) == false)
 }
 
+@Test("CachePolicy conforms to Equatable")
+func testCachePolicyEquatable() {
+    #expect(CachePolicy.default == .returnCacheElseLoad)
+    #expect(CachePolicy.returnCacheElseLoad != .reloadIgnoringCache)
+    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)) == .returnCacheIfNotExpired(maxAge: .seconds(10)))
+    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)) != .returnCacheIfNotExpired(maxAge: .seconds(20)))
+    #expect(CachePolicy.returnCacheIfNotExpired(maxAge: .seconds(10)) != .returnCacheElseLoad)
+}
+
 @Test("InMemoryCache stores, removes, and timestamps values")
 func testInMemoryCacheStoresAndRemoves() async {
     let cache = InMemoryCache<String>()

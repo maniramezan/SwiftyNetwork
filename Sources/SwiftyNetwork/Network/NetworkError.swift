@@ -266,7 +266,7 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     /// The request timed out.
     case timeout
     /// No internet connection was available.
-    case noConnection
+    case noInternetConnection
     /// The response body failed to decode.
     case decodingFailed
     /// The request body failed to encode.
@@ -288,7 +288,7 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     /// can't change their outcome.
     public var isTransient: Bool {
         switch self {
-        case .timeout, .noConnection, .tooManyRequests, .serverError:
+        case .timeout, .noInternetConnection, .tooManyRequests, .serverError:
             return true
         case .invalidURL, .invalidResponse, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
             .decodingFailed, .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed, .underlying:
@@ -329,7 +329,7 @@ extension NetworkError {
         case .timeout:
             return .timeout
         case .noInternetConnection:
-            return .noConnection
+            return .noInternetConnection
         case .decodingFailed:
             return .decodingFailed
         case .encodingFailed:
