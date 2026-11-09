@@ -164,7 +164,7 @@ TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:shouldRef
 
 // Scripted APIClient (no URLSession) -- prefer for MutationQueue / repository / service tests
 let client = MockAPIClient()                              // from SwiftyNetworkTesting
-await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 let queue = MutationQueue(client: client, retryPolicy: .immediate())
 
 // Deterministic interleavings -- never rely on sleeps
@@ -258,12 +258,15 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: 0` in tests
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
   (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
-- 429 is `NetworkError.tooManyRequests(retryAfter:data:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`
+- 429 is `NetworkError.tooManyRequests(_:)`; other 4xx are `.clientError`, 5xx are `.serverError`, anything else is
+  `.unexpectedStatus`. New status mappings go through `HTTPStatusValidator.error(for:)`
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced;
   it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
-- `NetworkError.unauthorized` / `.forbidden` carry an optional `HTTPErrorResponse` (status, headers, body),
-  built only for 401/403 in `NetworkClient` and `RemoteDataCache`; never log the body
+- Every HTTP-derived `NetworkError` case carries a non-optional `HTTPErrorResponse` (status, headers, body,
+  `retryAfter`); only a transport `.timeout(nil)` has none. In tests build errors with `.status(_:retryAfter:body:)`
+  from `Tests/SwiftyNetworkTests/Helpers`. Its `description` is redacted, but still never log the body.
+  `HTTPErrorResponse` parses `Retry-After` for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.mapURLError` is the single transport-error mapping; connectivity-loss codes map to

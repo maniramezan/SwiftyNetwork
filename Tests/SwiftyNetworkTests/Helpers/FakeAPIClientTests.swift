@@ -5,7 +5,7 @@ import Testing
 struct FakeAPIClientTests {
     @Test("An earlier held call keeps its scripted failure when a later call finishes first")
     func heldCallsKeepArrivalOrder() async throws {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .success])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout(nil)), .success])
         let gate = await fake.hold(call: 0)
         defer { gate.open() }
 

@@ -38,12 +38,12 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .tooManyRequests(let retryAfter, let data)? = error else {
+        guard case .tooManyRequests(let response)? = error else {
             Issue.record("Expected tooManyRequests, got \(String(describing: error))")
             return
         }
-        #expect(retryAfter == 5)
-        #expect(data == body)
+        #expect(response.retryAfter == 5)
+        #expect(response.body == body)
         #expect(await client.attemptCount() == 1)
     }
 
@@ -80,11 +80,73 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .tooManyRequests(let retryAfter, _)? = error else {
+        guard case .tooManyRequests(let response)? = error else {
             Issue.record("Expected tooManyRequests, got \(String(describing: error))")
             return
         }
-        #expect(retryAfter == nil)
+        #expect(response.retryAfter == nil)
+    }
+
+    @Test("A 429 keeps its full response, including rate-limit headers")
+    func tooManyRequestsCarriesResponse() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let testId = "retry-429-response"
+        stub.setResponses(
+            [.status(429, headers: ["Retry-After": "5", "X-RateLimit-Remaining": "0"])],
+            for: testId
+        )
+        let client = makeClient(stub, retryPolicy: nil)
+
+        let error = await #expect(throws: NetworkError.self) {
+            try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+        }
+
+        let response = try #require(error?.response)
+        #expect(response.statusCode == 429)
+        #expect(response.header("x-ratelimit-remaining") == "0")
+    }
+
+    @Test("A 503 surfaces Retry-After and its full response")
+    func serviceUnavailableCarriesRetryAfterAndResponse() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let testId = "retry-503-surface"
+        let body = Data("maintenance".utf8)
+        stub.setResponses(
+            [.status(503, data: body, headers: ["Retry-After": "12", "X-Region": "eu"])],
+            for: testId
+        )
+        let client = makeClient(stub, retryPolicy: nil)
+
+        let error = await #expect(throws: NetworkError.self) {
+            try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+        }
+
+        guard case .serverError(let response)? = error else {
+            Issue.record("Expected serverError, got \(String(describing: error))")
+            return
+        }
+        #expect(response.statusCode == 503)
+        #expect(response.body == body)
+        #expect(response.retryAfter == 12)
+        #expect(response.header("x-region") == "eu")
+    }
+
+    @Test("Retry-After is ignored on statuses where it has no retry meaning")
+    func retryAfterIgnoredOutsideRateLimitStatuses() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let testId = "retry-500-ignored"
+        stub.setResponses([.status(500, headers: ["Retry-After": "12"])], for: testId)
+        let client = makeClient(stub, retryPolicy: nil)
+
+        let error = await #expect(throws: NetworkError.self) {
+            try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+        }
+
+        #expect(error?.retryAfter == nil)
+        #expect(error?.response?.header("Retry-After") == "12")
     }
 
     // MARK: - Opt-in policy
@@ -216,11 +278,11 @@ struct NetworkClientRetryTests {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
 
-        guard case .serverError(let code, _)? = error else {
+        guard case .serverError(let response)? = error else {
             Issue.record("Expected serverError, got \(String(describing: error))")
             return
         }
-        #expect(code == 500)
+        #expect(response.statusCode == 500)
         #expect(stub.requests.count == 3)
     }
 
@@ -247,6 +309,29 @@ struct NetworkClientRetryTests {
         let testId = "retry-after-wait"
         stub.setResponses(
             [.status(429, headers: ["Retry-After": "3600"]), .success(try JSONEncoder().encode(user))],
+            for: testId
+        )
+        let client = makeClient(
+            stub,
+            retryPolicy: .init(baseDelay: 0, maxDelay: 0, jitterRange: 1...1, maxRetryAfter: 0.3)
+        )
+
+        let start = ContinuousClock.now
+        let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+        let elapsed = start.duration(to: .now)
+
+        #expect(response == user)
+        #expect(elapsed >= .milliseconds(290))
+        #expect(elapsed < .seconds(30))
+    }
+
+    @Test("A 503 Retry-After is honored, bounded by maxRetryAfter")
+    func honorsServiceUnavailableRetryAfter() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let testId = "retry-after-503-wait"
+        stub.setResponses(
+            [.status(503, headers: ["Retry-After": "3600"]), .success(try JSONEncoder().encode(user))],
             for: testId
         )
         let client = makeClient(

@@ -42,21 +42,21 @@ struct MutationRetryPolicyTests {
 
     @Test("Default policy retries timeouts, missing connectivity, invalid responses, and 5xx errors")
     func defaultRetriesTransientErrors() {
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.timeout))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.timeout(nil)))
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.noInternetConnection))
         #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.invalidResponse))
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 500, data: nil)))
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 503, data: nil)))
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.tooManyRequests(retryAfter: 5, data: Data())))
-        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.tooManyRequests(retryAfter: nil, data: Data())))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(.status(500))))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(.status(503))))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.tooManyRequests(.status(429, retryAfter: 5))))
+        #expect(MutationRetryPolicy.defaultIsRetryable(NetworkError.tooManyRequests(.status(429))))
     }
 
     @Test("Default policy does not retry client errors, encoding failures, or unknown errors")
     func defaultDoesNotRetryNonTransientErrors() {
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.unauthorized()))
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.forbidden()))
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.notFound))
-        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.serverError(statusCode: 400, data: nil)))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.unauthorized(.status(401))))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.forbidden(.status(403))))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.notFound(.status(404))))
+        #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.clientError(.status(400))))
         #expect(!MutationRetryPolicy.defaultIsRetryable(NetworkError.invalidURL(url: "bad")))
         #expect(!MutationRetryPolicy.defaultIsRetryable(URLError(.badURL)))
     }
@@ -64,15 +64,15 @@ struct MutationRetryPolicyTests {
     @Test("defaultIsRetryable delegates to NetworkError.isTransient, the shared classification source of truth")
     func defaultIsRetryableDelegatesToNetworkErrorIsTransient() {
         let errors: [NetworkError] = [
-            .timeout,
+            .timeout(nil),
             .noInternetConnection,
             .invalidResponse,
-            .serverError(statusCode: 500, data: nil),
-            .serverError(statusCode: 400, data: nil),
-            .tooManyRequests(retryAfter: 5, data: Data()),
-            .unauthorized(),
-            .forbidden(),
-            .notFound,
+            .serverError(.status(500)),
+            .clientError(.status(400)),
+            .tooManyRequests(.status(429, retryAfter: 5)),
+            .unauthorized(.status(401)),
+            .forbidden(.status(403)),
+            .notFound(.status(404)),
             .invalidURL(url: "bad"),
         ]
         for error in errors {
@@ -92,7 +92,7 @@ struct MutationRetryPolicyTests {
     @Test("A 429 Retry-After longer than the backoff sets the delay")
     func retryAfterOverridesShorterBackoff() {
         let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1)
-        let error = NetworkError.tooManyRequests(retryAfter: 20, data: Data())
+        let error = NetworkError.tooManyRequests(.status(429, retryAfter: 20))
 
         #expect(policy.delay(forAttempt: 1, after: error) == 20)
     }
@@ -101,14 +101,28 @@ struct MutationRetryPolicyTests {
     func retryAfterIsClampedToMaxRetryAfter() {
         let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1, maxRetryAfter: 30)
 
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(retryAfter: 600, data: Data())) == 30)
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(retryAfter: 10, data: Data())) == 10)
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 600))) == 30)
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429, retryAfter: 10))) == 10)
+    }
+
+    @Test("A 503 Retry-After sets the delay like a 429 does")
+    func serviceUnavailableRetryAfterSetsDelay() {
+        let policy = MutationRetryPolicy(baseDelay: 1, maxDelay: 4, jitterRange: 1...1, maxRetryAfter: 30)
+
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503, retryAfter: 20)))
+                == 20
+        )
+        #expect(
+            policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503, retryAfter: 600)))
+                == 30
+        )
     }
 
     @Test("A Retry-After shorter than the backoff never shortens the backoff")
     func retryAfterNeverShortensBackoff() {
         let policy = MutationRetryPolicy(baseDelay: 8, maxDelay: 8, jitterRange: 1...1)
-        let error = NetworkError.tooManyRequests(retryAfter: 1, data: Data())
+        let error = NetworkError.tooManyRequests(.status(429, retryAfter: 1))
 
         #expect(policy.delay(forAttempt: 1, after: error) == 8)
     }
@@ -117,8 +131,8 @@ struct MutationRetryPolicyTests {
     func errorsWithoutRetryAfterUseBackoff() {
         let policy = MutationRetryPolicy(baseDelay: 2, maxDelay: 60, jitterRange: 1...1)
 
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(retryAfter: nil, data: Data())) == 2)
-        #expect(policy.delay(forAttempt: 1, after: NetworkError.serverError(statusCode: 503, data: nil)) == 2)
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.tooManyRequests(.status(429))) == 2)
+        #expect(policy.delay(forAttempt: 1, after: NetworkError.serverError(.status(503))) == 2)
         #expect(policy.delay(forAttempt: 2, after: URLError(.timedOut)) == 4)
     }
 

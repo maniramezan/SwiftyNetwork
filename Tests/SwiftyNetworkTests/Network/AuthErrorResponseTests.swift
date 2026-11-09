@@ -68,7 +68,7 @@ struct HTTPErrorResponseTests {
             headers: ["Set-Cookie": "session=SECRET-COOKIE", "X-Request-Id": "abc"],
             body: Data("SECRET-BODY".utf8)
         )
-        let error = NetworkError.unauthorized(response: response)
+        let error = NetworkError.unauthorized(response)
 
         for text in [
             response.description,
@@ -88,15 +88,21 @@ struct HTTPErrorResponseTests {
         )
     }
 
-    @Test("Only 401 and 403 errors carry a response")
-    func responseAccessorIsLimitedToAuthErrors() {
+    @Test("Every HTTP error exposes its response; transport errors return nil")
+    func responseAccessorCoversHTTPErrors() {
         let response = HTTPErrorResponse(statusCode: 401)
-        #expect(NetworkError.unauthorized(response: response).response == response)
-        #expect(NetworkError.forbidden(response: response).response == response)
-        #expect(NetworkError.unauthorized().response == nil)
-        #expect(NetworkError.forbidden().response == nil)
-        #expect(NetworkError.notFound.response == nil)
-        #expect(NetworkError.serverError(statusCode: 500, data: nil).response == nil)
+        #expect(NetworkError.unauthorized(response).response == response)
+        #expect(NetworkError.forbidden(response).response == response)
+        #expect(NetworkError.tooManyRequests(response).response == response)
+        #expect(NetworkError.clientError(response).response == response)
+        #expect(NetworkError.serverError(response).response == response)
+        #expect(NetworkError.unexpectedStatus(response).response == response)
+        #expect(NetworkError.notFound(response).response == response)
+        #expect(NetworkError.timeout(response).response == response)
+
+        #expect(NetworkError.timeout(nil).response == nil)
+        #expect(NetworkError.noInternetConnection.response == nil)
+        #expect(NetworkError.invalidResponse.response == nil)
     }
 }
 
@@ -117,10 +123,51 @@ struct NetworkClientAuthErrorResponseTests {
             _ = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
             Issue.record("Expected a 401 to throw")
         } catch NetworkError.unauthorized(let response) {
-            #expect(response?.statusCode == 401)
-            #expect(response?.wwwAuthenticate == challenge)
-            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
+            #expect(response.statusCode == 401)
+            #expect(response.wwwAuthenticate == challenge)
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
         }
+    }
+
+    @Test("A 404 and a 408 keep their status, headers, and body")
+    func notFoundAndTimeoutCarryResponse() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let client = NetworkClient(configuration: NetworkClientConfiguration(session: stub.session))
+
+        for status in [404, 408] {
+            let testId = "auth-response-\(status)"
+            stub.setResponses(
+                [.status(status, data: errorBody("missing_\(status)"), headers: ["X-Test": "1"])],
+                for: testId
+            )
+
+            let error = await #expect(throws: NetworkError.self) {
+                try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+            }
+
+            let response = try #require(error?.response)
+            #expect(response.statusCode == status)
+            #expect(response.header("x-test") == "1")
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "missing_\(status)"))
+            switch status {
+            case 404:
+                guard case .notFound? = error else {
+                    Issue.record("Expected notFound, got \(String(describing: error))")
+                    return
+                }
+            default:
+                guard case .timeout? = error else {
+                    Issue.record("Expected timeout, got \(String(describing: error))")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test("A transport timeout has no response")
+    func transportTimeoutHasNoResponse() {
+        #expect(NetworkError.mapURLError(URLError(.timedOut)).response == nil)
     }
 
     @Test("After a refresh and retry, the error carries the final 401")
@@ -153,7 +200,7 @@ struct NetworkClientAuthErrorResponseTests {
             _ = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
             Issue.record("Expected a 401 to throw")
         } catch NetworkError.unauthorized(let response) {
-            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "not_authenticated"))
         }
         #expect(await provider.refreshCallCount == 1)
     }
@@ -186,7 +233,7 @@ struct NetworkClientAuthErrorResponseTests {
             _ = try await client.request(BearerEndpoint(testId: testId), responseType: TestUser.self)
             Issue.record("Expected a 401 to throw")
         } catch NetworkError.unauthorized(let response) {
-            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "authentication_failed"))
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "authentication_failed"))
         }
         #expect(await provider.inspectedResponses.isEmpty)
         #expect(await provider.refreshCallCount == 0)
@@ -239,9 +286,9 @@ struct NetworkClientAuthErrorResponseTests {
             _ = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
             Issue.record("Expected a 403 to throw")
         } catch NetworkError.forbidden(let response) {
-            #expect(response?.statusCode == 403)
-            #expect(response?.wwwAuthenticate == nil)
-            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "registration_required"))
+            #expect(response.statusCode == 403)
+            #expect(response.wwwAuthenticate == nil)
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "registration_required"))
         }
         #expect(await provider.refreshCallCount == 0)
         #expect(stub.requests.count == 1)
@@ -274,7 +321,7 @@ struct NetworkClientAuthErrorResponseTests {
             _ = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
             Issue.record("Expected a 401 to throw")
         } catch NetworkError.unauthorized(let response) {
-            #expect(try response?.decodeBody(APIErrorBody.self) == APIErrorBody(code: "unrelated"))
+            #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "unrelated"))
         }
         #expect(await provider.refreshCallCount == 0)
         #expect(await provider.inspectedResponses.count == 1)
@@ -316,13 +363,15 @@ struct NetworkClientAuthErrorResponseTests {
 
 @Suite("RemoteDataCache auth error responses")
 struct RemoteDataCacheAuthErrorResponseTests {
-    @Test("401 and 403 from the byte cache carry the response")
+    @Test("401, 403, 404 and 408 from the byte cache carry the response")
     func cacheErrorsCarryResponse() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
         let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 
-        for (status, code) in [(401, "authentication_failed"), (403, "registration_required")] {
+        for (status, code) in [
+            (401, "authentication_failed"), (403, "registration_required"), (404, "missing"), (408, "slow"),
+        ] {
             let testId = "cache-auth-\(status)"
             stub.setResponses([.status(status, data: errorBody(code), headers: ["X-Test": "1"])], for: testId)
             let url = try #require(URL(string: "https://api.test.com/img?test-id=\(testId)"))
@@ -335,6 +384,28 @@ struct RemoteDataCacheAuthErrorResponseTests {
                 #expect(response.statusCode == status)
                 #expect(response.header("x-test") == "1")
                 #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: code))
+            }
+        }
+    }
+
+    @Test("429 and 503 from the byte cache carry the response and Retry-After")
+    func cacheRateLimitErrorsCarryResponseAndRetryAfter() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
+
+        for status in [429, 503] {
+            let testId = "cache-rate-limit-\(status)"
+            stub.setResponses([.status(status, headers: ["Retry-After": "9", "X-Test": "1"])], for: testId)
+            let url = try #require(URL(string: "https://api.test.com/img?test-id=\(testId)"))
+
+            do {
+                _ = try await cache.data(for: url)
+                Issue.record("Expected status \(status) to throw")
+            } catch let error as NetworkError {
+                #expect(error.retryAfter == 9)
+                #expect(error.response?.statusCode == status)
+                #expect(error.response?.header("x-test") == "1")
             }
         }
     }

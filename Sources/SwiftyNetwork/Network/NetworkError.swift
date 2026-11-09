@@ -30,48 +30,57 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The response body was invalid for the expected successful response shape.
     case invalidData
 
-    /// The server returned an unhandled non-2xx HTTP status code.
-    ///
-    /// - Parameters:
-    ///   - statusCode: The HTTP status code returned by the server.
-    ///   - data: The response body, if one was returned.
-    case serverError(statusCode: Int, data: Data?)
-
     /// The server returned `429 Too Many Requests`.
     ///
-    /// The `Retry-After` response header is parsed into `retryAfter` in
-    /// seconds, from either its delta-seconds or HTTP-date form. It is `nil`
-    /// when the header is absent or malformed. A `429` is never reported as
-    /// ``serverError(statusCode:data:)``.
+    /// ``HTTPErrorResponse/retryAfter`` carries the parsed `Retry-After` header, and the
+    /// response headers carry rate-limit details such as `X-RateLimit-Remaining`.
     ///
-    /// - Parameters:
-    ///   - retryAfter: How long the server asked the client to wait, in seconds.
-    ///   - data: The response body (e.g. a problem+json document). Empty when the server sent no body.
-    case tooManyRequests(retryAfter: TimeInterval?, data: Data)
+    /// - Parameter response: The rejected response.
+    case tooManyRequests(HTTPErrorResponse)
 
     /// The server returned `401 Unauthorized`, and authorization could not be refreshed.
     ///
-    /// Matching `.unauthorized` without a binding keeps working. Read the server's
-    /// status, headers, and body through ``response``.
-    ///
-    /// - Parameter response: The rejected response, or `nil` when the error was not
-    ///   produced from a live response (for example in a test double).
-    case unauthorized(response: HTTPErrorResponse? = nil)
+    /// - Parameter response: The rejected response.
+    case unauthorized(HTTPErrorResponse)
 
     /// The server returned `403 Forbidden`.
     ///
-    /// ``NetworkClient`` never refreshes authorization for a `403`. Read the server's
-    /// status, headers, and body through ``response``.
+    /// ``NetworkClient`` never refreshes authorization for a `403`.
     ///
-    /// - Parameter response: The rejected response, or `nil` when the error was not
-    ///   produced from a live response (for example in a test double).
-    case forbidden(response: HTTPErrorResponse? = nil)
+    /// - Parameter response: The rejected response.
+    case forbidden(HTTPErrorResponse)
 
     /// The server returned `404 Not Found`.
-    case notFound
+    ///
+    /// - Parameter response: The rejected response.
+    case notFound(HTTPErrorResponse)
+
+    /// The server returned a `4xx` status that has no more specific case
+    /// (anything other than `401`, `403`, `404`, `408`, and `429`).
+    ///
+    /// The request itself was rejected; retrying it unchanged will not help.
+    ///
+    /// - Parameter response: The rejected response.
+    case clientError(HTTPErrorResponse)
+
+    /// The server returned a `5xx` status.
+    ///
+    /// For a `503`, ``HTTPErrorResponse/retryAfter`` carries the parsed `Retry-After` header.
+    ///
+    /// - Parameter response: The failed response.
+    case serverError(HTTPErrorResponse)
+
+    /// The server returned a non-2xx status outside `4xx` and `5xx`, such as an
+    /// unfollowed `3xx` redirect.
+    ///
+    /// - Parameter response: The unexpected response.
+    case unexpectedStatus(HTTPErrorResponse)
 
     /// The request timed out at the transport layer or the server returned `408 Request Timeout`.
-    case timeout
+    ///
+    /// - Parameter response: The `408` response, or `nil` when the timeout happened at the
+    ///   transport layer, where there is no response.
+    case timeout(HTTPErrorResponse?)
 
     /// The transport layer reported that no internet connection is available.
     case noInternetConnection
@@ -97,8 +106,12 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "The server response was invalid or malformed."
         case .invalidData:
             return "The response data was invalid or corrupted."
-        case .serverError(let statusCode, _):
-            return "Server error with status code \(statusCode)."
+        case .clientError(let response):
+            return "The request was rejected with status code \(response.statusCode)."
+        case .serverError(let response):
+            return "Server error with status code \(response.statusCode)."
+        case .unexpectedStatus(let response):
+            return "Unexpected response status code \(response.statusCode)."
         case .tooManyRequests:
             return "Too many requests. Please try again later."
         case .unauthorized:
@@ -122,45 +135,42 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         }
     }
 
-    /// The rejected HTTP response for ``unauthorized(response:)`` and ``forbidden(response:)``.
+    /// The HTTP response behind this error, with its status code, headers, and body.
     ///
-    /// Use it to tell apart failures that share a status code, for example by decoding
-    /// an API error `code` from ``HTTPErrorResponse/body`` or reading
-    /// ``HTTPErrorResponse/wwwAuthenticate``.
+    /// Available for every case that comes from an HTTP status: ``unauthorized(_:)``,
+    /// ``forbidden(_:)``, ``notFound(_:)``, ``timeout(_:)`` (for a `408`),
+    /// ``tooManyRequests(_:)``, ``clientError(_:)``, ``serverError(_:)``, and
+    /// ``unexpectedStatus(_:)``. Use it to tell apart failures that share a status code, for
+    /// example by decoding an API error `code` from ``HTTPErrorResponse/body``, reading
+    /// ``HTTPErrorResponse/wwwAuthenticate``, or reading rate-limit headers with
+    /// ``HTTPErrorResponse/header(_:)``.
     ///
-    /// - Returns: The response, or `nil` for other cases and for errors built without one.
+    /// - Returns: The response, or `nil` for cases that did not come from an HTTP status.
     public var response: HTTPErrorResponse? {
         switch self {
-        case .unauthorized(let response), .forbidden(let response):
+        case .unauthorized(let response), .forbidden(let response), .notFound(let response),
+            .tooManyRequests(let response), .clientError(let response), .serverError(let response),
+            .unexpectedStatus(let response):
             return response
-        default:
+        case .timeout(let response):
+            return response
+        case .invalidURL, .invalidResponse, .invalidData, .noInternetConnection, .decodingFailed,
+            .encodingFailed, .authorizationRefreshFailed, .underlying:
             return nil
         }
     }
 
-    /// The response body for ``serverError(statusCode:data:)`` and ``tooManyRequests(retryAfter:data:)``, if available.
-    ///
-    /// `nil` for every other case.
-    public var responseBody: Data? {
-        switch self {
-        case .serverError(_, let data):
-            return data
-        case .tooManyRequests(_, let data):
-            return data
-        default:
-            return nil
-        }
+    /// The HTTP status code behind this error, or `nil` when it did not come from an HTTP status.
+    public var statusCode: Int? {
+        response?.statusCode
     }
 
     /// How long the server asked the client to wait before retrying, in seconds.
     ///
-    /// Non-`nil` only for ``tooManyRequests(retryAfter:data:)`` responses that
+    /// Equivalent to `response?.retryAfter`: non-`nil` only for a `429` or `503` that
     /// carried a valid `Retry-After` header.
     public var retryAfter: TimeInterval? {
-        if case .tooManyRequests(let retryAfter, _) = self {
-            return retryAfter
-        }
-        return nil
+        response?.retryAfter
     }
 
     /// Maps a transport-level `URLError` to the corresponding ``NetworkError``.
@@ -181,7 +191,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
             return .noInternetConnection
         case .timedOut:
-            return .timeout
+            return .timeout(nil)
         default:
             return .underlying(error)
         }
@@ -204,8 +214,12 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case invalidResponse
     /// The response body was invalid for the expected shape.
     case invalidData
-    /// A non-2xx HTTP status the client doesn't have a more specific case for.
+    /// A `4xx` status without a more specific classification.
+    case clientError(statusCode: Int)
+    /// A `5xx` status.
     case serverError(statusCode: Int)
+    /// A non-2xx status outside `4xx` and `5xx`.
+    case unexpectedStatus(statusCode: Int)
     /// The server returned `429 Too Many Requests`.
     case tooManyRequests
     /// The server returned `401` and authorization could not be refreshed.
@@ -237,12 +251,10 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     /// encoding/decoding failures, since a retry can't change their outcome.
     public var isTransient: Bool {
         switch self {
-        case .timeout, .noConnection, .invalidResponse, .tooManyRequests:
+        case .timeout, .noConnection, .invalidResponse, .tooManyRequests, .serverError:
             return true
-        case .serverError(let statusCode):
-            return statusCode >= 500
-        case .invalidURL, .invalidData, .unauthorized, .forbidden, .notFound, .decodingFailed, .encodingFailed,
-            .authorizationRefreshFailed, .underlying:
+        case .invalidURL, .invalidData, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
+            .decodingFailed, .encodingFailed, .authorizationRefreshFailed, .underlying:
             return false
         }
     }
@@ -265,8 +277,12 @@ extension NetworkError {
             return .invalidResponse
         case .invalidData:
             return .invalidData
-        case .serverError(let statusCode, _):
-            return .serverError(statusCode: statusCode)
+        case .clientError(let response):
+            return .clientError(statusCode: response.statusCode)
+        case .serverError(let response):
+            return .serverError(statusCode: response.statusCode)
+        case .unexpectedStatus(let response):
+            return .unexpectedStatus(statusCode: response.statusCode)
         case .tooManyRequests:
             return .tooManyRequests
         case .unauthorized:

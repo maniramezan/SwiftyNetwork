@@ -12,7 +12,7 @@ SwiftyNetwork provides:
 - **Repository coordination** with ``GenericRepository`` and ``CachePolicy``.
 - **Pluggable authentication** via ``AuthorizationProvider`` and ``OAuthAuthorizationProvider``.
 - **Optional SSL pinning** via ``SSLPinningConfiguration`` for controlled hosts.
-- **Opt-in request retries** with ``NetworkRetryPolicy``: idempotent requests retry on `429` (honoring `Retry-After`), 5xx, timeouts and lost connectivity, with jittered, capped backoff.
+- **Opt-in request retries** with ``NetworkRetryPolicy``: idempotent requests retry on `429` and 5xx (honoring `Retry-After` on `429` and `503`), timeouts and lost connectivity, with jittered, capped backoff.
 - **Fire-and-forget mutations** with ``MutationQueue``, including background retry, coalescing, and pluggable persistence via ``MutationStore``.
 - **Single-flight remote data caching** with ``RemoteDataCache`` -- deduplicates concurrent fetches for the same key, composable with any ``Cache`` for app-configurable memory/disk layering.
 - **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with shared ``NetworkError/classification`` for retry policies and telemetry alike.

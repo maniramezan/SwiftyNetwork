@@ -60,7 +60,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///
     /// `nil` by default, in which case ``NetworkClient`` never retries a
     /// transient network, `429` or 5xx failure. When set, `GET`, `HEAD`, `PUT`
-    /// and `DELETE` requests are retried on `429` (honoring `Retry-After`), 5xx,
+    /// and `DELETE` requests are retried on `429` and 5xx (honoring `Retry-After` on `429` and `503`),
     /// timeouts and lost connectivity, with jittered exponential backoff.
     /// `POST` and `PATCH` are never retried. See ``NetworkRetryPolicy``.
     public var retryPolicy: NetworkRetryPolicy?
