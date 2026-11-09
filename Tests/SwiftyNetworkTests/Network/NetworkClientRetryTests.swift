@@ -387,8 +387,8 @@ struct NetworkClientRetryTests {
             await Task.yield()
         }
         // Give the client time to reach the Retry-After wait. If the cancel lands while the
-        // first attempt is still on the wire, URLSession reports it as a cancelled URLError
-        // instead; both outcomes must end the request promptly rather than waiting 30s.
+        // first attempt is still on the wire, the client translates URLSession's cancelled
+        // URLError, so either way the caller sees CancellationError promptly.
         try await Task.sleep(for: .milliseconds(200))
         let start = ContinuousClock.now
         task.cancel()
@@ -400,13 +400,7 @@ struct NetworkClientRetryTests {
         case .success:
             Issue.record("Expected the cancelled request to fail")
         case .failure(let error):
-            let isCancellation =
-                error is CancellationError
-                || ((error as? NetworkError).flatMap { error -> URLError? in
-                    guard case .underlying(let underlying) = error else { return nil }
-                    return underlying as? URLError
-                })?.code == .cancelled
-            #expect(isCancellation, "Unexpected error: \(error)")
+            #expect(error is CancellationError, "Unexpected error: \(error)")
         }
     }
 

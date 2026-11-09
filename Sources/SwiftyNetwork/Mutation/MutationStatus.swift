@@ -142,7 +142,7 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
             return .rejected
         case .serverError:
             return .serverError
-        case .invalidURL, .invalidResponse, .invalidData, .unexpectedStatus, .decodingFailed, .encodingFailed:
+        case .invalidURL, .invalidResponse, .unexpectedStatus, .decodingFailed, .encodingFailed:
             return .other
         case .underlying(let underlying):
             return underlying is CancellationError ? .cancelled : .other

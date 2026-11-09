@@ -58,10 +58,11 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
     ///   isn't an HTTP response; for a non-2xx status, the same mapping as
     ///   ``NetworkClient``: ``NetworkError/unauthorized(_:)`` (401),
     ///   ``NetworkError/forbidden(_:)`` (403), ``NetworkError/notFound(_:)`` (404),
-    ///   ``NetworkError/timeout(_:)`` (408), otherwise
-    ///   ``NetworkError/serverError(_:)``; ``NetworkError/timeout(_:)``,
+    ///   ``NetworkError/timeout(_:)`` (408), ``NetworkError/tooManyRequests(_:)`` (429),
+    ///   ``NetworkError/clientError(_:)`` (other 4xx), ``NetworkError/serverError(_:)`` (5xx),
+    ///   or ``NetworkError/unexpectedStatus(_:)``; ``NetworkError/timeout(_:)``,
     ///   ``NetworkError/noInternetConnection``, or ``NetworkError/underlying(_:)``
-    ///   for transport failures.
+    ///   for transport failures; `CancellationError` if the fetch was cancelled.
     public func data(for url: URL) async throws -> Data {
         let key = CacheKey(url: url)
         return try await cache.value(forKey: key) { [session] in
@@ -94,10 +95,8 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
         let response: URLResponse
         do {
             (data, response) = try await session.data(from: url)
-        } catch let error as URLError {
-            throw NetworkError.mapURLError(error)
         } catch {
-            throw NetworkError.underlying(AnySendableError(error))
+            throw NetworkError.transportError(error)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {

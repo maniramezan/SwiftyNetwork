@@ -271,8 +271,10 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
   `HTTPErrorResponse` parses `Retry-After` for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
-- `NetworkError.mapURLError` is the single transport-error mapping; connectivity-loss codes map to
-  `.noInternetConnection` (transient), other `URLError`s are kept intact in `.underlying`
+- `NetworkError.transportError` is the single transport-error mapping for anything `URLSession` throws:
+  task cancellation becomes `CancellationError` (a `URLError.cancelled` while the task is not cancelled,
+  such as a rejected TLS pin, stays in `.underlying`); connectivity-loss codes map to
+  `.noInternetConnection` (transient); other `URLError`s are kept intact in `.underlying`
 - `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites.
   The public knob is `LogLevel.current`; never set the level from a client or configuration
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder

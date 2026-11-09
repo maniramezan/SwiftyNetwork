@@ -27,9 +27,6 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The server returned a response that was not an `HTTPURLResponse`.
     case invalidResponse
 
-    /// The response body was invalid for the expected successful response shape.
-    case invalidData
-
     /// The server returned `429 Too Many Requests`.
     ///
     /// ``HTTPErrorResponse/retryAfter`` carries the parsed `Retry-After` header, and the
@@ -107,8 +104,6 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "Invalid URL: \(url)"
         case .invalidResponse:
             return "The server response was invalid or malformed."
-        case .invalidData:
-            return "The response data was invalid or corrupted."
         case .clientError(let response):
             return "The request was rejected with status code \(response.statusCode)."
         case .serverError(let response):
@@ -157,7 +152,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return response
         case .timeout(let response):
             return response
-        case .invalidURL, .invalidResponse, .invalidData, .noInternetConnection, .decodingFailed,
+        case .invalidURL, .invalidResponse, .noInternetConnection, .decodingFailed,
             .encodingFailed, .authorizationRefreshFailed, .underlying:
             return nil
         }
@@ -187,6 +182,11 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// transient and retried by ``MutationQueue``. Other codes keep the original
     /// `URLError` in ``underlying(_:)`` so callers can still inspect `code`.
     ///
+    /// Callers translate `URLError.cancelled` into `CancellationError` first
+    /// (see `transportError(_:)`) when the calling task was cancelled; a
+    /// `.cancelled` that reaches this function, such as a rejected TLS pin,
+    /// stays in ``underlying(_:)``.
+    ///
     /// - Parameter error: The transport-level error to map.
     /// - Returns: The corresponding ``NetworkError`` case.
     static func mapURLError(_ error: URLError) -> NetworkError {
@@ -198,6 +198,31 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         default:
             return .underlying(error)
         }
+    }
+}
+
+extension NetworkError {
+    /// Maps any error thrown by `URLSession` to what SwiftyNetwork rethrows.
+    ///
+    /// Task cancellation surfaces as `CancellationError`, the same error a
+    /// cancelled retry or auth-refresh wait throws, so callers have one shape
+    /// to check. `URLSession` reports a cancelled task as `URLError.cancelled`,
+    /// but so does a rejected TLS pin; only the former is translated, by
+    /// checking `Task.isCancelled`.
+    ///
+    /// - Parameter error: The error thrown by `URLSession`.
+    /// - Returns: `CancellationError` for task cancellation, otherwise a ``NetworkError``.
+    static func transportError(_ error: any Error) -> any Error {
+        if error is CancellationError {
+            return error
+        }
+        guard let urlError = error as? URLError else {
+            return NetworkError.underlying(AnySendableError(error))
+        }
+        if urlError.code == .cancelled, Task.isCancelled {
+            return CancellationError()
+        }
+        return mapURLError(urlError)
     }
 }
 
@@ -215,8 +240,6 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case invalidURL
     /// The response was not a well-formed HTTP response.
     case invalidResponse
-    /// The response body was invalid for the expected shape.
-    case invalidData
     /// A `4xx` status without a more specific classification.
     case clientError(statusCode: Int)
     /// A `5xx` status.
@@ -246,17 +269,17 @@ public enum NetworkErrorClassification: Sendable, Equatable {
 
     /// Whether an error of this classification is generally worth retrying.
     ///
-    /// `true` for timeouts, missing connectivity, malformed responses, `429`
-    /// rate limiting, and 5xx server errors -- conditions a retry can
-    /// plausibly resolve. `false` for everything else, including other 4xx
-    /// client errors (other than what ``NetworkClient`` already handles via
-    /// auth refresh) and
-    /// encoding/decoding failures, since a retry can't change their outcome.
+    /// `true` for timeouts, missing connectivity, `429` rate limiting, and 5xx
+    /// server errors -- conditions a retry can plausibly resolve. `false` for
+    /// everything else: 4xx client errors (other than what ``NetworkClient``
+    /// already handles via auth refresh), a response that is not HTTP (usually
+    /// a broken server or proxy), and encoding/decoding failures, since a retry
+    /// can't change their outcome.
     public var isTransient: Bool {
         switch self {
-        case .timeout, .noConnection, .invalidResponse, .tooManyRequests, .serverError:
+        case .timeout, .noConnection, .tooManyRequests, .serverError:
             return true
-        case .invalidURL, .invalidData, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
+        case .invalidURL, .invalidResponse, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
             .decodingFailed, .encodingFailed, .authorizationRefreshFailed, .underlying:
             return false
         }
@@ -278,8 +301,6 @@ extension NetworkError {
             return .invalidURL
         case .invalidResponse:
             return .invalidResponse
-        case .invalidData:
-            return .invalidData
         case .clientError(let response):
             return .clientError(statusCode: response.statusCode)
         case .serverError(let response):
