@@ -113,7 +113,7 @@ struct MockAPIClientTests {
         try await client.stub(.get, "/users/1", returning: user)
         let repository = GenericRepository<TestUser>(
             client: client,
-            localDataSource: CacheBasedLocalDataSource(cache: InMemoryCache<TestUser>())
+            cache: InMemoryCache<TestUser>()
         )
 
         let key = CacheKey("user:1")

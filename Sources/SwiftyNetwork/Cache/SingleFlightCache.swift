@@ -19,7 +19,7 @@ import Foundation
 ///
 /// `SingleFlightCache` adds only deduplication -- size limits, eviction, and
 /// persistence are entirely up to whatever ``Cache`` you wrap (e.g.
-/// `InMemoryCache(maxSize:)` for LRU eviction, or your own `PersistentCache`).
+/// `InMemoryCache(maxSize:)` for LRU eviction, or your own disk cache).
 ///
 /// Example:
 /// ```swift
@@ -54,16 +54,16 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     // MARK: - Cache API
 
-    /// Reads the stored value after preceding storage operations finish.
-    public func value(forKey key: CacheKey) async -> Value? {
-        await operations.run { await self.wrapped.value(forKey: key) }
+    /// Reads the stored entry after preceding storage operations finish.
+    public func entry(forKey key: CacheKey) async -> CacheEntry<Value>? {
+        await operations.run { await self.wrapped.entry(forKey: key) }
     }
 
-    /// Invalidates a pending fetch and stores an explicit value.
-    public func setValue(_ value: Value, forKey key: CacheKey) async {
+    /// Invalidates a pending fetch and stores an explicit entry.
+    public func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async {
         await operations.run {
             await self.invalidate(key)
-            await self.wrapped.setValue(value, forKey: key)
+            await self.wrapped.setEntry(entry, forKey: key)
         }
     }
 
@@ -83,11 +83,6 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
         }
     }
 
-    /// Reads the timestamp after preceding storage operations finish.
-    public func timestamp(forKey key: CacheKey) async -> Date? {
-        await operations.run { await self.wrapped.timestamp(forKey: key) }
-    }
-
     private func invalidate(_ key: CacheKey) {
         inFlightFetches.removeValue(forKey: key)?.task.cancel()
     }
@@ -104,7 +99,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
     /// Concurrent calls for the same `key` that arrive while a fetch is
     /// already in flight await that same fetch rather than starting their
     /// own -- the defining single-flight guarantee. A successful fetch is
-    /// stored via ``setValue(_:forKey:)`` before being returned; a failed
+    /// stored in the wrapped cache before being returned; a failed
     /// fetch is not cached, so the next call retries it.
     ///
     /// - Parameters:
@@ -130,7 +125,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     // Called only while holding operations, including across wrapped-cache awaits.
     private func lookup(_ key: CacheKey, fetch: @escaping @Sendable () async throws -> Value) async -> Lookup {
-        if let cached = await wrapped.value(forKey: key) { return .cached(cached) }
+        if let cached = await wrapped.entry(forKey: key) { return .cached(cached.value) }
         if let flight = inFlightFetches[key] { return .flight(flight) }
         let id = UUID()
         let task = Task<Value, any Error> {
@@ -150,7 +145,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     private func commit(_ value: Value, key: CacheKey, id: UUID) async throws -> Value {
         guard inFlightFetches[key]?.id == id else { throw CancellationError() }
-        await wrapped.setValue(value, forKey: key)
+        await wrapped.setEntry(CacheEntry(value), forKey: key)
         clearFlight(key, id: id)
         return value
     }

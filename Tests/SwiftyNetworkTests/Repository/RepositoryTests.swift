@@ -3,45 +3,26 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Test("CacheBasedLocalDataSource reads and writes values")
-func testCacheBasedLocalDataSourceReadWrite() async {
-    let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
-    let key = CacheKey("local-key")
-    let user = TestUser(id: "1", name: "Sam", email: "sam@example.com")
+@Test("GenericRepository accepts any Cache, including a LayeredCache")
+func testRepositoryAcceptsLayeredCache() async throws {
+    let memory = InMemoryCache<TestUser>()
+    let layered = LayeredCache(memoryCache: memory)
+    let networkUser = TestUser(id: "1", name: "Sam", email: "sam@example.com")
+    let network = MockNetworkDataSource(result: .success(networkUser))
+    let repository = GenericRepository(client: network, cache: layered)
+    let key = CacheKey("layered-repo")
 
-    await local.write(user, for: key)
-    let loaded = await local.read(for: key)
+    let fetched = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .returnCacheElseLoad)
 
-    #expect(loaded == user)
-    #expect(await local.timestamp(for: key) != nil)
-}
-
-@Test("CacheBasedLocalDataSource removes individual and all values")
-func testCacheBasedLocalDataSourceRemove() async {
-    let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
-    let key1 = CacheKey("remove-1")
-    let key2 = CacheKey("remove-2")
-    let user = TestUser(id: "1", name: "Sam", email: "sam@example.com")
-
-    await local.write(user, for: key1)
-    await local.write(user, for: key2)
-
-    await local.remove(for: key1)
-    #expect(await local.read(for: key1) == nil)
-    #expect(await local.read(for: key2) == user)
-
-    await local.removeAll()
-    #expect(await local.read(for: key2) == nil)
+    #expect(fetched == networkUser)
+    #expect(await memory.value(forKey: key) == networkUser)
 }
 
 @Test("GenericRepository returns cached data when available")
 func testRepositoryReturnsCachedData() async throws {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let network = MockNetworkDataSource(result: .success(TestUser(id: "2", name: "Net", email: "net@example.com")))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("repo-cache")
     let cached = TestUser(id: "cached", name: "Cache", email: "cache@example.com")
     await cache.setValue(cached, forKey: key)
@@ -56,10 +37,9 @@ func testRepositoryReturnsCachedData() async throws {
 @Test("GenericRepository loads from network and caches on miss")
 func testRepositoryLoadsFromNetworkOnMiss() async throws {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let networkUser = TestUser(id: "3", name: "Remote", email: "remote@example.com")
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("repo-miss")
 
     let fetched = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .returnCacheElseLoad)
@@ -73,12 +53,11 @@ func testRepositoryLoadsFromNetworkOnMiss() async throws {
 @Test("GenericRepository reloadIgnoringCache always hits network")
 func testRepositoryReloadIgnoringCache() async throws {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let cached = TestUser(id: "cached", name: "Cache", email: "cache@example.com")
     let networkUser = TestUser(id: "4", name: "Fresh", email: "fresh@example.com")
     await cache.setValue(cached, forKey: CacheKey("reload"))
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("reload")
 
     let fetched = try await repository.fetch(using: TestEndpoint(), cacheKey: key, policy: .reloadIgnoringCache)
@@ -92,13 +71,12 @@ func testRepositoryReloadIgnoringCache() async throws {
 @Test("GenericRepository returns cache when not expired")
 func testRepositoryReturnsCacheIfNotExpired() async throws {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let user = TestUser(id: "5", name: "FreshCache", email: "freshcache@example.com")
     let key = CacheKey("not-expired")
     let now = Date()
-    await cache.setValue(user, forKey: key, timestamp: now)
+    await cache.setEntry(CacheEntry(user, timestamp: now), forKey: key)
     let network = MockNetworkDataSource(result: .success(TestUser(id: "net", name: "Net", email: "net@example.com")))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
 
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
@@ -114,13 +92,12 @@ func testRepositoryReturnsCacheIfNotExpired() async throws {
 @Test("GenericRepository refreshes cache when expired")
 func testRepositoryRefreshesWhenExpired() async throws {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let expired = TestUser(id: "expired", name: "Old", email: "old@example.com")
     let key = CacheKey("expired")
-    await cache.setValue(expired, forKey: key, timestamp: Date(timeIntervalSince1970: 0))
+    await cache.setEntry(CacheEntry(expired, timestamp: Date(timeIntervalSince1970: 0)), forKey: key)
     let networkUser = TestUser(id: "6", name: "New", email: "new@example.com")
     let network = MockNetworkDataSource(result: .success(networkUser))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
 
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
@@ -137,9 +114,8 @@ func testRepositoryRefreshesWhenExpired() async throws {
 @Test("GenericRepository surfaces network errors")
 func testRepositoryPropagatesNetworkError() async {
     let cache = InMemoryCache<TestUser>()
-    let local = CacheBasedLocalDataSource(cache: AnyCache(cache))
     let network = MockNetworkDataSource(result: .failure(TestRepositoryError.networkFailure))
-    let repository = GenericRepository(client: network, localDataSource: local)
+    let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("error")
 
     await #expect {

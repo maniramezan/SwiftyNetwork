@@ -114,14 +114,15 @@ struct SingleFlightCacheTests {
         #expect(await fetchCount.value == 2)
     }
 
-    @Test("timestamp(forKey:) passes through to the wrapped cache")
-    func passThroughTimestamp() async {
+    @Test("entry(forKey:) passes through to the wrapped cache with its timestamp")
+    func passThroughEntry() async {
         let cache = SingleFlightCache(InMemoryCache<String>())
-        #expect(await cache.timestamp(forKey: CacheKey("k")) == nil)
+        #expect(await cache.entry(forKey: CacheKey("k")) == nil)
 
-        await cache.setValue("hello", forKey: CacheKey("k"))
+        let entry = CacheEntry("hello", timestamp: Date(timeIntervalSince1970: 42))
+        await cache.setEntry(entry, forKey: CacheKey("k"))
 
-        #expect(await cache.timestamp(forKey: CacheKey("k")) != nil)
+        #expect(await cache.entry(forKey: CacheKey("k")) == entry)
     }
 
     @Test("removeValue cancels an in-flight fetch for that key")
