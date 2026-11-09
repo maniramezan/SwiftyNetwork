@@ -312,6 +312,16 @@ struct RedirectPolicyTests {
 
     @Test("The default configuration strips credentials across origins")
     func defaultConfigurationPolicy() {
-        #expect(NetworkClientConfiguration().redirectPolicy.behavior == .stripCredentialsAcrossOrigins)
+        #expect(NetworkClientConfiguration().redirectPolicy == .stripCredentialsAcrossOrigins)
+    }
+
+    @Test("RedirectPolicy conforms to Equatable")
+    func redirectPolicyEquatable() {
+        #expect(RedirectPolicy.stripCredentialsAcrossOrigins == .stripCredentialsAcrossOrigins)
+        #expect(RedirectPolicy.followAll == .followAll)
+        #expect(RedirectPolicy.never == .never)
+        #expect(RedirectPolicy.stripCredentialsAcrossOrigins != .followAll)
+        #expect(RedirectPolicy.stripCredentialsAcrossOrigins != .never)
+        #expect(RedirectPolicy.followAll != .never)
     }
 }

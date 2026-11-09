@@ -128,6 +128,30 @@ extension APIClient {
         try await response(for: endpoint, body: body, responseType: responseType).value
     }
 
+    /// Performs a request that is expected to return no response body, returning its HTTP response.
+    ///
+    /// - Parameter endpoint: The endpoint describing the request.
+    /// - Returns: The HTTP response: status code, headers, and empty body.
+    /// - Throws: The client's transport, validation, or decoding error.
+    public func response(for endpoint: any NetworkEndpoint) async throws -> HTTPResponse {
+        try await response(for: endpoint, responseType: EmptyResponse.self).response
+    }
+
+    /// Performs a request with an `Encodable` JSON body that is expected to return no response body,
+    /// returning its HTTP response.
+    ///
+    /// - Parameters:
+    ///   - endpoint: The endpoint describing the request.
+    ///   - body: The value to encode as the request body.
+    /// - Returns: The HTTP response: status code, headers, and empty body.
+    /// - Throws: The client's encoding, transport, validation, or decoding error.
+    public func response<Body: Encodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
+        body: Body
+    ) async throws -> HTTPResponse {
+        try await response(for: endpoint, body: body, responseType: EmptyResponse.self).response
+    }
+
     /// Performs a request that is expected to return no response body.
     ///
     /// - Parameter endpoint: The endpoint describing the request.

@@ -6,12 +6,15 @@ import Testing
 @Suite("MutationKey Tests")
 struct MutationKeyTests {
 
-    @Test("Explicit init and string literal init produce equal keys")
+    @Test("Explicit init, rawValue init and string literal init produce equal keys")
     func explicitAndLiteralInitAreEquivalent() {
         let explicit = MutationKey("like:video:42")
+        let raw = MutationKey(rawValue: "like:video:42")
         let literal: MutationKey = "like:video:42"
 
         #expect(explicit == literal)
+        #expect(raw == literal)
+        #expect(raw.rawValue == "like:video:42")
     }
 
     @Test("description returns the raw value")
@@ -22,13 +25,15 @@ struct MutationKeyTests {
         #expect("\(key)" == "like:video:42")
     }
 
-    @Test("Round-trips through JSON")
+    @Test("Round-trips through JSON as a string literal")
     func roundTripsThroughJSON() throws {
         let key = MutationKey("like:video:42")
 
         let data = try JSONEncoder().encode(key)
-        let decoded = try JSONDecoder().decode(MutationKey.self, from: data)
+        let jsonString = try #require(String(data: data, encoding: .utf8))
+        #expect(jsonString == "\"like:video:42\"")
 
+        let decoded = try JSONDecoder().decode(MutationKey.self, from: data)
         #expect(decoded == key)
     }
 

@@ -120,8 +120,11 @@ enum EndpointURLBuilder {
         guard var components = URLComponents(string: baseURL) else {
             throw NetworkError.invalidURL(url: baseURL + path)
         }
-        guard let scheme = components.scheme,
-            ["http", "https"].contains(scheme.lowercased()),
+        guard let scheme = components.scheme else {
+            throw NetworkError.invalidURL(url: baseURL + path)
+        }
+        let lowerScheme = scheme.lowercased()
+        guard lowerScheme == "http" || lowerScheme == "https",
             let host = components.host,
             !host.isEmpty
         else {
@@ -133,8 +136,11 @@ enum EndpointURLBuilder {
             path.isEmpty ? "" : String(path.trimmingPrefix(while: { $0 == "/" })).ensuringStarts(with: "/")
         components.path = basePath + endpointPath
 
+        let existingQueryItems = components.queryItems ?? []
         if let queryItems, !queryItems.isEmpty {
-            components.queryItems = queryItems
+            components.queryItems = existingQueryItems + queryItems
+        } else if !existingQueryItems.isEmpty {
+            components.queryItems = existingQueryItems
         }
 
         guard let url = components.url else {

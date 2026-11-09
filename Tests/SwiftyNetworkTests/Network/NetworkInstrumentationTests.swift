@@ -75,7 +75,7 @@ struct NetworkInstrumentationTests {
 
         let failed = await instrumentation.failed
         #expect(failed.count == 1)
-        #expect(failed.first?.error.classification == .noConnection)
+        #expect(failed.first?.error.classification == .noInternetConnection)
     }
 
     @Test("A 401 that successfully refreshes emits requestRetried and a second attempt sharing the requestID")
@@ -196,5 +196,33 @@ struct NetworkInstrumentationTests {
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
         #expect(response == user)
+    }
+
+    @Test("NetworkRequestAttempt and NetworkRequestCompletion conform to Equatable")
+    func eventEquality() throws {
+        let id1 = UUID()
+        let id2 = UUID()
+        let url1 = try #require(URL(string: "https://api.example.com/a"))
+        let url2 = try #require(URL(string: "https://api.example.com/b"))
+
+        let attempt1 = NetworkRequestAttempt(requestID: id1, url: url1, method: .get, attempt: 1)
+        let attempt1Duplicate = NetworkRequestAttempt(requestID: id1, url: url1, method: .get, attempt: 1)
+        let attempt2 = NetworkRequestAttempt(requestID: id2, url: url2, method: .post, attempt: 2)
+
+        #expect(attempt1 == attempt1Duplicate)
+        #expect(attempt1 != attempt2)
+
+        let completion1 = NetworkRequestCompletion(
+            requestID: id1, url: url1, method: .get, attempt: 1, statusCode: 200, duration: .seconds(1)
+        )
+        let completion1Duplicate = NetworkRequestCompletion(
+            requestID: id1, url: url1, method: .get, attempt: 1, statusCode: 200, duration: .seconds(1)
+        )
+        let completion2 = NetworkRequestCompletion(
+            requestID: id1, url: url1, method: .get, attempt: 1, statusCode: 204, duration: .seconds(1)
+        )
+
+        #expect(completion1 == completion1Duplicate)
+        #expect(completion1 != completion2)
     }
 }

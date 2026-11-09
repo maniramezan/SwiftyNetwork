@@ -32,7 +32,7 @@ import Foundation
 /// )
 /// let client = NetworkClient(configuration: configuration)
 /// ```
-public struct NetworkRetryPolicy: Sendable {
+public struct NetworkRetryPolicy: Sendable, Equatable {
     /// The HTTP methods that are safe to replay: `GET`, `HEAD`, `PUT` and `DELETE`.
     public static let retryableMethods: Set<HTTPMethod> = [.get, .head, .put, .delete]
 

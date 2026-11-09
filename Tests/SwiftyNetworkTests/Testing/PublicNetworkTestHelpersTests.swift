@@ -174,4 +174,27 @@ struct PublicNetworkTestHelpersTests {
         #expect(failure.url.query?.contains(failureID) == true)
         #expect(await recorder.retried.isEmpty)
     }
+
+    @Test("NetworkRetryPolicy.immediate creates a zero-delay policy for tests")
+    func immediateNetworkRetryPolicy() {
+        let policy = NetworkRetryPolicy.immediate(maxRetries: 4)
+        #expect(policy.maxRetries == 4)
+        #expect(policy.backoff == .immediate)
+        #expect(policy.delay(forRetry: 1) == .zero)
+        #expect(policy.delay(forRetry: 2, after: .tooManyRequests(.status(429, retryAfter: 30))) == .zero)
+    }
+
+    @Test("RecordedRequest conforms to NetworkEndpoint and builds URLRequest")
+    func recordedRequestConformsToNetworkEndpoint() throws {
+        let endpoint = makeEndpointWithTestId("endpoint-test-id")
+        let recorded = RecordedRequest(endpoint)
+        #expect(recorded.baseURL == endpoint.baseURL)
+        #expect(recorded.path == endpoint.path)
+        #expect(recorded.method == endpoint.method)
+        #expect(recorded.queryItems == endpoint.queryItems)
+
+        let urlRequest = try recorded.makeURLRequest()
+        #expect(urlRequest.url?.absoluteString.contains("endpoint-test-id") == true)
+        #expect(urlRequest.httpMethod == "GET")
+    }
 }

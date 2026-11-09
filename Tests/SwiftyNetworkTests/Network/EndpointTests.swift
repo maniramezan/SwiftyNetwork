@@ -34,6 +34,25 @@ func testEndpointQueryItems() throws {
     #expect(items.contains(where: { $0.name == "lang" && $0.value == "en" }))
 }
 
+@Test("NetworkEndpoint preserves base URL query items when appending endpoint query items")
+func testEndpointKeepsBaseURLQueryItems() throws {
+    struct E: NetworkEndpoint {
+        let baseURL = "https://api.test.com/search?source=home"
+        var path: String { "" }
+        var method: HTTPMethod { .get }
+        var queryItems: [URLQueryItem]? {
+            [URLQueryItem(name: "q", value: "swift"), URLQueryItem(name: "lang", value: "en")]
+        }
+    }
+
+    let req = try E().makeURLRequest()
+    let comps = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)
+    let items = comps?.queryItems ?? []
+    #expect(items.contains(where: { $0.name == "source" && $0.value == "home" }))
+    #expect(items.contains(where: { $0.name == "q" && $0.value == "swift" }))
+    #expect(items.contains(where: { $0.name == "lang" && $0.value == "en" }))
+}
+
 @Test("NetworkEndpoint sets headers, body and authorization")
 func testEndpointHeadersBodyAuth() throws {
     struct E: NetworkEndpoint {

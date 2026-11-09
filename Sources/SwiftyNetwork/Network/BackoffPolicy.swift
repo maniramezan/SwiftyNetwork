@@ -39,12 +39,12 @@ public struct BackoffPolicy: Sendable, Equatable {
     ///   - baseDelay: The wait before the first retry.
     ///   - maxDelay: The upper bound on the computed backoff.
     ///   - jitterRange: The multiplicative jitter range. Defaults to `0.5...1.5` (±50%).
-    ///   - maxRetryAfter: The upper bound on an honored `Retry-After`.
+    ///   - maxRetryAfter: The upper bound on an honored `Retry-After`. Defaults to 60 seconds.
     public init(
         baseDelay: Duration,
         maxDelay: Duration,
         jitterRange: ClosedRange<Double> = 0.5...1.5,
-        maxRetryAfter: Duration
+        maxRetryAfter: Duration = .seconds(60)
     ) {
         self.baseDelay = max(.zero, baseDelay)
         self.maxDelay = max(self.baseDelay, maxDelay)

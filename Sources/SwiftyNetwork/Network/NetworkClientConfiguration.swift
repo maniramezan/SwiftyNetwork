@@ -41,13 +41,15 @@ public struct NetworkClientConfiguration: Sendable {
     /// The JSON decoder for parsing responses.
     ///
     /// Configure this when your API uses custom dates, key decoding strategies, or
-    /// other `Codable` conventions.
+    /// other `Codable` conventions. Do not reconfigure this instance concurrently after
+    /// passing it to an initialized ``NetworkClient``.
     public var decoder: JSONDecoder
 
     /// The JSON encoder for creating request bodies.
     ///
     /// Used by ``NetworkClient/request(_:body:responseType:)`` when encoding an
-    /// `Encodable` request body.
+    /// `Encodable` request body. Do not reconfigure this instance concurrently after
+    /// passing it to an initialized ``NetworkClient``.
     public var encoder: JSONEncoder
 
     /// The authorization provider for handling authentication.

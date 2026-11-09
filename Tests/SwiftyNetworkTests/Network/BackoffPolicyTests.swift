@@ -63,6 +63,9 @@ struct BackoffPolicyTests {
 
         let inverted = BackoffPolicy(baseDelay: .seconds(10), maxDelay: .seconds(2), maxRetryAfter: .zero)
         #expect(inverted.maxDelay == .seconds(10))
+
+        let defaultRetryAfter = BackoffPolicy(baseDelay: .seconds(1), maxDelay: .seconds(10))
+        #expect(defaultRetryAfter.maxRetryAfter == .seconds(60))
     }
 
     @Test("Both retry policies delegate their delay to the same backoff, including Retry-After")

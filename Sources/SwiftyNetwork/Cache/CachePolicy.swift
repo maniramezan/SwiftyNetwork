@@ -16,7 +16,7 @@ import Foundation
 ///     policy: .returnCacheIfNotExpired(maxAge: .seconds(300))
 /// )
 /// ```
-public enum CachePolicy: Sendable {
+public enum CachePolicy: Sendable, Equatable {
     /// Return cached data if available; otherwise fetch from remote and cache it.
     case returnCacheElseLoad
 

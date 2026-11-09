@@ -79,6 +79,16 @@ struct DecodedResponseTests {
         #expect(avatar == Data([1, 2, 3]))
     }
 
+    @Test("DecodedResponse is Equatable when its value is, comparing both value and response")
+    func decodedResponseEquality() {
+        let ok = HTTPResponse(statusCode: 200, headers: ["ETag": "v1"])
+        let base = DecodedResponse(value: user, response: ok)
+
+        #expect(base == DecodedResponse(value: user, response: ok))
+        #expect(base != DecodedResponse(value: TestUser(id: "2", name: "Bo", email: "bo@example.com"), response: ok))
+        #expect(base != DecodedResponse(value: user, response: HTTPResponse(statusCode: 201)))
+    }
+
     private struct MockEndpoint: NetworkEndpoint {
         let baseURL = "https://api.test.com"
         let path: String

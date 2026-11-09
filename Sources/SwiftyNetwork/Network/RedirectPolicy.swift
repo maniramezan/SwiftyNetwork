@@ -30,7 +30,7 @@ import Foundation
 /// // Never follow redirects, for an API that should not redirect at all.
 /// let configuration = NetworkClientConfiguration(redirectPolicy: .never)
 /// ```
-public struct RedirectPolicy: Sendable {
+public struct RedirectPolicy: Sendable, Equatable {
     enum Behavior: Sendable, Equatable {
         case stripCredentialsAcrossOrigins
         case followAll

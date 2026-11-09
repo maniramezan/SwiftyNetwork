@@ -112,6 +112,8 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
   longer transient, so ``MutationRetryPolicy`` stops retrying it.
 - ``NetworkError/authorizationUnavailable(underlying:)`` is new; see the next section.
   Exhaustive switches over ``NetworkError`` and ``NetworkErrorClassification`` need it.
+- ``NetworkErrorClassification/noInternetConnection`` replaces the 1.x `.noConnection` case,
+  mirroring ``NetworkError/noInternetConnection``.
 
 ### Authorization
 
@@ -164,6 +166,8 @@ MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
   `MutationRequest(baseURL:path:method:...)` calls.
 - The encoded `MutationRequest` carries a schema version. Payloads that a 1.x durable
   store saved still decode, and their persisted authorization is ignored.
+- ``MutationKey`` conforms to `RawRepresentable` and encodes as a raw JSON string instead
+  of a keyed container.
 - ``MutationFailureReason`` has a ``MutationFailureReason/category`` (`offline`, `timedOut`,
   `unauthorized`, `rejected`, `serverError`, `cancelled`, `other`) for choosing what to show.
 

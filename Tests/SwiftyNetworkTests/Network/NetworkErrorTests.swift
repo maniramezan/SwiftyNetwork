@@ -102,7 +102,7 @@ func testClassificationMapsEveryCase() {
     #expect(NetworkError.forbidden(.status(403)).classification == .forbidden)
     #expect(NetworkError.notFound(.status(404)).classification == .notFound)
     #expect(NetworkError.timeout(nil).classification == .timeout)
-    #expect(NetworkError.noInternetConnection.classification == .noConnection)
+    #expect(NetworkError.noInternetConnection.classification == .noInternetConnection)
     #expect(NetworkError.decodingFailed(underlying: URLError(.badURL)).classification == .decodingFailed)
     #expect(NetworkError.encodingFailed(underlying: URLError(.badURL)).classification == .encodingFailed)
     #expect(
@@ -163,7 +163,7 @@ func testIsTransientClassifiesTransientErrors() {
 
 @Test("mapURLError classifies notConnectedToInternet, timedOut, and other codes")
 func testMapURLErrorClassifiesCodes() {
-    #expect(NetworkError.mapURLError(URLError(.notConnectedToInternet)).classification == .noConnection)
+    #expect(NetworkError.mapURLError(URLError(.notConnectedToInternet)).classification == .noInternetConnection)
     #expect(NetworkError.mapURLError(URLError(.timedOut)).classification == .timeout)
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
@@ -187,7 +187,7 @@ func testMapURLErrorTreatsConnectivityLossAsNoConnection() {
     let codes: [URLError.Code] = [.networkConnectionLost, .dataNotAllowed, .internationalRoamingOff]
     for code in codes {
         let mapped = NetworkError.mapURLError(URLError(code))
-        #expect(mapped.classification == .noConnection)
+        #expect(mapped.classification == .noInternetConnection)
         #expect(mapped.isTransient)
     }
 }

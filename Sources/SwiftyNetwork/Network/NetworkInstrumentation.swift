@@ -81,7 +81,7 @@ extension NetworkInstrumentation {
 ///
 /// Emitted for ``NetworkInstrumentation/requestStarted(_:)`` and
 /// ``NetworkInstrumentation/requestRetried(_:)``.
-public struct NetworkRequestAttempt: Sendable {
+public struct NetworkRequestAttempt: Sendable, Equatable {
     /// Identifies every attempt belonging to the same logical `request(_:...)`
     /// call, including retries after a 401 auth refresh. Use this to
     /// correlate a parent span across attempts.
@@ -108,7 +108,7 @@ public struct NetworkRequestAttempt: Sendable {
 /// Describes an HTTP attempt that completed with a response.
 ///
 /// Emitted for ``NetworkInstrumentation/requestCompleted(_:)``.
-public struct NetworkRequestCompletion: Sendable {
+public struct NetworkRequestCompletion: Sendable, Equatable {
     /// See ``NetworkRequestAttempt/requestID``.
     public let requestID: UUID
 

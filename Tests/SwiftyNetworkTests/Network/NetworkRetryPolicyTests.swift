@@ -99,6 +99,13 @@ struct NetworkRetryPolicyTests {
         #expect(NetworkRetryPolicy(maxRetries: -1).maxRetries == 0)
     }
 
+    @Test("NetworkRetryPolicy conforms to Equatable")
+    func equatable() {
+        #expect(
+            NetworkRetryPolicy.default == NetworkRetryPolicy(maxRetries: 2, backoff: NetworkRetryPolicy.defaultBackoff))
+        #expect(NetworkRetryPolicy(maxRetries: 2) != NetworkRetryPolicy(maxRetries: 3))
+    }
+
     @Test("The retry policy is off by default")
     func offByDefault() {
         #expect(NetworkClientConfiguration().retryPolicy == nil)
