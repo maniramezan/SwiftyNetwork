@@ -50,6 +50,10 @@ a protocol-extension convenience over it. Decoding `Data` returns the raw body, 
 The encoded-body overload uses the configured encoder and preserves an explicitly
 supplied Content-Type header.
 
+`sendAuthorized(_:errorBody:transport:)` runs this same 401 flow (`refreshAfterUnauthorized`) around a
+caller-supplied transport for requests `NetworkClient` cannot decode, such as streams. It reuses the redirect guard and
+instrumentation, maps statuses with `HTTPStatusValidator`, and does not apply `retryPolicy`.
+
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `authRefreshDelay` before replay. The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`

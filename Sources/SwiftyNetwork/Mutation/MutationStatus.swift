@@ -133,21 +133,16 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
     }
 
     private static func category(for error: NetworkError) -> Category {
-        switch error {
-        case .noInternetConnection:
-            return .offline
-        case .timeout:
-            return .timedOut
-        case .unauthorized, .authorizationUnavailable, .authorizationRefreshFailed:
-            return .unauthorized
-        case .forbidden, .notFound, .tooManyRequests, .clientError:
-            return .rejected
-        case .serverError:
-            return .serverError
-        case .invalidURL, .invalidResponse, .unexpectedStatus, .decodingFailed, .encodingFailed:
-            return .other
-        case .underlying(let underlying):
-            return underlying is CancellationError ? .cancelled : .other
+        if case .underlying(let underlying) = error, underlying is CancellationError {
+            return .cancelled
+        }
+        switch error.category {
+        case .offline: return .offline
+        case .timedOut: return .timedOut
+        case .unauthorized: return .unauthorized
+        case .rejected: return .rejected
+        case .serverError: return .serverError
+        case .other: return .other
         }
     }
 }

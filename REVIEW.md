@@ -56,6 +56,7 @@ security audit or measured performance gains.
 
 | Priority | Finding | Proposed change and acceptance criteria |
 | --- | --- | --- |
+| Medium | The 2.0 audits were source-level; the gaps found by migrating a real app (raw/streaming transports, error categories, migration-guide holes, fixture overlap) were only visible from a consumer. | Before each major tag, migrate one real consumer app onto the release candidate and fold its friction into the API and `MigratingTo*.md`; keep adding external-consumer fixtures. |
 | Medium | Concurrent requests are not coalesced at the repository boundary. (Value and timestamp now come from one `CacheEntry` read.) | Explore explicit repository fetch sharing without conflating cache policies or users. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
 

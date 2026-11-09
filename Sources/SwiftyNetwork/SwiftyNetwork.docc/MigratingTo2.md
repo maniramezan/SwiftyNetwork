@@ -114,6 +114,26 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
   Exhaustive switches over ``NetworkError`` and ``NetworkErrorClassification`` need it.
 - ``NetworkErrorClassification/noInternetConnection`` replaces the 1.x `.noConnection` case,
   mirroring ``NetworkError/noInternetConnection``.
+- ``NetworkErrorClassification`` also gained ``NetworkErrorClassification/clientError(statusCode:)``,
+  ``NetworkErrorClassification/unexpectedStatus(statusCode:)``, and
+  ``NetworkErrorClassification/authorizationUnavailable``. To read a status code, use
+  ``NetworkError/statusCode`` or `error.response?.statusCode`, not the classification.
+- `NetworkError.unauthorized()` with no argument is gone, because the case now carries the
+  response. Build one with `NetworkError.unauthorized(HTTPResponse(statusCode: 401))`. This also
+  applies to code written against the unreleased `feature/retry-and-mutation-failures` branch.
+- To choose what to show the user, use the new ``NetworkError/category``
+  (``NetworkErrorCategory``: `offline`, `timedOut`, `unauthorized`, `rejected`, `serverError`,
+  `other`) instead of keeping your own mapping. ``NetworkError/authorizationUnavailable(underlying:)``
+  is in `unauthorized`, with the `401` cases, because both mean the user must sign in again. Use
+  ``NetworkError/classification`` to tell them apart.
+
+```swift
+switch error.category {
+case .offline, .timedOut: showOfflineBanner()
+case .unauthorized: promptSignIn()
+case .rejected, .serverError, .other: showGenericError()
+}
+```
 
 ### Authorization
 
@@ -124,17 +144,82 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
 - ``AuthorizationProvider/currentAuthorization()`` is `async throws`. Your non-throwing
   implementation still conforms. Throw when the user is signed out, and the client fails the
   request with ``NetworkError/authorizationUnavailable(underlying:)`` without sending it.
+  **Source change:** calling it through `any AuthorizationProvider` or a generic `some AuthorizationProvider`
+  now needs `try`. Calling it on your concrete non-throwing type does not.
 - ``OAuthAuthorizationProvider``'s refresh handler is `() async throws -> String`. Throw
   instead of returning `nil`; the client surfaces the error as
   ``NetworkError/authorizationRefreshFailed(underlying:)``.
 - ``AuthorizationProvider/shouldRefreshAuthorization(after:)`` is new (default `true`), so
   a provider can decline to refresh a `401` that a new token cannot fix.
 - ``AuthorizationType`` is no longer `Codable`.
+- To skip a refresh that another request already did, call
+  ``AuthorizationProvider/isCurrentAuthorization(_:)`` with `rejected` first.
+- To send a request that ``NetworkClient`` cannot model, such as a Server-Sent Events stream,
+  with the same authorization and refresh-once behavior, use
+  ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` instead of calling the provider yourself.
+
+#### Converting a `Bool` refresh
+
+If your 1.x provider returned `true` when it refreshed and `false` when it could not,
+move the failure into a thrown error:
+
+```swift
+// 1.x
+func refreshAuthorizationIfNeeded() async -> Bool {
+    guard let refreshToken = store.refreshToken else { return false }
+    do {
+        store.accessToken = try await service.refresh(refreshToken)
+        return true
+    } catch {
+        return false
+    }
+}
+
+// 2.0
+struct SignedOut: Error {}
+
+func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+    guard await isCurrentAuthorization(rejected) else { return }
+    guard let refreshToken = store.refreshToken else { throw SignedOut() }
+    store.accessToken = try await service.refresh(refreshToken)
+}
+```
+
+The client wraps whatever you throw in ``NetworkError/authorizationRefreshFailed(underlying:)``
+and passes a `CancellationError` through unchanged. If you still need a `Bool` somewhere else,
+catch the error at that call site, and let cancellation propagate:
+
+```swift
+func refreshSucceeded(rejecting rejected: AuthorizationType) async throws -> Bool {
+    do {
+        try await provider.refreshAuthorization(rejecting: rejected)
+        return true
+    } catch is CancellationError {
+        throw CancellationError()
+    } catch {
+        return false
+    }
+}
+```
+
+Prefer ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` to hand-written wrappers like this one.
 
 ### Retries
 
 - ``NetworkRetryPolicy`` is new and off by default. Set
   ``NetworkClientConfiguration/retryPolicy`` to retry idempotent requests.
+  Its initializer takes a ``BackoffPolicy`` instead of separate delay settings:
+
+```swift
+// Unreleased feature branch
+NetworkRetryPolicy(maxRetries: 3, baseDelay: .seconds(1), maxDelay: .seconds(30), maxRetryAfter: .seconds(60))
+// 2.0
+NetworkRetryPolicy(
+    maxRetries: 3,
+    backoff: BackoffPolicy(baseDelay: .seconds(1), maxDelay: .seconds(30), maxRetryAfter: .seconds(60))
+)
+```
+
 - Both retry policies take a ``BackoffPolicy``:
 
 ```swift
@@ -190,7 +275,8 @@ actor DiskCache<Value: Sendable>: Cache {
   `value(forKey:)` and `setValue(_:forKey:)` come from a protocol extension; delete your
   implementations. Replace `timestamp(forKey:)` with `entry(forKey:)?.timestamp`, and
   `setValue(_:forKey:timestamp:)` with `setEntry(CacheEntry(value, timestamp: date), forKey:)`.
-- `PersistentCache` and `TimestampedCache` are gone. Conform your disk cache to ``Cache``.
+- `PersistentCache` and `TimestampedCache` are gone. Conform your disk cache to ``Cache``;
+  <doc:CustomDiskCache> shows one that keeps the write time and the last-use time apart.
 - `AnyCache(cache)` is gone. Use `any Cache<Value>`.
 - `LocalDataSource` and `CacheBasedLocalDataSource` are gone. Pass the cache straight to the
   repository: `GenericRepository(client: client, cache: InMemoryCache<User>())`.

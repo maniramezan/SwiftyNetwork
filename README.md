@@ -356,6 +356,30 @@ the `401` response (status, headers, and body) before refreshing; return `false`
 cannot fix and the client throws `NetworkError.unauthorized` without refreshing or retrying. The default
 returns `true`. `403` is never refreshed.
 
+Inside `refreshAuthorization(rejecting:)`, `guard await isCurrentAuthorization(rejected) else { return }` skips a
+refresh that another request already did.
+
+### Streaming and Other Transports
+
+`NetworkClient` decodes whole responses, so it cannot carry a Server-Sent Events stream. `sendAuthorized` runs a raw
+`URLRequest` through a transport you supply, with the client's authorization, `401` refresh-once, redirect policy, and
+instrumentation, and throws the same `NetworkError` cases:
+
+```swift
+let (bytes, _) = try await client.sendAuthorized(request) { request, session, delegate in
+    try await session.bytes(for: request, delegate: delegate)
+} errorBody: { bytes in
+    var body = Data()
+    do { for try await byte in bytes { body.append(byte) } } catch {}
+    return body
+}
+for try await line in bytes.lines {
+    handle(line)
+}
+```
+
+It returns only for a `2xx`. It never retries transient failures and does not set a timeout.
+
 ### Fire-and-Forget Mutations with MutationQueue
 
 Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
@@ -573,6 +597,9 @@ Events include full URLs and errors. Redact them before exporting.
 
 ### Custom Cache Implementation
 
+For a complete disk-backed `Cache` that keeps the write timestamp separate from last-use recency, see the
+`CustomDiskCache` article in the DocC documentation (`Tests/SwiftyNetworkTests/Cache/DiskCacheRecipeTests.swift` compiles it).
+
 ```swift
 // Implement custom cache
 public actor MyCustomCache<T: Sendable>: Cache {
@@ -664,6 +691,20 @@ do {
     let user = try await client.request(endpoint, responseType: User.self)
 } catch is CancellationError {
     // The view went away; nothing to show
+}
+```
+
+### Choosing What to Show
+
+`error.category` collapses the cases into what a UI treats differently, the same grouping as
+`MutationFailureReason.category`. `authorizationUnavailable` counts as `unauthorized`; use `error.classification`
+to tell it apart from a `401`.
+
+```swift
+switch error.category {
+case .offline, .timedOut: showOfflineBanner()
+case .unauthorized: promptSignIn()
+case .rejected, .serverError, .other: showGenericError()
 }
 ```
 
@@ -827,6 +868,10 @@ import Testing
     // ...
 }
 ```
+
+`TestAuthorizationProvider` is a scriptable `AuthorizationProvider` for the same targets: a fixed bearer token, a
+`refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)` to change the refresh outcome mid-test.
+Like the rest of `SwiftyNetworkTesting`, it is for test targets and previews only.
 
 Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))` to script response headers
 for code that reads `response(for:responseType:)`. Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw

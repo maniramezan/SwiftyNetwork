@@ -28,6 +28,7 @@ Sources/SwiftyNetwork/
 │   ├── DecodedResponse.swift        # Decoded value + HTTPResponse returned by response(for:responseType:)
 │   ├── HTTPResponse.swift           # Status, headers, body (+ Retry-After) for successes and NetworkError
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
+│   ├── NetworkClient+RawRequests.swift  # sendAuthorized: raw URLRequest + caller transport with auth/refresh-once
 │   ├── NetworkClientConfiguration.swift  # Session, coders, auth, retry/redirect policies, timeouts, instrumentation
 │   ├── RedirectPolicy.swift         # Redirect handling presets (default strips credentials across origins)
 │   ├── RedirectGuard.swift          # Internal: per-task delegate applying RedirectPolicy, Origin comparison
@@ -41,7 +42,7 @@ Sources/SwiftyNetwork/
 │   ├── EmptyResponse.swift          # Decodable for bodiless responses
 │   ├── AuthorizationType.swift      # Auth header strategies
 │   ├── AuthProvider.swift           # AuthorizationProvider protocol + OAuth actor
-│   ├── NetworkError.swift           # Error enum, classification, isTransient, URLError mapping
+│   ├── NetworkError.swift           # Error enum, classification, category, isTransient, URLError mapping
 │   ├── NetworkInstrumentation.swift # Observability hook + event types
 │   ├── NetworkMonitor.swift         # NWPathMonitor reachability actor
 │   └── SSLPinningConfiguration.swift  # Pins, host policies, trust evaluation

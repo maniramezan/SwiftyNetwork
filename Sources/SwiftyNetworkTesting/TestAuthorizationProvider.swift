@@ -1,6 +1,17 @@
 import SwiftyNetwork
 
 /// Scriptable authorization state that records refresh attempts and rejected credentials.
+///
+/// For tests and SwiftUI previews only; link `SwiftyNetworkTesting` from test targets, never from
+/// production targets. It covers what apps usually hand-roll: a fixed bearer token
+/// (`current: .bearer(token: "t")`), a refresh call counter (``refreshCallCount``), and a refresh
+/// outcome you can change after creation (``setRefreshResult(_:)``).
+///
+/// ```swift
+/// let provider = TestAuthorizationProvider(current: .bearer(token: "old"), refreshResult: true,
+///     refreshedAuthorization: .bearer(token: "new"))
+/// await provider.setRefreshResult(false)
+/// ```
 public actor TestAuthorizationProvider: AuthorizationProvider {
     /// The error thrown by a refresh scripted to fail.
     public struct RefreshFailed: Error, Sendable, Equatable {
@@ -9,8 +20,8 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     }
 
     private var currentAuth: AuthorizationType
-    private let refreshResult: Bool
-    private let refreshedAuth: AuthorizationType?
+    private var refreshResult: Bool
+    private var refreshedAuth: AuthorizationType?
     /// Number of attempted refreshes.
     public private(set) var refreshCallCount = 0
     /// Credentials rejected by the server, in order.
@@ -36,6 +47,24 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
         self.currentAuth = current
         self.refreshResult = refreshResult
         self.refreshedAuth = refreshedAuthorization
+    }
+
+    /// Changes whether later refreshes succeed. A failed refresh throws ``RefreshFailed``.
+    /// - Parameter succeeds: `true` to make refreshes succeed, `false` to make them throw.
+    public func setRefreshResult(_ succeeds: Bool) {
+        refreshResult = succeeds
+    }
+
+    /// Changes the authorization that replaces the current one after a successful refresh.
+    /// - Parameter authorization: The replacement, or `nil` to keep the current authorization.
+    public func setRefreshedAuthorization(_ authorization: AuthorizationType?) {
+        refreshedAuth = authorization
+    }
+
+    /// Replaces the current authorization, for example to simulate sign-in or a token rotated elsewhere.
+    /// - Parameter authorization: The authorization that later requests send.
+    public func setCurrentAuthorization(_ authorization: AuthorizationType) {
+        currentAuth = authorization
     }
 
     /// Returns the current scripted authorization.

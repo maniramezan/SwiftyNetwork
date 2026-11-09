@@ -68,6 +68,30 @@ public protocol AuthorizationProvider: Sendable {
 }
 
 extension AuthorizationProvider {
+    /// Whether `authorization` is still what ``currentAuthorization()`` returns.
+    ///
+    /// Use it at the top of ``refreshAuthorization(rejecting:)`` to skip a refresh that another
+    /// request already did. When it returns `false`, a newer credential exists and the caller
+    /// retries with it, so return without refreshing:
+    ///
+    /// ```swift
+    /// func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+    ///     guard await isCurrentAuthorization(rejected) else { return }
+    ///     try await tokenService.refresh()
+    /// }
+    /// ```
+    ///
+    /// If ``currentAuthorization()`` throws, there is no newer credential, so this returns `true`
+    /// and the refresh proceeds.
+    ///
+    /// - Parameter authorization: Typically the `rejected` value passed to
+    ///   ``refreshAuthorization(rejecting:)``.
+    /// - Returns: `true` when the provider would still send `authorization`.
+    public func isCurrentAuthorization(_ authorization: AuthorizationType) async -> Bool {
+        guard let current = try? await currentAuthorization() else { return true }
+        return current == authorization
+    }
+
     /// Returns `true`, so every `401` is refreshed once.
     ///
     /// - Parameter response: The `401` response.

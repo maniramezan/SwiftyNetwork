@@ -297,6 +297,75 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     }
 }
 
+/// A coarse category of a ``NetworkError`` for choosing what to tell the user.
+///
+/// It collapses ``NetworkErrorClassification`` into the few cases a UI or telemetry
+/// pipeline treats differently, so apps need not keep their own mapping. It is the same
+/// grouping ``MutationFailureReason/category`` uses, minus cancellation, which
+/// ``NetworkClient`` reports as `CancellationError` rather than a ``NetworkError``.
+///
+/// Example:
+/// ```swift
+/// catch let error as NetworkError {
+///     switch error.category {
+///     case .offline, .timedOut:
+///         showBanner("You're offline.")
+///     case .unauthorized:
+///         promptSignIn()
+///     case .rejected, .serverError, .other:
+///         showBanner("Something went wrong.")
+///     }
+/// }
+/// ```
+public enum NetworkErrorCategory: Sendable, Equatable {
+    /// The device had no usable connection (``NetworkError/noInternetConnection``).
+    case offline
+
+    /// The request timed out (``NetworkError/timeout(_:)``), at the transport layer or with a `408`.
+    /// The server may or may not have processed it.
+    case timedOut
+
+    /// The user has no valid credentials: the server answered `401` and authorization could not be
+    /// refreshed (``NetworkError/unauthorized(_:)`` or ``NetworkError/authorizationRefreshFailed(underlying:)``),
+    /// or the provider had no authorization to send (``NetworkError/authorizationUnavailable(underlying:)``).
+    ///
+    /// ``NetworkError/authorizationUnavailable(underlying:)`` counts as unauthorized because both mean
+    /// the same to the user: sign in again. Switch on ``NetworkError/classification`` to tell them apart.
+    case unauthorized
+
+    /// The server rejected the request with a `4xx` status other than `401` and `408`, such as
+    /// `400`, `403`, `404`, `409`, `422`, or `429`. Retrying the same request will not succeed
+    /// until something changes.
+    case rejected
+
+    /// The server failed with a `5xx` status.
+    case serverError
+
+    /// Any other failure: an invalid URL, an unexpected status, an encoding or decoding failure, or
+    /// a lower-level error.
+    case other
+}
+
+extension NetworkErrorClassification {
+    /// The coarse ``NetworkErrorCategory`` of this classification.
+    public var category: NetworkErrorCategory {
+        switch self {
+        case .noInternetConnection:
+            return .offline
+        case .timeout:
+            return .timedOut
+        case .unauthorized, .authorizationUnavailable, .authorizationRefreshFailed:
+            return .unauthorized
+        case .forbidden, .notFound, .tooManyRequests, .clientError:
+            return .rejected
+        case .serverError:
+            return .serverError
+        case .invalidURL, .invalidResponse, .unexpectedStatus, .decodingFailed, .encodingFailed, .underlying:
+            return .other
+        }
+    }
+}
+
 extension NetworkError {
     /// This error's coarse-grained ``NetworkErrorClassification``.
     ///
@@ -341,6 +410,13 @@ extension NetworkError {
         case .underlying:
             return .underlying
         }
+    }
+
+    /// This error's coarse ``NetworkErrorCategory``, for choosing what to show the user.
+    ///
+    /// Equivalent to `classification.category`.
+    public var category: NetworkErrorCategory {
+        classification.category
     }
 
     /// Whether this error is generally worth retrying.
