@@ -309,7 +309,8 @@ is the dedicated retry loop for this class of call, which also replays non-idemp
 and status reporting.
 
 ```swift
-let queue = MutationQueue(client: NetworkClient.shared)
+// The queue needs a client; give it the one with your AuthorizationProvider.
+let queue = MutationQueue(client: authenticatedClient)
 
 // Enqueue returns immediately; the network call and any retries run in the background.
 let request = MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42"))
@@ -371,16 +372,21 @@ Persistence is pluggable via the `MutationStore` protocol. `InMemoryMutationStor
 default (mutations are lost if the process is killed, which is fine for most forgivable
 mutations); implement `MutationStore` yourself for durable persistence that survives a relaunch.
 Because `MutationRequest` is `Codable`, a durable store can serialize "which endpoint plus what
-body" directly and replay it on the next launch via `resumePendingMutations()`.
+body" directly and replay it on the next launch via `resumePendingMutations()`. The encoded form carries a
+schema `version`, and decoding rejects a version newer than the library understands.
 
 ```swift
-let queue = MutationQueue(client: NetworkClient.shared, store: MyDurableMutationStore())
+let queue = MutationQueue(client: authenticatedClient, store: MyDurableMutationStore())
 await queue.resumePendingMutations() // call once at startup
 ```
 
-> **Note:** `MutationRequest` can carry secrets (bearer tokens, API keys) via its captured
-> `AuthorizationType`. A durable `MutationStore` is responsible for storing the encoded request
-> securely (e.g. Keychain-backed) -- SwiftyNetwork does not encrypt persisted mutations itself.
+A `MutationRequest` never captures credentials: its `authorization` is always `.none`, so every attempt,
+including a replay after relaunch, is authorized by the client's `AuthorizationProvider`, and a `401`
+refreshes the token instead of replaying a stale one. An endpoint's own `authorization` is dropped (with a
+logged warning) when you build a `MutationRequest` from it.
+
+> **Note:** Headers and bodies are persisted as given. Keep secrets out of them, and store durable
+> mutations securely anyway, since bodies can contain user data.
 
 ### SSL Pinning
 

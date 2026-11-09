@@ -102,7 +102,6 @@ struct InMemoryMutationStoreTests {
             baseURL: "https://api.test.com",
             path: "/videos/42/like",
             method: .post,
-            authorization: .bearer(token: "secret-token"),
             body: Data("{\"liked\":true}".utf8)
         )
         await store.save(request, for: "like:video:42")

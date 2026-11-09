@@ -14,7 +14,7 @@ import Foundation
 /// Example:
 /// ```swift
 /// let policy = MutationRetryPolicy(maxRetries: 5)
-/// let queue = MutationQueue(client: NetworkClient.shared, retryPolicy: policy)
+/// let queue = MutationQueue(client: authenticatedClient, retryPolicy: policy)
 /// ```
 public struct MutationRetryPolicy: Sendable {
     /// The default backoff: 1s doubling up to 60s, ±50% jitter, and `Retry-After` honored up to 300s.
