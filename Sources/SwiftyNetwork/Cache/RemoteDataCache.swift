@@ -56,8 +56,8 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
     /// - Returns: The cached or freshly fetched response body.
     /// - Throws: ``NetworkError/invalidResponse`` if the server response
     ///   isn't an HTTP response; for a non-2xx status, the same mapping as
-    ///   ``NetworkClient``: ``NetworkError/unauthorized`` (401),
-    ///   ``NetworkError/forbidden`` (403), ``NetworkError/notFound`` (404),
+    ///   ``NetworkClient``: ``NetworkError/unauthorized(response:)`` (401),
+    ///   ``NetworkError/forbidden(response:)`` (403), ``NetworkError/notFound`` (404),
     ///   ``NetworkError/timeout`` (408), otherwise
     ///   ``NetworkError/serverError(statusCode:data:)``; ``NetworkError/timeout``,
     ///   ``NetworkError/noInternetConnection``, or ``NetworkError/underlying(_:)``
@@ -103,10 +103,14 @@ public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
+        let rejection =
+            httpResponse.statusCode == 401 || httpResponse.statusCode == 403
+            ? HTTPErrorResponse(httpResponse, body: data) : nil
         try HTTPStatusValidator.validate(
             statusCode: httpResponse.statusCode,
             data: data,
-            retryAfter: RetryAfter.parse(from: httpResponse)
+            retryAfter: RetryAfter.parse(from: httpResponse),
+            response: rejection
         )
         return data
     }

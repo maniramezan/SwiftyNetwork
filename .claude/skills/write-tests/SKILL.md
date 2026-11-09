@@ -16,7 +16,7 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
 | Anything that only needs an `APIClient` (MutationQueue, repositories, services) | `MockAPIClient` from `SwiftyNetworkTesting` |
 | MutationQueue races (supersede while in flight, etc.) | `FakeAPIClient(outcomes:)` (wraps `ScriptedResponder`) + `await fake.hold(call:)` (TestCommons; `try await gate.wait()`, synchronous `open()`) |
 | Instrumentation events | `FakeNetworkInstrumentation` |
-| Auth refresh | `TestAuthorizationProvider` (records `refreshCallCount`, `rejectedAuthorizations`) |
+| Auth refresh | `TestAuthorizationProvider` (records `refreshCallCount`, `rejectedAuthorizations`, `inspectedResponses`; pass `shouldRefresh:` to veto a 401 refresh) |
 | Pure logic (`LRUStorage`, `CachePolicy`, `MutationRetryPolicy.delay`) | Direct unit tests, inject `jitterGenerator` |
 
 ## Rules
