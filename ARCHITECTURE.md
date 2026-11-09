@@ -41,8 +41,10 @@ throws, the request fails with `authorizationUnavailable` and is never sent.
 
 Each client call captures its configuration before suspension. It executes
 `URLSession.data(for:)`, validates HTTP status, and decodes a `Decodable & Sendable`
-result. `EmptyResponse` supports empty successful responses through the
-`APIClient.request(_:)` convenience method, including protocol-based test doubles.
+result into a `DecodedResponse` that also carries the `HTTPResponse`. `APIClient`
+has one decoding requirement, `response(for:responseType:)`; every `request` method is
+a protocol-extension convenience over it. Decoding `Data` returns the raw body, and
+`EmptyResponse` supports empty successful responses, including in protocol-based test doubles.
 The encoded-body overload uses the configured encoder and preserves an explicitly
 supplied Content-Type header.
 
@@ -51,13 +53,13 @@ with `authRefreshDelay` before replay. The client passes the exact provider auth
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
 skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
 `shouldRefreshAuthorization(after:)` (default `true`) with the `401` response, so a provider can decline for a
-`401` that a new token cannot fix. Every non-2xx error (`401`, `403`, `404`, `408`, `429`, 5xx, ...) carries an `HTTPErrorResponse`
+`401` that a new token cannot fix. Every non-2xx error (`401`, `403`, `404`, `408`, `429`, 5xx, ...) carries an `HTTPResponse`
 (status, headers, body), exposed as `NetworkError.response`; `403` never triggers a refresh. Neither is general transient-error retry;
 that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by default), which `performRequest`
 consults through `retryOrFail` after any failed attempt. It retries `GET`/`HEAD`/`PUT`/`DELETE` only, on 429, 5xx,
 timeout and lost connectivity, with capped jittered backoff and a clamped `Retry-After`. Refresh and policy retries
 have independent budgets (`refreshAttempt`, `retryAttempt`). `HTTPStatusValidator` maps 429 to
-`NetworkError.tooManyRequests`, other 4xx to `.clientError`, and 5xx to `.serverError`; `HTTPErrorResponse` parses
+`NetworkError.tooManyRequests`, other 4xx to `.clientError`, and 5xx to `.serverError`; `HTTPResponse` parses
 `Retry-After` (delta-seconds and HTTP-date) for 429 and 503.
 Endpoint-specific authorization does not trigger provider refresh. Attempt counts
 include auth replays. Instrumentation callbacks are awaited and therefore add to

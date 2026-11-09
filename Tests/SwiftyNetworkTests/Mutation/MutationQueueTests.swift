@@ -523,14 +523,14 @@ private actor RoutingAPIClient: APIClient {
         self.fast = fast
     }
 
-    func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    func response<T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         if endpoint.path == "/fast" {
-            return try await fast.request(endpoint, responseType: responseType)
+            return try await fast.response(for: endpoint, responseType: responseType)
         }
-        return try await slow.request(endpoint, responseType: responseType)
+        return try await slow.response(for: endpoint, responseType: responseType)
     }
 }
 

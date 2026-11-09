@@ -59,15 +59,15 @@ actor FakeAPIClient: APIClient {
         await responder.hold(call: call)
     }
 
-    func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    func response<T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         let response = try await responder.respond(to: MutationRequest(endpoint: endpoint))
         guard let value = response as? T else {
             throw NetworkError.decodingFailed(underlying: URLError(.cannotDecodeContentData))
         }
-        return value
+        return DecodedResponse(value: value)
     }
 }
 

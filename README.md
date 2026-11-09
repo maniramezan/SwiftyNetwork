@@ -171,6 +171,31 @@ func fetchUser(client: any APIClient, baseURL: String, userId: String) async thr
 let post = try await client.request(CreatePostEndpoint(), body: draft, responseType: Post.self)
 ```
 
+### Response Headers and Raw Bytes
+
+`request(_:responseType:)` returns only the decoded value. When you also need the status code, headers, or raw
+body of a successful response, call `response(for:responseType:)`. It returns a `DecodedResponse` holding
+the `value` and its `HTTPResponse`, the same type that `NetworkError` carries for failures:
+
+```swift
+let page = try await client.response(for: PostsEndpoint(page: 1), responseType: [Post].self)
+let posts = page.value
+let nextPage = page.response.header("Link")
+let etag = page.response.header("ETag")
+
+let created = try await client.response(for: CreatePostEndpoint(), body: draft, responseType: EmptyResponse.self)
+let location = created.response.header("Location")
+```
+
+Ask for `Data` to get the raw body without JSON decoding, for images, files, or a payload you decode yourself:
+
+```swift
+let avatar = try await client.request(AvatarEndpoint(userId: "42"), responseType: Data.self)
+```
+
+`response(for:responseType:)` is the one requirement an `APIClient` conformance implements; the `request`
+methods are built on it.
+
 ### Layered Caching with a Custom Persistent Cache
 
 Implement `Cache` in your app to define on-disk behavior, then combine it with
@@ -569,7 +594,7 @@ do {
 }
 ```
 
-Every HTTP case carries the rejected `HTTPErrorResponse` (only a transport `timeout` has none). Read its
+Every HTTP case carries the rejected `HTTPResponse` (only a transport `timeout` has none). Read its
 status, headers, and body to tell apart failures that share a status code, such as an API error `code` in
 the body, the `WWW-Authenticate` challenge, or `X-RateLimit-*` headers. `error.response` and
 `error.statusCode` give the same values without a `switch`:
@@ -590,8 +615,8 @@ do {
 ```
 
 `catch NetworkError.unauthorized` without a binding still matches. Construct these errors in test doubles
-as `NetworkError.notFound(HTTPErrorResponse(statusCode: 404))`. The body is raw server data and
-may contain user information, so don't log it. `HTTPErrorResponse` prints only its status code, header names,
+as `NetworkError.notFound(HTTPResponse(statusCode: 404))`. The body is raw server data and
+may contain user information, so don't log it. `HTTPResponse` prints only its status code, header names,
 and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
@@ -612,7 +637,7 @@ do {
 ### Rate Limiting (429) and Retry-After
 
 A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(_:)`, never as
-`.clientError`. `HTTPErrorResponse.retryAfter` is the parsed `Retry-After` header as a `Duration` (both the
+`.clientError`. `HTTPResponse.retryAfter` is the parsed `Retry-After` header as a `Duration` (both the
 delta-seconds and HTTP-date forms; `nil` if absent or malformed), `body` keeps the response body (empty if the
 server sent none) so you can decode a problem+json document, and the headers keep values such as
 `X-RateLimit-Remaining`. A `503 Service Unavailable` carries `retryAfter` on `.serverError` the same way:
@@ -760,7 +785,8 @@ import Testing
 }
 ```
 
-Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw
+Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))` to script response headers
+for code that reads `response(for:responseType:)`. Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw
 `MockAPIClient.UnstubbedRequestError` unless you set a fallback with `setFallback(_:)`.
 
 ## Contributing
