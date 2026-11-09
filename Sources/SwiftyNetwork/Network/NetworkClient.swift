@@ -52,22 +52,25 @@ public actor NetworkClient: APIClient {
 
     // MARK: - Public Request API
 
-    /// Performs a network request and decodes the response.
+    /// Performs a network request and returns the decoded value with its HTTP response.
+    ///
+    /// Decoding `Data` returns the raw body; decoding ``EmptyResponse`` accepts an empty body.
     ///
     /// - Parameters:
     ///   - endpoint: The endpoint describing the request.
     ///   - responseType: The expected `Decodable` response type.
-    /// - Returns: A decoded value of `responseType`.
+    /// - Returns: The decoded value and the ``HTTPResponse`` it came from.
     /// - Throws: ``NetworkError`` if the request, response, or decoding fails.
     ///
     /// Example:
     /// ```swift
-    /// let profile = try await client.request(ProfileEndpoint(), responseType: Profile.self)
+    /// let profile = try await client.response(for: ProfileEndpoint(), responseType: Profile.self)
+    /// let etag = profile.response.header("ETag")
     /// ```
-    public func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    public func response<T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         let configuration = self.configuration
         return try await performRequest(
             endpoint,
@@ -89,20 +92,21 @@ public actor NetworkClient: APIClient {
     ///   - endpoint: The endpoint describing the request.
     ///   - body: The value to encode as the request body.
     ///   - responseType: The expected `Decodable` response type.
-    /// - Returns: A decoded value of `responseType`.
+    /// - Returns: The decoded value and the ``HTTPResponse`` it came from.
     /// - Throws: ``NetworkError/encodingFailed(underlying:)`` if encoding fails;
     ///   other ``NetworkError`` cases on transport or decoding failures.
     ///
     /// Example:
     /// ```swift
     /// let draft = CreatePostRequest(title: "Hello", body: "...")
-    /// let post = try await client.request(CreatePostEndpoint(), body: draft, responseType: Post.self)
+    /// let created = try await client.response(for: CreatePostEndpoint(), body: draft, responseType: Post.self)
+    /// let location = created.response.header("Location")
     /// ```
-    public func request<Body: Encodable & Sendable, T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    public func response<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         body: Body,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         let configuration = self.configuration
         let encodedBody = try await Self.encodeBody(body, encoder: configuration.encoder)
 
@@ -126,7 +130,7 @@ public actor NetworkClient: APIClient {
         retryAttempt: Int,
         configuration: NetworkClientConfiguration,
         requestID: UUID
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         let attempt = refreshAttempt + retryAttempt + 1
         Logger.debug("Starting request (attempt \(attempt))")
 
@@ -192,7 +196,7 @@ public actor NetworkClient: APIClient {
                 refreshAttempt: refreshAttempt,
                 retryAttempt: retryAttempt,
                 rejectedAuthorization: providerAuthorization,
-                response: HTTPErrorResponse(httpResponse, body: data),
+                response: HTTPResponse(httpResponse, body: data),
                 configuration: configuration,
                 trace: trace
             )
@@ -206,7 +210,7 @@ public actor NetworkClient: APIClient {
                 decoder: configuration.decoder
             )
             await trace.completed(statusCode: httpResponse.statusCode)
-            return decoded
+            return DecodedResponse(value: decoded, response: HTTPResponse(httpResponse, body: data))
         } catch let error as NetworkError {
             return try await retryOrFail(
                 error,
@@ -233,7 +237,7 @@ public actor NetworkClient: APIClient {
         retryAttempt: Int,
         configuration: NetworkClientConfiguration,
         trace: RequestTrace
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         guard let policy = configuration.retryPolicy,
             retryAttempt < policy.maxRetries,
             policy.shouldRetry(error, method: endpoint.method)
@@ -337,6 +341,9 @@ public actor NetworkClient: APIClient {
         responseType: T.Type,
         decoder: JSONDecoder
     ) async throws -> T {
+        if let raw = data as? T {
+            return raw
+        }
         if data.isEmpty, let emptyResponse = EmptyResponse() as? T {
             return emptyResponse
         }
@@ -361,10 +368,10 @@ public actor NetworkClient: APIClient {
         refreshAttempt: Int,
         retryAttempt: Int,
         rejectedAuthorization: AuthorizationType?,
-        response: HTTPErrorResponse,
+        response: HTTPResponse,
         configuration: NetworkClientConfiguration,
         trace: RequestTrace
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         guard let provider = configuration.authorizationProvider,
             let rejectedAuthorization,
             refreshAttempt < configuration.maxAuthRefreshAttempts

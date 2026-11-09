@@ -6,7 +6,7 @@ import Foundation
 /// ``RemoteDataCache``. ``NetworkClient`` handles `401` through its auth-refresh
 /// path before validation runs; other callers get ``NetworkError/unauthorized(_:)``.
 ///
-/// Every thrown error carries the ``HTTPErrorResponse`` snapshot, which parses
+/// Every thrown error carries the ``HTTPResponse`` snapshot, which parses
 /// `Retry-After` itself, so no caller can forget either.
 enum HTTPStatusValidator {
     /// Throws the ``NetworkError`` that corresponds to a non-2xx response.
@@ -24,11 +24,11 @@ enum HTTPStatusValidator {
             Logger.debug("Request successful with status \(statusCode)")
             return
         }
-        throw error(for: HTTPErrorResponse(httpResponse, body: data))
+        throw error(for: HTTPResponse(httpResponse, body: data))
     }
 
     /// Returns the ``NetworkError`` for a non-2xx response snapshot.
-    static func error(for response: HTTPErrorResponse) -> NetworkError {
+    static func error(for response: HTTPResponse) -> NetworkError {
         let statusCode = response.statusCode
         switch statusCode {
         case 401:

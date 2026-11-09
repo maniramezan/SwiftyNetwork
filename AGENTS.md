@@ -24,7 +24,9 @@ Sources/SwiftyNetwork/
 ├── Logger.swift              # Internal logging (SwiftCommons LibraryLogger, privacy-aware)
 ├── Network/
 │   ├── NetworkEndpoint.swift        # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
-│   ├── APIClient.swift              # APIClient protocol (typed + Encodable-body requests) + no-body conveniences
+│   ├── APIClient.swift              # APIClient protocol (response(for:) requirement) + request conveniences
+│   ├── DecodedResponse.swift        # Decoded value + HTTPResponse returned by response(for:responseType:)
+│   ├── HTTPResponse.swift           # Status, headers, body (+ Retry-After) for successes and NetworkError
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
 │   ├── NetworkClientConfiguration.swift  # Session, coders, auth, timeouts, instrumentation
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
@@ -266,10 +268,10 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced;
   it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
-- Every HTTP-derived `NetworkError` case carries a non-optional `HTTPErrorResponse` (status, headers, body,
+- Every HTTP-derived `NetworkError` case carries a non-optional `HTTPResponse` (status, headers, body,
   `retryAfter`); only a transport `.timeout(nil)` has none. In tests build errors with `.status(_:retryAfter:body:)`
   from `Tests/SwiftyNetworkTests/Helpers`. Its `description` is redacted, but still never log the body.
-  `HTTPErrorResponse` parses `Retry-After` for 429 and 503 only
+  `HTTPResponse` parses `Retry-After` for 429 and 503 only
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.transportError` is the single transport-error mapping for anything `URLSession` throws:

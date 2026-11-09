@@ -92,7 +92,7 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
     public let classification: NetworkErrorClassification?
 
     /// The HTTP response that failed the mutation, or `nil` when it did not come from an HTTP status.
-    public let response: HTTPErrorResponse?
+    public let response: HTTPResponse?
 
     /// A description of the underlying error.
     public let description: String

@@ -85,11 +85,11 @@ func testGraphQLVariablesEncoding() throws {
 @Test("Empty-response convenience works through APIClient")
 func testProtocolEmptyResponseConvenience() async throws {
     struct EmptyClient: APIClient {
-        func request<T: Decodable & Sendable>(
-            _ endpoint: any NetworkEndpoint, responseType: T.Type
-        ) async throws -> T {
+        func response<T: Decodable & Sendable>(
+            for endpoint: any NetworkEndpoint, responseType: T.Type
+        ) async throws -> DecodedResponse<T> {
             #expect(responseType == EmptyResponse.self)
-            return try JSONDecoder().decode(responseType, from: Data("{}".utf8))
+            return DecodedResponse(value: try JSONDecoder().decode(responseType, from: Data("{}".utf8)))
         }
     }
     let client: any APIClient = EmptyClient()
