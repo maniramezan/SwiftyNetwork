@@ -26,10 +26,72 @@ public enum MutationStatus: Sendable, Equatable {
 
 /// A `Sendable`, `Equatable` snapshot of the error that permanently failed a mutation.
 ///
-/// Wraps an arbitrary `Error` (which is neither `Sendable` nor `Equatable`)
-/// so it can travel through ``MutationStatus`` and be compared in tests,
-/// mirroring how `NetworkClient` wraps foreign errors internally.
+/// Switch on ``category`` to decide what to tell the user. It separates the cases a
+/// UI must treat differently: the device was offline, the server rejected the request
+/// (a `4xx`, so retrying it unchanged will not help), the server failed (a `5xx`), the
+/// credentials expired, or the app cancelled the mutation. The HTTP ``response``, when
+/// there is one, carries the status, headers, and body, for example an API error code.
+///
+/// Example:
+/// ```swift
+/// for await event in await queue.events() {
+///     guard case .failed(let reason) = event.status else { continue }
+///     switch reason.category {
+///     case .cancelled:
+///         break
+///     case .offline, .timedOut:
+///         showBanner("You're offline. Your like wasn't saved.")
+///     case .rejected:
+///         rollBackOptimisticLike()
+///         showError(try? reason.response?.decodeBody(APIError.self))
+///     case .unauthorized:
+///         promptSignIn()
+///     case .serverError, .other:
+///         showBanner("Something went wrong. Try again later.")
+///     }
+/// }
+/// ```
 public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertible {
+    /// What kind of failure ended a mutation.
+    public enum Category: Sendable, Equatable {
+        /// ``MutationQueue/cancel(_:)`` or ``MutationQueue/cancelAll()`` ended the mutation.
+        /// The request did not fail; don't show an error.
+        case cancelled
+
+        /// The device had no usable connection
+        /// (``NetworkError/noInternetConnection``) on the last attempt.
+        case offline
+
+        /// The request timed out (``NetworkError/timeout(_:)``), at the transport layer
+        /// or with a `408`. The server may or may not have processed it.
+        case timedOut
+
+        /// The server answered `401` and authorization could not be refreshed
+        /// (``NetworkError/unauthorized(_:)`` or ``NetworkError/authorizationRefreshFailed(underlying:)``).
+        case unauthorized
+
+        /// The server rejected the request with a `4xx` status other than `401` and `408`,
+        /// such as `400`, `403`, `404`, `409`, `422`, or `429` after retries ran out.
+        /// Retrying the same request will not succeed; ``response`` has the details.
+        case rejected
+
+        /// The server failed with a `5xx` status.
+        case serverError
+
+        /// Any other failure: an invalid URL, an unexpected status, an encoding or
+        /// decoding failure, or an error that is not a ``NetworkError``.
+        case other
+    }
+
+    /// What kind of failure ended the mutation.
+    public let category: Category
+
+    /// The ``NetworkErrorClassification`` of the error, or `nil` when it was not a ``NetworkError``.
+    public let classification: NetworkErrorClassification?
+
+    /// The HTTP response that failed the mutation, or `nil` when it did not come from an HTTP status.
+    public let response: HTTPErrorResponse?
+
     /// A description of the underlying error.
     public let description: String
 
@@ -37,13 +99,53 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
     /// ``MutationQueue/cancelAll()`` was called, not because the request failed.
     ///
     /// Check this before showing a failure message or rolling back an optimistic update.
-    public let isCancellation: Bool
+    public var isCancellation: Bool {
+        category == .cancelled
+    }
 
-    /// Captures a description of the given error.
+    /// The HTTP status code that failed the mutation, or `nil` when it did not come from an HTTP status.
+    public var statusCode: Int? {
+        response?.statusCode
+    }
+
+    /// Whether the failure was transient (``NetworkError/isTransient``), meaning the queue
+    /// gave up only because retries ran out. Enqueuing the mutation again later may succeed.
+    public var isTransient: Bool {
+        classification?.isTransient ?? false
+    }
+
+    /// Captures the given error.
     ///
     /// - Parameter error: The error that caused the mutation to fail permanently.
     public init(_ error: any Error) {
         self.description = String(describing: error)
-        self.isCancellation = error is CancellationError
+        guard let networkError = error as? NetworkError else {
+            self.category = error is CancellationError ? .cancelled : .other
+            self.classification = nil
+            self.response = nil
+            return
+        }
+        self.classification = networkError.classification
+        self.response = networkError.response
+        self.category = Self.category(for: networkError)
+    }
+
+    private static func category(for error: NetworkError) -> Category {
+        switch error {
+        case .noInternetConnection:
+            return .offline
+        case .timeout:
+            return .timedOut
+        case .unauthorized, .authorizationRefreshFailed:
+            return .unauthorized
+        case .forbidden, .notFound, .tooManyRequests, .clientError:
+            return .rejected
+        case .serverError:
+            return .serverError
+        case .invalidURL, .invalidResponse, .invalidData, .unexpectedStatus, .decodingFailed, .encodingFailed:
+            return .other
+        case .underlying(let underlying):
+            return underlying is CancellationError ? .cancelled : .other
+        }
     }
 }

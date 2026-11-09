@@ -6,15 +6,9 @@ extension NetworkRetryPolicy {
     /// Uses the standard retry classification (idempotent methods only) but never
     /// waits, ignoring any `Retry-After` the server sent.
     ///
-    /// - Parameter maxRetries: Maximum retries after the first attempt. Defaults to 2.
-    /// - Returns: A policy with zero backoff, no jitter, and no `Retry-After` wait.
+    /// - Parameter maxRetries: Retries after the first attempt. Defaults to 2.
+    /// - Returns: A policy with ``BackoffPolicy/immediate`` backoff.
     public static func immediate(maxRetries: Int = 2) -> NetworkRetryPolicy {
-        NetworkRetryPolicy(
-            maxRetries: maxRetries,
-            baseDelay: .zero,
-            maxDelay: .zero,
-            jitterRange: 1...1,
-            maxRetryAfter: .zero
-        )
+        NetworkRetryPolicy(maxRetries: maxRetries, backoff: .immediate)
     }
 }

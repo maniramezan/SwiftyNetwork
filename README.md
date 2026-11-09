@@ -337,10 +337,43 @@ for await event in await queue.events() where event.key == "like:video:42" {
     switch event.status {
     case .succeeded:
         break
-    case .failed:
-        showLikeFailedError()
+    case .failed(let reason):
+        handleLikeFailure(reason)
     case .pending, .retrying:
         break
+    }
+}
+```
+
+A failed mutation's `MutationFailureReason.category` tells apart the outcomes a UI handles differently:
+
+| Category | Meaning | Typical handling |
+| --- | --- | --- |
+| `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
+| `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
+| `.rejected` | The server refused it with a 4xx (other than 401/408); retrying won't help | Roll back; show `reason.response` details |
+| `.unauthorized` | `401` and the token could not be refreshed | Prompt sign-in |
+| `.serverError` | The server failed with a 5xx (retried first) | Generic error |
+| `.cancelled` | `cancel(_:)` or `cancelAll()` ended it | Nothing |
+| `.other` | Encoding, decoding, invalid URL, or a non-`NetworkError` | Generic error |
+
+`reason.statusCode` and `reason.response` carry the HTTP details for `.rejected`, `.unauthorized`, and
+`.serverError`, and `reason.isTransient` says whether the queue gave up only because retries ran out:
+
+```swift
+func handleLikeFailure(_ reason: MutationFailureReason) {
+    switch reason.category {
+    case .cancelled:
+        return
+    case .offline, .timedOut:
+        showBanner("You're offline. Your like will need to be sent again.")
+    case .rejected:
+        rollBackLike()
+        showError(try? reason.response?.decodeBody(APIError.self))
+    case .unauthorized:
+        promptSignIn()
+    case .serverError, .other:
+        showBanner("Couldn't save your like.")
     }
 }
 ```
@@ -572,7 +605,9 @@ do {
 ```swift
 let configuration = NetworkClientConfiguration(
     retryPolicy: NetworkRetryPolicy(
-        maxRetries: 2, baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
+        maxRetries: 2,
+        backoff: BackoffPolicy(baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
+    )
 )
 let client = NetworkClient(configuration: configuration)
 ```
@@ -580,15 +615,17 @@ let client = NetworkClient(configuration: configuration)
 - Only `GET`, `HEAD`, `PUT` and `DELETE` are retried. `POST` and `PATCH` are never replayed, even on `429`.
 - Retried failures: `429`, 5xx, timeouts, and lost connectivity. Other 4xx responses and decoding failures
   are reported immediately.
-- Backoff is exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is honored (the wait is at
-  least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
+- Waits follow a `BackoffPolicy`: exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is
+  honored (the wait is at least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
 - Waits are cancellation-aware: cancelling the calling task ends the wait with `CancellationError`.
 - `maxRetries` bounds the retries after the first attempt, independently of `maxAuthRefreshAttempts`.
   Each retry emits `requestRetried` to your `NetworkInstrumentation`.
 
 If the client sits behind a `MutationQueue`, its `MutationRetryPolicy` also retries; enabling both makes
-the attempts multiply, so prefer one. `MutationRetryPolicy` honors `Retry-After` too (bounded by its
-`maxRetryAfter`, default 300s), so a throttled mutation waits as long as the server asked instead of failing.
+the attempts multiply, so prefer one. Both policies have the same shape: `maxRetries` counts retries after the
+first attempt, `backoff` is a `BackoffPolicy`, and `shouldRetry` decides which failures are retried.
+`MutationRetryPolicy.defaultBackoff` honors `Retry-After` up to 300s, so a throttled mutation waits as long as the
+server asked instead of failing.
 
 ## Configuration
 

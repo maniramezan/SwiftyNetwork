@@ -29,6 +29,7 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 - ``NetworkClient``
 - ``NetworkClientConfiguration``
 - ``NetworkRetryPolicy``
+- ``BackoffPolicy``
 - ``APIClient``
 - ``EmptyResponse``
 - ``NetworkError``

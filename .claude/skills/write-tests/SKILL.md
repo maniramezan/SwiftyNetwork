@@ -30,7 +30,7 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
   TestCommons `observeStream` with an event budget and a 5-second deadline, so a failure can't
   hang the suite. A deadline finishes the stream, so don't reuse a stream after a miss.
 - Use `authRefreshDelay: .zero` for `NetworkClientConfiguration` and
-  `MutationRetryPolicy.immediate()` (or `baseDelay: .zero`) for queues.
+  `MutationRetryPolicy.immediate()` (or `backoff: .immediate`) for queues.
 - `#expect(throws: SomeError.self)` for expected errors; `#require` for
   prerequisites; `Issue.record` only for unreachable branches.
 - Hoist mutating calls on local `var`s out of `#expect`/`#require` into a `let`
@@ -43,6 +43,6 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
 ## Checklist per change
 
 - Success path, each failure mapping, and the boundary values (empty body,
-  `maxSize: 0`, `maxAttempts: 0`, negative inputs clamped).
+  `maxSize: 0`, `maxRetries: 0`, negative inputs clamped).
 - Cancellation: a canceled caller and a canceled shared task.
 - Regression test that fails on the old code for every bug fix.

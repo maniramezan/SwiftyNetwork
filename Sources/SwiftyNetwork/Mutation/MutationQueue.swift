@@ -248,7 +248,7 @@ public actor MutationQueue {
             } catch {
                 guard isCurrentWorker(workerID, for: key) else { return }
                 attempt += 1
-                guard retryPolicy.isRetryable(error), attempt <= retryPolicy.maxAttempts else {
+                guard retryPolicy.shouldRetry(error), attempt <= retryPolicy.maxRetries else {
                     let removed = await store.removeIfCurrent(request, for: key)
                     guard isCurrentWorker(workerID, for: key) else { return }
                     if removed {
@@ -272,7 +272,7 @@ public actor MutationQueue {
                     category: .mutation
                 )
                 setStatus(.retrying(attempt: attempt), for: key)
-                let delay = retryPolicy.delay(forAttempt: attempt, after: error)
+                let delay = retryPolicy.delay(forRetry: attempt, after: error)
                 if delay > .zero {
                     try? await Task.sleep(for: delay)
                 }
