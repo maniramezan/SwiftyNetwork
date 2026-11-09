@@ -23,7 +23,7 @@ Sources/SwiftyNetwork/
 ├── Logger.swift              # Internal logging (SwiftCommons LibraryLogger, privacy-aware)
 ├── Network/
 │   ├── NetworkEndpoint.swift        # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
-│   ├── APIClient.swift              # APIClient / NetworkDataSource protocols + no-body convenience
+│   ├── APIClient.swift              # APIClient protocol (typed + Encodable-body requests) + no-body conveniences
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
 │   ├── NetworkClientConfiguration.swift  # Session, coders, auth, timeouts, instrumentation
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
@@ -62,7 +62,7 @@ Sources/SwiftyNetwork/
     └── InMemoryMutationStore.swift  # Default in-memory MutationStore
 
 Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
-├── MockAPIClient.swift              # Scriptable APIClient/NetworkDataSource that records requests
+├── MockAPIClient.swift              # Scriptable APIClient that records requests
 ├── RecordedRequest.swift            # Snapshot of a received endpoint
 ├── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
 └── NetworkRetryPolicy+Testing.swift   # .immediate() zero-backoff request retry policy
@@ -271,7 +271,8 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.mapURLError` is the single transport-error mapping; connectivity-loss codes map to
   `.noInternetConnection` (transient), other `URLError`s are kept intact in `.underlying`
-- `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites
+- `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites.
+  The public knob is `LogLevel.current`; never set the level from a client or configuration
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder
 - All actors use instance isolation -- no locks or GCD in production code
 - `TestHTTPStub` uses TestCommons `TestValueBox` and `ScriptedValues` for synchronous response routing

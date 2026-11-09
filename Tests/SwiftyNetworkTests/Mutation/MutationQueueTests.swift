@@ -327,7 +327,7 @@ struct MutationQueueTests {
         // Matches the existing convention (see NetworkClientTests) of setting
         // the package-wide log level to .debug without resetting it -- the
         // level is process-global, and no test asserts on log output.
-        Logger.setLevel(.debug)
+        LogLevel.current = .debug
 
         // Exercise resumePendingMutations (.info), a transient-then-success
         // retry (.debug + .warning + .debug), and a permanent failure (.error).

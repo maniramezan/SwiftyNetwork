@@ -30,7 +30,6 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 - ``NetworkClientConfiguration``
 - ``NetworkRetryPolicy``
 - ``APIClient``
-- ``NetworkDataSource``
 - ``EmptyResponse``
 - ``NetworkError``
 - ``NetworkErrorClassification``

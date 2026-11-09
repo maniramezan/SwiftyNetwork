@@ -147,6 +147,37 @@ public struct SSLPinningConfiguration: Sendable, Equatable {
     }
 }
 
+// MARK: - Session Factory
+
+extension SSLPinningConfiguration {
+    /// Creates a `URLSession` that enforces these pins during TLS server-trust evaluation.
+    ///
+    /// Pass the result as ``NetworkClientConfiguration/session``. Keep and reuse the
+    /// session: each call creates a new session with its own connection pool.
+    ///
+    /// Example:
+    /// ```swift
+    /// let pinning = SSLPinningConfiguration(policies: [...])
+    /// let client = NetworkClient(configuration: NetworkClientConfiguration(session: pinning.makeSession()))
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - configuration: The session configuration. Defaults to `.default`.
+    ///   - delegateQueue: The queue for delegate callbacks. Defaults to `nil`, which
+    ///     lets `URLSession` create a serial queue.
+    /// - Returns: A session whose delegate evaluates server trust against these pins.
+    public func makeSession(
+        configuration: URLSessionConfiguration = .default,
+        delegateQueue: OperationQueue? = nil
+    ) -> URLSession {
+        URLSession(
+            configuration: configuration,
+            delegate: SSLPinningURLSessionDelegate(configuration: self),
+            delegateQueue: delegateQueue
+        )
+    }
+}
+
 // MARK: - URLSession Delegate
 
 final class SSLPinningURLSessionDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {

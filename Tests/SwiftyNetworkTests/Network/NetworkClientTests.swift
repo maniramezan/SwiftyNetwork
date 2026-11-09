@@ -31,8 +31,7 @@ struct NetworkClientIntegrationTests {
         let response = try await client.request(endpoint, responseType: TestUser.self)
 
         #expect(response == user)
-        let count = await client.attemptCount()
-        #expect(count == 1)
+        #expect(stub.requests.count == 1)
     }
 
     @Test("NetworkClient applies authorization provider when endpoint has none")
@@ -125,8 +124,7 @@ struct NetworkClientIntegrationTests {
         let refreshCalls = await provider.refreshCallCount
         #expect(refreshCalls == 1)
         #expect(await provider.rejectedAuthorizations == [.bearer(token: "expired")])
-        let count = await client.attemptCount()
-        #expect(count == 2)
+        #expect(stub.requests.count == 2)
     }
 
     @Test("NetworkClient reports authorization refresh failure")
@@ -156,9 +154,9 @@ struct NetworkClientIntegrationTests {
             try await client.request(endpoint, responseType: TestUser.self)
         } throws: { error in
             guard let networkError = error as? NetworkError,
-                case .authorizationRefreshFailed = networkError
+                case .authorizationRefreshFailed(let underlying) = networkError
             else { return false }
-            return true
+            return underlying is TestAuthorizationProvider.RefreshFailed
         }
     }
 
@@ -532,12 +530,16 @@ struct NetworkClientIntegrationTests {
         }
     }
 
-    @Test("NetworkClient emits debug logs when logLevel is debug")
+    @Test("NetworkClient emits debug logs when LogLevel.current is debug")
     func testNetworkClientDebugLogging() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
+        let previousLevel = LogLevel.current
+        LogLevel.current = .debug
+        defer { LogLevel.current = previousLevel }
+        #expect(LogLevel.current == .debug)
         let session = stub.session
-        let configuration = NetworkClientConfiguration(session: session, logLevel: .debug)
+        let configuration = NetworkClientConfiguration(session: session)
         let client = NetworkClient(configuration: configuration)
         let testId = "debug-logging"
         let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
@@ -706,36 +708,5 @@ struct NetworkClientIntegrationTests {
 
         let refreshCalls = await provider.refreshCallCount
         #expect(refreshCalls == 0)
-    }
-
-    @Test("NetworkClient keeps request configuration stable across awaits")
-    func testNetworkClientUsesConfigurationSnapshot() async throws {
-        let stub = try TestHTTPStub()
-        defer { stub.invalidate() }
-        let initialSession = stub.session
-        let replacementStub = try TestHTTPStub()
-        defer { replacementStub.invalidate() }
-        let provider = GatedAuthorizationProvider()
-        defer { provider.release.open() }
-        let configuration = NetworkClientConfiguration(session: initialSession, authorizationProvider: provider)
-        let client = NetworkClient(configuration: configuration)
-        let user = TestUser(id: "snapshot", name: "Stable", email: "stable@example.com")
-        let data = try JSONEncoder().encode(user)
-        let testId = "configuration-snapshot"
-        stub.setResponses(
-            [.success(data)],
-            for: testId
-        )
-
-        let endpoint = makeEndpointWithTestId(testId)
-        async let response = client.request(endpoint, responseType: TestUser.self)
-        _ = try await waitUntil(
-            timeout: .seconds(2), operation: { await provider.callCount }, matching: { $0 == 1 })
-        await client.updateConfiguration(NetworkClientConfiguration(session: replacementStub.session, logLevel: .debug))
-        provider.release.open()
-
-        let fetched = try await response
-
-        #expect(fetched == user)
     }
 }

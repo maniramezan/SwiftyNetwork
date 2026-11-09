@@ -46,7 +46,7 @@ struct NetworkRetryPolicyTests {
             .noInternetConnection,
             .decodingFailed(underlying: URLError(.badURL)),
             .encodingFailed(underlying: URLError(.badURL)),
-            .authorizationRefreshFailed,
+            .authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)),
             .underlying(URLError(.badURL)),
         ]
         for error in errors {
@@ -82,7 +82,7 @@ struct NetworkRetryPolicyTests {
             .invalidURL(url: "x"),
             .decodingFailed(underlying: URLError(.badURL)),
             .encodingFailed(underlying: URLError(.badURL)),
-            .authorizationRefreshFailed,
+            .authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)),
             .underlying(URLError(.cancelled)),
         ]
         for error in errors {

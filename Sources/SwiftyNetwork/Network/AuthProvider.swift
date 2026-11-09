@@ -8,19 +8,17 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// actor StaticTokenProvider: AuthorizationProvider {
-///     let token: String
+/// struct StaticTokenProvider: AuthorizationProvider {
+///     struct CannotRefresh: Error {}
 ///
-///     init(token: String) {
-///         self.token = token
-///     }
+///     let token: String
 ///
 ///     func currentAuthorization() async -> AuthorizationType {
 ///         .bearer(token: token)
 ///     }
 ///
-///     func refreshAuthorizationIfNeeded() async -> Bool {
-///         false
+///     func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+///         throw CannotRefresh()
 ///     }
 /// }
 /// ```
@@ -28,29 +26,23 @@ public protocol AuthorizationProvider: Sendable {
     /// Returns the current authorization to apply to requests.
     func currentAuthorization() async -> AuthorizationType
 
-    /// Attempts to refresh authorization credentials.
+    /// Refreshes credentials after `rejected` was answered with `401`.
     ///
-    /// Called when a request receives an unauthorized response.
-    ///
-    /// - Returns: `true` if the authorization was successfully refreshed; otherwise `false`.
-    func refreshAuthorizationIfNeeded() async -> Bool
-
-    /// Attempts to refresh credentials after `rejected` was answered with `401`.
-    ///
-    /// ``NetworkClient`` calls this (rather than ``refreshAuthorizationIfNeeded()``)
-    /// and passes the exact authorization it sent. Override it to skip redundant
-    /// refreshes: when several requests fail with the same expired token, only
-    /// the first needs to refresh. The rest see that the current authorization
-    /// already differs from the rejected one and can retry immediately. This
+    /// ``NetworkClient`` passes the exact authorization it sent. Use it to skip
+    /// redundant refreshes: when several requests fail with the same expired token,
+    /// only the first needs to refresh. The rest see that the current authorization
+    /// already differs from the rejected one and can return immediately. This
     /// matters for servers that rotate refresh tokens, where a second refresh
     /// with a consumed refresh token fails and signs the user out.
     ///
-    /// The default implementation ignores `rejected` and calls
-    /// ``refreshAuthorizationIfNeeded()``.
+    /// Return normally when newer authorization is available, and the client
+    /// retries the request once with it. Throw when it is not; the client then
+    /// throws ``NetworkError/authorizationRefreshFailed(underlying:)`` carrying
+    /// your error, except that a `CancellationError` propagates unchanged.
     ///
     /// - Parameter rejected: The authorization that the server rejected.
-    /// - Returns: `true` if newer authorization is available for a retry; otherwise `false`.
-    func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool
+    /// - Throws: Any error explaining why authorization could not be refreshed.
+    func refreshAuthorization(rejecting rejected: AuthorizationType) async throws
 
     /// Decides whether a `401` warrants a credential refresh.
     ///
@@ -67,10 +59,10 @@ public protocol AuthorizationProvider: Sendable {
 }
 
 extension AuthorizationProvider {
-    public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
-        await refreshAuthorizationIfNeeded()
-    }
-
+    /// Returns `true`, so every `401` is refreshed once.
+    ///
+    /// - Parameter response: The `401` response.
+    /// - Returns: `true`.
     public func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool {
         true
     }
@@ -84,16 +76,15 @@ extension AuthorizationProvider {
 /// using `Security.framework` or another secure mechanism, and inject
 /// refreshed tokens through the supplied refresh handler.
 ///
-/// Concurrent calls to ``refreshAuthorizationIfNeeded()`` are coalesced so the
-/// refresh handler runs at most once per refresh cycle even if many requests
-/// receive a 401 simultaneously. A `401` that arrives *after* a refresh already
-/// replaced the rejected token reuses the new token instead of refreshing again
-/// (see ``refreshAuthorization(rejecting:)``).
+/// Concurrent refreshes are coalesced so the refresh handler runs at most once
+/// per refresh cycle even if many requests receive a 401 simultaneously. A `401`
+/// that arrives *after* a refresh already replaced the rejected token reuses the
+/// new token instead of refreshing again (see ``refreshAuthorization(rejecting:)``).
 ///
 /// Example:
 /// ```swift
 /// let provider = OAuthAuthorizationProvider(initialAccessToken: "old-token") {
-///     await tokenService.refreshAccessToken()
+///     try await tokenService.refreshAccessToken()
 /// }
 ///
 /// let configuration = NetworkClientConfiguration(authorizationProvider: provider)
@@ -102,18 +93,20 @@ extension AuthorizationProvider {
 public actor OAuthAuthorizationProvider: AuthorizationProvider {
     private var accessToken: String
     private var credentialGeneration = UUID()
-    private let refreshTokenHandler: @Sendable () async -> String?
-    private var inFlightRefresh: Task<Bool, Never>?
+    private let refreshTokenHandler: @Sendable () async throws -> String
+    private var inFlightRefresh: Task<Void, any Error>?
 
     /// Creates an OAuth authorization provider.
     ///
     /// - Parameters:
     ///   - initialAccessToken: The initial OAuth access token to use for requests.
     ///   - refreshTokenHandler: A closure invoked to obtain a new access token.
-    ///     Return the new token on success, or `nil` to signal refresh failure.
+    ///     Return the new token on success, or throw to signal refresh failure.
+    ///     ``NetworkClient`` surfaces the error as
+    ///     ``NetworkError/authorizationRefreshFailed(underlying:)``.
     public init(
         initialAccessToken: String,
-        refreshTokenHandler: @escaping @Sendable () async -> String?
+        refreshTokenHandler: @escaping @Sendable () async throws -> String
     ) {
         self.accessToken = initialAccessToken
         self.refreshTokenHandler = refreshTokenHandler
@@ -124,43 +117,35 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
         .bearer(token: accessToken)
     }
 
-    /// Attempts to refresh the access token, coalescing concurrent calls.
+    /// Refreshes only if `rejected` is still the current token, coalescing concurrent calls.
     ///
-    /// If a refresh is already in flight, this awaits its result rather than
-    /// invoking the refresh handler again.
+    /// If another request already refreshed the token since `rejected` was
+    /// sent, this returns without invoking the refresh handler, so the caller
+    /// retries with the newer token. An in-flight refresh is joined rather than
+    /// invoking the handler again.
     ///
-    /// - Returns: `true` if a new token was stored or an explicit token update
-    ///   superseded this refresh; `false` otherwise.
-    public func refreshAuthorizationIfNeeded() async -> Bool {
+    /// - Parameter rejected: The authorization the server answered with `401`.
+    /// - Throws: The refresh handler's error, unless an explicit
+    ///   ``updateAccessToken(_:)`` superseded the refresh.
+    public func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+        if rejected != .bearer(token: accessToken) {
+            Logger.debug("Rejected token was already replaced; skipping refresh", category: .auth)
+            return
+        }
+
         if let existing = inFlightRefresh {
-            return await existing.value
+            try await existing.value
+            return
         }
 
         let generation = credentialGeneration
-        let task = Task<Bool, Never> { [weak self] in
-            await self?.performRefresh(generation: generation) ?? false
+        let task = Task<Void, any Error> { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.performRefresh(generation: generation)
         }
         inFlightRefresh = task
-
-        let result = await task.value
-        inFlightRefresh = nil
-        return result
-    }
-
-    /// Refreshes only if `rejected` is still the current token.
-    ///
-    /// If another request already refreshed the token since `rejected` was
-    /// sent, this returns `true` without invoking the refresh handler, so the
-    /// caller retries with the newer token. An in-flight refresh is joined.
-    ///
-    /// - Parameter rejected: The authorization the server answered with `401`.
-    /// - Returns: `true` if a token newer than `rejected` is available.
-    public func refreshAuthorization(rejecting rejected: AuthorizationType) async -> Bool {
-        if rejected != .bearer(token: accessToken) {
-            Logger.debug("Rejected token was already replaced; skipping refresh", category: .auth)
-            return true
-        }
-        return await refreshAuthorizationIfNeeded()
+        defer { inFlightRefresh = nil }
+        try await task.value
     }
 
     /// Replaces the stored access token, for example after sign-in or when
@@ -173,15 +158,19 @@ public actor OAuthAuthorizationProvider: AuthorizationProvider {
         credentialGeneration = UUID()
     }
 
-    /// Runs the refresh handler and applies the new token if one was returned.
-    private func performRefresh(generation: UUID) async -> Bool {
-        let newToken = await refreshTokenHandler()
-        // Explicit token updates supersede both successful and failed refresh results.
-        guard generation == credentialGeneration else { return true }
-        if let newToken {
-            accessToken = newToken
-            return true
+    /// Runs the refresh handler and stores the new token.
+    private func performRefresh(generation: UUID) async throws {
+        let newToken: String
+        do {
+            newToken = try await refreshTokenHandler()
+        } catch {
+            // An explicit token update supersedes a failed refresh.
+            guard generation == credentialGeneration else { return }
+            Logger.error("Refresh handler failed", error: error, category: .auth)
+            throw error
         }
-        return false
+        // An explicit token update supersedes a successful refresh, too.
+        guard generation == credentialGeneration else { return }
+        accessToken = newToken
     }
 }

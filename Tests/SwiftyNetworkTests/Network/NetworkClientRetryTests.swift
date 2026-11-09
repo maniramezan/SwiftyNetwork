@@ -17,8 +17,8 @@ struct NetworkClientRetryTests {
             configuration: NetworkClientConfiguration(
                 session: stub.session,
                 authRefreshDelay: 0,
-                instrumentation: instrumentation,
-                retryPolicy: retryPolicy
+                retryPolicy: retryPolicy,
+                instrumentation: instrumentation
             )
         )
     }
@@ -44,7 +44,7 @@ struct NetworkClientRetryTests {
         }
         #expect(response.retryAfter == 5)
         #expect(response.body == body)
-        #expect(await client.attemptCount() == 1)
+        #expect(stub.requests.count == 1)
     }
 
     @Test("A 429 surfaces an HTTP-date Retry-After as a non-negative delay")
@@ -186,7 +186,6 @@ struct NetworkClientRetryTests {
 
         #expect(response == user)
         #expect(stub.requests.count == 5)
-        #expect(await client.attemptCount() == 5)
     }
 
     @Test("PUT and DELETE are retried")
