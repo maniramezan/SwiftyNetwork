@@ -106,7 +106,8 @@ on logout. `SingleFlightCache` adds fetch sharing, not an atomic transaction API
 
 ## Mutation lifecycle
 
-`MutationQueue.enqueue` saves a Codable `MutationRequest`, then starts background
+`MutationQueue.enqueue` saves a Codable, versioned `MutationRequest` (no credentials;
+the queue's client authorizes each attempt through its provider), then starts background
 work per `MutationKey`. Replacing the same key coalesces pending work. Workers
 retry transient failures according to `MutationRetryPolicy`, publish status, and
 conditionally remove completed requests using `MutationStore.removeIfCurrent`.

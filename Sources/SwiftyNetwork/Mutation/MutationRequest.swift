@@ -12,11 +12,19 @@ import Foundation
 /// Conforms to ``NetworkEndpoint`` directly, so it can be executed by any
 /// ``APIClient`` without an adapter.
 ///
-/// - Important: ``AuthorizationType`` cases can carry secrets (bearer
-///   tokens, API keys, basic-auth credentials). A durable ``MutationStore``
-///   implementation is responsible for storing the encoded request securely
-///   (e.g. Keychain-backed storage on Apple platforms) -- SwiftyNetwork does
-///   not encrypt persisted mutations itself.
+/// A mutation request never carries credentials. Its ``authorization`` is
+/// always ``AuthorizationType/none``, so the client behind the
+/// ``MutationQueue`` authorizes every attempt through its
+/// ``AuthorizationProvider``, including a replay after relaunch, and a `401`
+/// refreshes the token instead of replaying a stale one. Configure that
+/// provider on the client you pass to the queue.
+///
+/// - Important: Headers and bodies are persisted as given. Don't put
+///   secrets in them; a durable ``MutationStore`` should still store
+///   requests securely, because bodies can contain user data.
+///
+/// The encoded form carries a schema ``version``; decoding rejects a newer
+/// version than this library understands rather than misreading it.
 ///
 /// Example:
 /// ```swift
@@ -24,13 +32,25 @@ import Foundation
 /// await queue.enqueue(request, key: "like:video:42")
 /// ```
 public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
+    /// The schema version this library writes and the newest it can read.
+    public static let version = 1
+
+    /// The base URL for the API.
     public var baseURL: String
+    /// The endpoint path.
     public var path: String
+    /// The HTTP method to use.
     public var method: HTTPMethod
+    /// Query parameters to append to the URL.
     public var queryItems: [URLQueryItem]?
+    /// Additional HTTP headers.
     public var headers: [String: String]?
-    public var authorization: AuthorizationType
+    /// The request body, pre-encoded.
     public var body: Data?
+
+    /// Always ``AuthorizationType/none``: the queue's client authorizes mutations
+    /// through its ``AuthorizationProvider``.
+    public var authorization: AuthorizationType { .none }
 
     /// Creates a mutation request from explicit field values.
     ///
@@ -40,7 +60,6 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     ///   - method: The HTTP method to use.
     ///   - queryItems: Query parameters to append to the URL. Defaults to `nil`.
     ///   - headers: Additional HTTP headers. Defaults to `nil`.
-    ///   - authorization: The authorization to apply. Defaults to ``AuthorizationType/none``.
     ///   - body: The request body, pre-encoded. Defaults to `nil`.
     public init(
         baseURL: String,
@@ -48,7 +67,6 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         method: HTTPMethod,
         queryItems: [URLQueryItem]? = nil,
         headers: [String: String]? = nil,
-        authorization: AuthorizationType = .none,
         body: Data? = nil
     ) {
         self.baseURL = baseURL
@@ -56,21 +74,23 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         self.method = method
         self.queryItems = queryItems
         self.headers = headers
-        self.authorization = authorization
         self.body = body
     }
 
     /// Captures an existing endpoint's fields into a replayable, `Codable` value.
     ///
+    /// The endpoint's ``NetworkEndpoint/authorization`` is not captured; see the
+    /// type-level documentation.
+    ///
     /// - Parameter endpoint: The endpoint to capture.
     public init(endpoint: any NetworkEndpoint) {
+        Self.warnIfDroppingAuthorization(of: endpoint)
         self.init(
             baseURL: endpoint.baseURL,
             path: endpoint.path,
             method: endpoint.method,
             queryItems: endpoint.queryItems,
             headers: endpoint.headers,
-            authorization: endpoint.authorization,
             body: endpoint.body
         )
     }
@@ -79,7 +99,8 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     /// ``NetworkClient/request(_:body:responseType:)``'s content-type behavior.
     ///
     /// A `Content-Type: application/json` header is added automatically unless
-    /// the endpoint already declares one.
+    /// the endpoint already declares one. The endpoint's
+    /// ``NetworkEndpoint/authorization`` is not captured.
     ///
     /// - Parameters:
     ///   - endpoint: The endpoint to capture.
@@ -93,14 +114,23 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     ) throws {
         let encodedBody = try encoder.encode(encodableBody)
         let headers = HTTPHeaders.addingJSONContentTypeIfMissing(to: endpoint.headers)
+        Self.warnIfDroppingAuthorization(of: endpoint)
         self.init(
             baseURL: endpoint.baseURL,
             path: endpoint.path,
             method: endpoint.method,
             queryItems: endpoint.queryItems,
             headers: headers,
-            authorization: endpoint.authorization,
             body: encodedBody
+        )
+    }
+
+    private static func warnIfDroppingAuthorization(of endpoint: any NetworkEndpoint) {
+        guard endpoint.authorization != .none else { return }
+        Logger.warning(
+            "MutationRequest does not persist endpoint authorization; "
+                + "configure an AuthorizationProvider on the queue's client instead",
+            category: .mutation
         )
     }
 }
@@ -109,7 +139,7 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
 
 extension MutationRequest {
     private enum CodingKeys: String, CodingKey {
-        case baseURL, path, method, queryItems, headers, authorization, body
+        case version, baseURL, path, method, queryItems, headers, body
     }
 
     /// `URLQueryItem` does not conform to `Codable` on all supported
@@ -126,26 +156,43 @@ extension MutationRequest {
         var queryItem: URLQueryItem { URLQueryItem(name: name, value: value) }
     }
 
+    /// Decodes a persisted request.
+    ///
+    /// A payload without a `version` (written by SwiftyNetwork 1.x) is read as
+    /// version 1, and any persisted `authorization` in it is ignored.
+    ///
+    /// - Throws: `DecodingError.dataCorrupted` when the payload's `version` is
+    ///   newer than ``version``, or any error from decoding the fields.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        guard version <= Self.version else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: container,
+                debugDescription: "MutationRequest version \(version) is newer than supported version \(Self.version)"
+            )
+        }
         self.baseURL = try container.decode(String.self, forKey: .baseURL)
         self.path = try container.decode(String.self, forKey: .path)
         self.method = try container.decode(HTTPMethod.self, forKey: .method)
         self.queryItems = try container.decodeIfPresent([CodableQueryItem].self, forKey: .queryItems)?
             .map(\.queryItem)
         self.headers = try container.decodeIfPresent([String: String].self, forKey: .headers)
-        self.authorization = try container.decode(AuthorizationType.self, forKey: .authorization)
         self.body = try container.decodeIfPresent(Data.self, forKey: .body)
     }
 
+    /// Encodes the request with the current schema ``version``.
+    ///
+    /// - Throws: Any error from encoding the fields.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.version, forKey: .version)
         try container.encode(baseURL, forKey: .baseURL)
         try container.encode(path, forKey: .path)
         try container.encode(method, forKey: .method)
         try container.encodeIfPresent(queryItems?.map(CodableQueryItem.init), forKey: .queryItems)
         try container.encodeIfPresent(headers, forKey: .headers)
-        try container.encode(authorization, forKey: .authorization)
         try container.encodeIfPresent(body, forKey: .body)
     }
 }
