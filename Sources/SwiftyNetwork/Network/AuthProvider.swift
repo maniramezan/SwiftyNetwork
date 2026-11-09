@@ -64,7 +64,7 @@ public protocol AuthorizationProvider: Sendable {
     ///
     /// - Parameter response: The `401` response, including its headers and body.
     /// - Returns: `true` to refresh and retry once; `false` to fail immediately.
-    func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool
+    func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool
 }
 
 extension AuthorizationProvider {
@@ -72,7 +72,7 @@ extension AuthorizationProvider {
     ///
     /// - Parameter response: The `401` response.
     /// - Returns: `true`.
-    public func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool {
+    public func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
         true
     }
 }

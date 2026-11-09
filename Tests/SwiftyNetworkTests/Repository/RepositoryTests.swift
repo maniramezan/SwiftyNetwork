@@ -137,17 +137,17 @@ private actor MockNetworkDataSource: APIClient {
         self.result = result
     }
 
-    func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    func response<T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         requestCount += 1
         switch result {
         case .success(let user):
             guard let value = user as? T else {
                 throw TestRepositoryError.networkFailure
             }
-            return value
+            return DecodedResponse(value: value)
         case .failure(let error):
             throw error
         }

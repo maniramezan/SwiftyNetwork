@@ -243,7 +243,7 @@ func testTooManyRequestsAccessors() {
 @Test("serverError exposes retryAfter, its response body, and its response")
 func testServerErrorRetryAfterAccessors() {
     let body = Data("maintenance".utf8)
-    let response = HTTPErrorResponse(statusCode: 503, headers: ["Retry-After": "30"], body: body)
+    let response = HTTPResponse(statusCode: 503, headers: ["Retry-After": "30"], body: body)
     let error = NetworkError.serverError(response)
 
     #expect(error.retryAfter == .seconds(30))

@@ -29,28 +29,28 @@ public enum NetworkError: Error, LocalizedError, Sendable {
 
     /// The server returned `429 Too Many Requests`.
     ///
-    /// ``HTTPErrorResponse/retryAfter`` carries the parsed `Retry-After` header, and the
+    /// ``HTTPResponse/retryAfter`` carries the parsed `Retry-After` header, and the
     /// response headers carry rate-limit details such as `X-RateLimit-Remaining`.
     ///
     /// - Parameter response: The rejected response.
-    case tooManyRequests(HTTPErrorResponse)
+    case tooManyRequests(HTTPResponse)
 
     /// The server returned `401 Unauthorized`, and authorization could not be refreshed.
     ///
     /// - Parameter response: The rejected response.
-    case unauthorized(HTTPErrorResponse)
+    case unauthorized(HTTPResponse)
 
     /// The server returned `403 Forbidden`.
     ///
     /// ``NetworkClient`` never refreshes authorization for a `403`.
     ///
     /// - Parameter response: The rejected response.
-    case forbidden(HTTPErrorResponse)
+    case forbidden(HTTPResponse)
 
     /// The server returned `404 Not Found`.
     ///
     /// - Parameter response: The rejected response.
-    case notFound(HTTPErrorResponse)
+    case notFound(HTTPResponse)
 
     /// The server returned a `4xx` status that has no more specific case
     /// (anything other than `401`, `403`, `404`, `408`, and `429`).
@@ -58,26 +58,26 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The request itself was rejected; retrying it unchanged will not help.
     ///
     /// - Parameter response: The rejected response.
-    case clientError(HTTPErrorResponse)
+    case clientError(HTTPResponse)
 
     /// The server returned a `5xx` status.
     ///
-    /// For a `503`, ``HTTPErrorResponse/retryAfter`` carries the parsed `Retry-After` header.
+    /// For a `503`, ``HTTPResponse/retryAfter`` carries the parsed `Retry-After` header.
     ///
     /// - Parameter response: The failed response.
-    case serverError(HTTPErrorResponse)
+    case serverError(HTTPResponse)
 
     /// The server returned a non-2xx status outside `4xx` and `5xx`, such as an
     /// unfollowed `3xx` redirect.
     ///
     /// - Parameter response: The unexpected response.
-    case unexpectedStatus(HTTPErrorResponse)
+    case unexpectedStatus(HTTPResponse)
 
     /// The request timed out at the transport layer or the server returned `408 Request Timeout`.
     ///
     /// - Parameter response: The `408` response, or `nil` when the timeout happened at the
     ///   transport layer, where there is no response.
-    case timeout(HTTPErrorResponse?)
+    case timeout(HTTPResponse?)
 
     /// The transport layer reported that no internet connection is available.
     case noInternetConnection
@@ -148,12 +148,12 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// ``forbidden(_:)``, ``notFound(_:)``, ``timeout(_:)`` (for a `408`),
     /// ``tooManyRequests(_:)``, ``clientError(_:)``, ``serverError(_:)``, and
     /// ``unexpectedStatus(_:)``. Use it to tell apart failures that share a status code, for
-    /// example by decoding an API error `code` from ``HTTPErrorResponse/body``, reading
-    /// ``HTTPErrorResponse/wwwAuthenticate``, or reading rate-limit headers with
-    /// ``HTTPErrorResponse/header(_:)``.
+    /// example by decoding an API error `code` from ``HTTPResponse/body``, reading
+    /// ``HTTPResponse/wwwAuthenticate``, or reading rate-limit headers with
+    /// ``HTTPResponse/header(_:)``.
     ///
     /// - Returns: The response, or `nil` for cases that did not come from an HTTP status.
-    public var response: HTTPErrorResponse? {
+    public var response: HTTPResponse? {
         switch self {
         case .unauthorized(let response), .forbidden(let response), .notFound(let response),
             .tooManyRequests(let response), .clientError(let response), .serverError(let response),

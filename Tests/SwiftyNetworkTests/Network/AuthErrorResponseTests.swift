@@ -15,11 +15,11 @@ private func errorBody(_ code: String) -> Data {
     Data(#"{"code":"\#(code)"}"#.utf8)
 }
 
-@Suite("HTTPErrorResponse")
-struct HTTPErrorResponseTests {
+@Suite("HTTPResponse")
+struct HTTPResponseTests {
     @Test("Header lookup ignores case and exposes the WWW-Authenticate challenge")
     func headerLookupIsCaseInsensitive() {
-        let response = HTTPErrorResponse(
+        let response = HTTPResponse(
             statusCode: 401,
             headers: ["Www-Authenticate": challenge, "Content-Type": "application/json"]
         )
@@ -32,10 +32,10 @@ struct HTTPErrorResponseTests {
 
     @Test("Decodes the body and surfaces decoding failures for empty bodies")
     func decodesBody() throws {
-        let response = HTTPErrorResponse(statusCode: 403, body: errorBody("registration_required"))
+        let response = HTTPResponse(statusCode: 403, body: errorBody("registration_required"))
         #expect(try response.decodeBody(APIErrorBody.self) == APIErrorBody(code: "registration_required"))
 
-        let empty = HTTPErrorResponse(statusCode: 403)
+        let empty = HTTPResponse(statusCode: 403)
         #expect(throws: DecodingError.self) {
             try empty.decodeBody(APIErrorBody.self)
         }
@@ -54,7 +54,7 @@ struct HTTPErrorResponseTests {
         )
         let body = errorBody("registration_required")
 
-        let response = HTTPErrorResponse(httpResponse, body: body)
+        let response = HTTPResponse(httpResponse, body: body)
 
         #expect(response.statusCode == 403)
         #expect(response.header("x-request-id") == "abc")
@@ -63,7 +63,7 @@ struct HTTPErrorResponseTests {
 
     @Test("Descriptions redact header values and body bytes, including inside a NetworkError")
     func descriptionsAreRedacted() {
-        let response = HTTPErrorResponse(
+        let response = HTTPResponse(
             statusCode: 401,
             headers: ["Set-Cookie": "session=SECRET-COOKIE", "X-Request-Id": "abc"],
             body: Data("SECRET-BODY".utf8)
@@ -84,13 +84,13 @@ struct HTTPErrorResponseTests {
         }
         #expect(
             response.description
-                == "HTTPErrorResponse(statusCode: 401, headers: [Set-Cookie, X-Request-Id], body: 11 bytes)"
+                == "HTTPResponse(statusCode: 401, headers: [Set-Cookie, X-Request-Id], body: 11 bytes)"
         )
     }
 
     @Test("Every HTTP error exposes its response; transport errors return nil")
     func responseAccessorCoversHTTPErrors() {
-        let response = HTTPErrorResponse(statusCode: 401)
+        let response = HTTPResponse(statusCode: 401)
         #expect(NetworkError.unauthorized(response).response == response)
         #expect(NetworkError.forbidden(response).response == response)
         #expect(NetworkError.tooManyRequests(response).response == response)

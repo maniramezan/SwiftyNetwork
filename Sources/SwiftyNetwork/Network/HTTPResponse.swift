@@ -1,10 +1,13 @@
 import Foundation
 
-/// The status code, headers, and body of an HTTP response that ``NetworkClient`` rejected.
+/// The status code, headers, and body of an HTTP response.
 ///
-/// Attached to every ``NetworkError`` case that comes from an HTTP status, so callers can tell
-/// apart failures that share a status code, for example a `401` whose body carries
-/// `"code": "not_authenticated"` (a token refresh can fix it) from one that does not.
+/// A successful request returns it in ``DecodedResponse/response`` (see
+/// ``APIClient/response(for:responseType:)``), so callers can read headers such as `ETag`,
+/// `Link`, or rate-limit counters. It is also attached to every ``NetworkError`` case that
+/// comes from an HTTP status, so callers can tell apart failures that share a status code, for
+/// example a `401` whose body carries `"code": "not_authenticated"` (a token refresh can fix it)
+/// from one that does not.
 ///
 /// The body is the raw server payload and can contain user-specific data. SwiftyNetwork never
 /// logs it; do the same in your own logging. The `description` and `debugDescription` are
@@ -22,7 +25,7 @@ import Foundation
 ///     }
 /// }
 /// ```
-public struct HTTPErrorResponse: Sendable, Equatable {
+public struct HTTPResponse: Sendable, Equatable {
     /// The HTTP status code of the response.
     public let statusCode: Int
 
@@ -105,14 +108,14 @@ public struct HTTPErrorResponse: Sendable, Equatable {
     }
 }
 
-extension HTTPErrorResponse: CustomStringConvertible, CustomDebugStringConvertible {
+extension HTTPResponse: CustomStringConvertible, CustomDebugStringConvertible {
     /// A redacted summary: the status code, the sorted header names, and the body size in bytes.
     ///
     /// Header values and body bytes are omitted because they can carry credentials,
     /// cookies, or personal data.
     public var description: String {
         let names = headers.keys.sorted().joined(separator: ", ")
-        return "HTTPErrorResponse(statusCode: \(statusCode), headers: [\(names)], body: \(body.count) bytes)"
+        return "HTTPResponse(statusCode: \(statusCode), headers: [\(names)], body: \(body.count) bytes)"
     }
 
     /// The same redacted summary as ``description``.
