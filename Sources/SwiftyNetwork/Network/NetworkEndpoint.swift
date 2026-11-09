@@ -120,8 +120,11 @@ enum EndpointURLBuilder {
         guard var components = URLComponents(string: baseURL) else {
             throw NetworkError.invalidURL(url: baseURL + path)
         }
-        guard let scheme = components.scheme,
-            ["http", "https"].contains(scheme.lowercased()),
+        guard let scheme = components.scheme else {
+            throw NetworkError.invalidURL(url: baseURL + path)
+        }
+        let lowerScheme = scheme.lowercased()
+        guard lowerScheme == "http" || lowerScheme == "https",
             let host = components.host,
             !host.isEmpty
         else {

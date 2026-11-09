@@ -137,7 +137,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     ) async throws -> Entity {
         // One entry read, so the value and its timestamp come from the same write.
         if let entry = await cache.entry(forKey: cacheKey),
-            CachePolicy.returnCacheIfNotExpired(maxAge: maxAge).shouldUseCachedData(cacheAge: entry.age())
+            entry.age() <= maxAge
         {
             return entry.value
         }

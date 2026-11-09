@@ -47,6 +47,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | Entry count didn't bound bytes in `RemoteDataCache` | maniramezan/SwiftyNetwork#20 (`InMemoryCache(maxCost:cost:)`, `InMemoryCache<Data>(maxBytes:)`) |
 | `SwiftyNetworkTesting` had no DocC | maniramezan/SwiftyNetwork#21 (catalog, Docs CI validation, `.spi.yml`) |
 | Credentialed requests followed redirects to any host with their headers | `RedirectPolicy`, default `.stripCredentialsAcrossOrigins` (strips credentials across origins, refuses HTTPS downgrades; per-task delegate so injected and pinned sessions are covered, while a session delegate that handles redirects keeps deciding them) |
+| Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 
 ## Priority follow-ups
 
@@ -56,7 +57,6 @@ security audit or measured performance gains.
 | Priority | Finding | Proposed change and acceptance criteria |
 | --- | --- | --- |
 | Medium | Concurrent requests are not coalesced at the repository boundary. (Value and timestamp now come from one `CacheEntry` read.) | Explore explicit repository fetch sharing without conflating cache policies or users. |
-| Medium | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording. | Document ownership and prohibit concurrent external coder reconfiguration; evaluate factory-based configuration in an API proposal. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
 
 ## Evolution constraints
