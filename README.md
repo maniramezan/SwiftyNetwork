@@ -95,6 +95,10 @@ public struct UserEndpoint: NetworkEndpoint {
 }
 ```
 
+`HTTPMethod` predefines `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`. Any other method is a
+string literal away, for example `let method: HTTPMethod = "PROPFIND"`. `HTTPMethod` is a struct, so a `switch`
+over it needs a `default` case.
+
 ### 2. Create a Data Model
 
 ```swift

@@ -33,7 +33,7 @@ Sources/SwiftyNetwork/
 │   ├── RetryAfter.swift             # Internal: Retry-After parsing (delta-seconds + HTTP-date)
 │   ├── RequestTrace.swift           # Internal: per-attempt instrumentation reporting
 │   ├── EncodedBodyEndpoint.swift    # Internal: body-override wrapper + HTTPHeaders helpers
-│   ├── HTTPMethod.swift             # HTTP verb enum
+│   ├── HTTPMethod.swift             # Extensible HTTP method struct (string literals for custom verbs)
 │   ├── EmptyResponse.swift          # Decodable for bodiless responses
 │   ├── AuthorizationType.swift      # Auth header strategies
 │   ├── AuthProvider.swift           # AuthorizationProvider protocol + OAuth actor
