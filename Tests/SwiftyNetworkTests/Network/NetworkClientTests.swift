@@ -103,7 +103,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 2,
-            authRefreshDelay: 0
+            authRefreshDelay: .zero
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "4", name: "Mo", email: "mo@example.com")
@@ -563,7 +563,7 @@ struct NetworkClientIntegrationTests {
             refreshResult: true,
             refreshedAuthorization: .bearer(token: "fresh")
         )
-        let authRefreshDelay: TimeInterval = 0.2
+        let authRefreshDelay: Duration = .milliseconds(200)
         let configuration = NetworkClientConfiguration(
             session: session,
             authorizationProvider: provider,
@@ -603,7 +603,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            authRefreshDelay: 0
+            authRefreshDelay: .zero
         )
         let client = NetworkClient(configuration: configuration)
         let user = TestUser(id: "nodelay", name: "NoDelay", email: "nodelay@example.com")
@@ -640,7 +640,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            authRefreshDelay: 0
+            authRefreshDelay: .zero
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "max-retries"
@@ -688,7 +688,7 @@ struct NetworkClientIntegrationTests {
             session: session,
             authorizationProvider: provider,
             maxAuthRefreshAttempts: 1,
-            authRefreshDelay: 0
+            authRefreshDelay: .zero
         )
         let client = NetworkClient(configuration: configuration)
         let testId = "endpoint-auth-401"

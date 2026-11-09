@@ -44,10 +44,10 @@ public struct NetworkRetryPolicy: Sendable {
 
     /// The backoff before the first retry, in seconds. Each later retry doubles
     /// the previous value until ``maxDelay`` caps it.
-    public var baseDelay: TimeInterval
+    public var baseDelay: Duration
 
     /// The upper bound on the computed backoff, in seconds, after jitter.
-    public var maxDelay: TimeInterval
+    public var maxDelay: Duration
 
     /// The multiplicative jitter range applied to the computed backoff, to keep
     /// many clients from retrying in lockstep.
@@ -56,7 +56,7 @@ public struct NetworkRetryPolicy: Sendable {
     /// The upper bound on how long a server-supplied `Retry-After` is honored, in seconds.
     ///
     /// A larger value is clamped to this bound rather than ignored.
-    public var maxRetryAfter: TimeInterval
+    public var maxRetryAfter: Duration
 
     /// A conservative default: 2 retries, 0.5s base delay doubling up to 8s,
     /// ±50% jitter, and `Retry-After` honored up to 30s.
@@ -72,16 +72,16 @@ public struct NetworkRetryPolicy: Sendable {
     ///   - maxRetryAfter: Upper bound on an honored `Retry-After`, in seconds. Defaults to 30.
     public init(
         maxRetries: Int = 2,
-        baseDelay: TimeInterval = 0.5,
-        maxDelay: TimeInterval = 8,
+        baseDelay: Duration = .milliseconds(500),
+        maxDelay: Duration = .seconds(8),
         jitterRange: ClosedRange<Double> = 0.5...1.5,
-        maxRetryAfter: TimeInterval = 30
+        maxRetryAfter: Duration = .seconds(30)
     ) {
         self.maxRetries = max(0, maxRetries)
-        self.baseDelay = max(0, baseDelay)
+        self.baseDelay = max(.zero, baseDelay)
         self.maxDelay = max(self.baseDelay, maxDelay)
         self.jitterRange = jitterRange
-        self.maxRetryAfter = max(0, maxRetryAfter)
+        self.maxRetryAfter = max(.zero, maxRetryAfter)
     }
 
     /// Whether a failed request should be retried, ignoring the attempt budget.
@@ -114,19 +114,18 @@ public struct NetworkRetryPolicy: Sendable {
         forRetry retry: Int,
         after error: NetworkError? = nil,
         jitterGenerator: @Sendable () -> Double = { Double.random(in: 0...1) }
-    ) -> TimeInterval {
+    ) -> Duration {
         let jitter = max(0, jitterRange.lowerBound)...max(0, jitterRange.upperBound)
         let backoff = withoutActuallyEscaping(jitterGenerator) { jitterSource in
             let delay =
                 RetryBackoff.exponential(
-                    baseDelay: .seconds(baseDelay),
-                    maxDelay: .seconds(maxDelay),
+                    baseDelay: baseDelay,
+                    maxDelay: maxDelay,
                     jitter: jitter,
                     jitterSource: jitterSource
                 )
                 .delay(forRetry: retry)
-                .timeInterval
-            return min(max(0, delay), maxDelay)
+            return min(max(.zero, delay), maxDelay)
         }
         return RetryAfter.delay(backoff: backoff, retryAfter: error?.retryAfter, cap: maxRetryAfter)
     }
@@ -136,12 +135,12 @@ extension RetryAfter {
     /// Combines a computed backoff with a server-supplied `Retry-After`.
     ///
     /// - Parameters:
-    ///   - backoff: The policy's own backoff, in seconds.
+    ///   - backoff: The policy's own backoff.
     ///   - retryAfter: The server's requested wait, if any.
     ///   - cap: The longest `retryAfter` that is honored.
     /// - Returns: `backoff` without a `Retry-After`; otherwise the larger of
     ///   `backoff` and `retryAfter` clamped to `cap`.
-    static func delay(backoff: TimeInterval, retryAfter: TimeInterval?, cap: TimeInterval) -> TimeInterval {
+    static func delay(backoff: Duration, retryAfter: Duration?, cap: Duration) -> Duration {
         guard let retryAfter else { return backoff }
         return max(backoff, min(retryAfter, cap))
     }

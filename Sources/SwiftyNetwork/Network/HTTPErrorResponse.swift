@@ -34,13 +34,13 @@ public struct HTTPErrorResponse: Sendable, Equatable {
     /// The raw response body. Empty when the server sent none.
     public let body: Data
 
-    /// How long the server asked the client to wait before retrying, in seconds.
+    /// How long the server asked the client to wait before retrying.
     ///
     /// Parsed from the `Retry-After` header, in either its delta-seconds or HTTP-date form, when
     /// the status is `429 Too Many Requests` or `503 Service Unavailable` (RFC 9110 §10.2.3).
     /// `nil` for other statuses and when the header is absent or malformed.
     /// ``NetworkRetryPolicy`` and ``MutationRetryPolicy`` honor it.
-    public let retryAfter: TimeInterval?
+    public let retryAfter: Duration?
 
     /// The statuses on which `Retry-After` is meaningful for an error (RFC 9110 §10.2.3).
     static let retryAfterStatusCodes: Set<Int> = [429, 503]

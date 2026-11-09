@@ -1,4 +1,5 @@
 import Foundation
+import SwiftCommons
 
 /// Configuration settings for ``NetworkClient``.
 ///
@@ -19,7 +20,7 @@ import Foundation
 /// let configuration = NetworkClientConfiguration(
 ///     decoder: decoder,
 ///     authorizationProvider: provider,
-///     timeoutInterval: 15
+///     timeout: .seconds(15)
 /// )
 /// let client = NetworkClient(configuration: configuration)
 /// ```
@@ -67,8 +68,8 @@ public struct NetworkClientConfiguration: Sendable {
     /// This applies only to the `401` refresh path. It is unrelated to ``retryPolicy``,
     /// which controls backoff for transient failures.
     ///
-    /// Set this to `0` in tests or when the API can be retried immediately.
-    public var authRefreshDelay: TimeInterval
+    /// Set this to `.zero` in tests or when the API can be retried immediately.
+    public var authRefreshDelay: Duration
 
     /// Opt-in retry policy for transient failures of idempotent requests.
     ///
@@ -79,10 +80,10 @@ public struct NetworkClientConfiguration: Sendable {
     /// `POST` and `PATCH` are never retried. See ``NetworkRetryPolicy``.
     public var retryPolicy: NetworkRetryPolicy?
 
-    /// The timeout interval for requests, in seconds.
+    /// The timeout for each request.
     ///
     /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
-    public var timeoutInterval: TimeInterval
+    public var timeout: Duration
 
     /// Observer for request timing, retries, and outcomes.
     ///
@@ -102,7 +103,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
-    ///   - timeoutInterval: Request timeout interval. Defaults to 30 seconds.
+    ///   - timeout: The timeout for each request. Defaults to 30 seconds.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     public init(
         session: URLSession = .shared,
@@ -110,9 +111,9 @@ public struct NetworkClientConfiguration: Sendable {
         encoder: JSONEncoder = JSONEncoder(),
         authorizationProvider: (any AuthorizationProvider)? = nil,
         maxAuthRefreshAttempts: Int = 1,
-        authRefreshDelay: TimeInterval = 1.0,
+        authRefreshDelay: Duration = .seconds(1),
         retryPolicy: NetworkRetryPolicy? = nil,
-        timeoutInterval: TimeInterval = 30,
+        timeout: Duration = .seconds(30),
         instrumentation: (any NetworkInstrumentation)? = nil
     ) {
         self.session = session
@@ -122,7 +123,7 @@ public struct NetworkClientConfiguration: Sendable {
         self.maxAuthRefreshAttempts = max(0, maxAuthRefreshAttempts)
         self.authRefreshDelay = authRefreshDelay
         self.retryPolicy = retryPolicy
-        self.timeoutInterval = timeoutInterval
+        self.timeout = timeout
         self.instrumentation = instrumentation
     }
 }

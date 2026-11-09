@@ -103,7 +103,7 @@ func testRepositoryReturnsCacheIfNotExpired() async throws {
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
         cacheKey: key,
-        policy: .returnCacheIfNotExpired(maxAge: 60)
+        policy: .returnCacheIfNotExpired(maxAge: .seconds(60))
     )
 
     #expect(fetched == user)
@@ -125,7 +125,7 @@ func testRepositoryRefreshesWhenExpired() async throws {
     let fetched = try await repository.fetch(
         using: TestEndpoint(),
         cacheKey: key,
-        policy: .returnCacheIfNotExpired(maxAge: 1)
+        policy: .returnCacheIfNotExpired(maxAge: .seconds(1))
     )
 
     #expect(fetched == networkUser)
