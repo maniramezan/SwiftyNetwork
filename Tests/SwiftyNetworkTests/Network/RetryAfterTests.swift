@@ -41,15 +41,23 @@ struct RetryAfterTests {
         #expect(RetryAfter.parse("Wed, 99 Foo 2015 07:28:00 GMT", now: now) == nil)
     }
 
-    @Test("Reads the header from an HTTPURLResponse case-insensitively")
-    func readsHeaderFromResponse() throws {
+    @Test("HTTPErrorResponse reads the header case-insensitively for 429 and 503 only")
+    func errorResponseParsesRetryAfterForRateLimitStatuses() throws {
         let url = try #require(URL(string: "https://api.test.com/users"))
-        let response = try #require(
+        let tooMany = try #require(
             HTTPURLResponse(url: url, statusCode: 429, httpVersion: nil, headerFields: ["retry-after": "7"])
+        )
+        let unavailable = try #require(
+            HTTPURLResponse(url: url, statusCode: 503, httpVersion: nil, headerFields: ["Retry-After": "3"])
+        )
+        let teapot = try #require(
+            HTTPURLResponse(url: url, statusCode: 418, httpVersion: nil, headerFields: ["Retry-After": "3"])
         )
         let without = try #require(HTTPURLResponse(url: url, statusCode: 429, httpVersion: nil, headerFields: [:]))
 
-        #expect(RetryAfter.parse(from: response) == 7)
-        #expect(RetryAfter.parse(from: without) == nil)
+        #expect(HTTPErrorResponse(tooMany, body: Data()).retryAfter == 7)
+        #expect(HTTPErrorResponse(unavailable, body: Data()).retryAfter == 3)
+        #expect(HTTPErrorResponse(teapot, body: Data()).retryAfter == nil)
+        #expect(HTTPErrorResponse(without, body: Data()).retryAfter == nil)
     }
 }

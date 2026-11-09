@@ -42,7 +42,9 @@ struct MutationQueueTests {
 
     @Test("Transient failures are retried in the background until success")
     func retriesTransientFailuresThenSucceeds() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success])
+        let fake = FakeAPIClient(outcomes: [
+            .failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)), .success,
+        ])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
 
@@ -58,7 +60,10 @@ struct MutationQueueTests {
     func exhaustsRetriesAndFails() async {
         let policy = MutationRetryPolicy(maxAttempts: 2, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .failure(NetworkError.timeout)]
+            outcomes: [
+                .failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)),
+                .failure(NetworkError.timeout(nil)),
+            ]
         )
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: policy)
@@ -71,7 +76,7 @@ struct MutationQueueTests {
         #expect(
             events.map(\.status) == [
                 .pending, .retrying(attempt: 1), .retrying(attempt: 2),
-                .failed(MutationFailureReason(NetworkError.timeout)),
+                .failed(MutationFailureReason(NetworkError.timeout(nil))),
             ])
         #expect(await fake.callCount == 3)
         #expect(await store.load(for: "like:video:42") == nil)
@@ -79,7 +84,7 @@ struct MutationQueueTests {
 
     @Test("Non-retryable failures are reported failed without retrying")
     func nonRetryableFailureFailsImmediately() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden())])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden(.status(403)))])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
 
@@ -87,7 +92,8 @@ struct MutationQueueTests {
         await queue.enqueue(makeRequest(), key: "like:video:42")
         let events = await collected
 
-        #expect(events.map(\.status) == [.pending, .failed(MutationFailureReason(NetworkError.forbidden()))])
+        #expect(
+            events.map(\.status) == [.pending, .failed(MutationFailureReason(NetworkError.forbidden(.status(403))))])
         #expect(await fake.callCount == 1)
     }
 
@@ -153,7 +159,7 @@ struct MutationQueueTests {
 
     @Test("A non-retryable failure does not discard a replacement enqueued while it was in flight")
     func nonRetryableFailurePreservesInFlightReplacement() async {
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden()), .success])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.forbidden(.status(403))), .success])
         let gate = await fake.hold(call: 0)
         let store = InMemoryMutationStore()
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
@@ -192,7 +198,7 @@ struct MutationQueueTests {
         // test can supersede the key while that terminal attempt is in flight.
         let policy = MutationRetryPolicy(maxAttempts: 1, baseDelay: 0, maxDelay: 0, jitterRange: 0...0)
         let fake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
+            outcomes: [.failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)), .success]
         )
         let terminalAttemptGate = await fake.hold(call: 1)
         let store = InMemoryMutationStore()
@@ -250,7 +256,7 @@ struct MutationQueueTests {
     @Test("A positive retry delay is actually awaited before the next attempt")
     func retryDelayIsAwaited() async {
         let policy = MutationRetryPolicy(maxAttempts: 3, baseDelay: 0.01, maxDelay: 0.01, jitterRange: 1...1)
-        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout), .success])
+        let fake = FakeAPIClient(outcomes: [.failure(NetworkError.timeout(nil)), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
         let stream = await queue.events()
 
@@ -273,7 +279,7 @@ struct MutationQueueTests {
             jitterRange: 1...1,
             maxRetryAfter: 0.2
         )
-        let throttled = NetworkError.tooManyRequests(retryAfter: 5, data: Data())
+        let throttled = NetworkError.tooManyRequests(.status(429, retryAfter: 5))
         let fake = FakeAPIClient(outcomes: [.failure(throttled), .success])
         let queue = MutationQueue(client: fake, store: InMemoryMutationStore(), retryPolicy: policy)
         let stream = await queue.events()
@@ -292,7 +298,7 @@ struct MutationQueueTests {
     @Test("Independent keys are processed without blocking each other")
     func independentKeysProcessConcurrently() async {
         let slowFake = FakeAPIClient(
-            outcomes: [.failure(NetworkError.timeout), .failure(NetworkError.timeout), .success]
+            outcomes: [.failure(NetworkError.timeout(nil)), .failure(NetworkError.timeout(nil)), .success]
         )
         let slowGate = await slowFake.hold(call: 0)
         defer { slowGate.open() }
@@ -328,7 +334,7 @@ struct MutationQueueTests {
         let store = InMemoryMutationStore()
         await store.save(makeRequest(liked: true), for: "resume:1")
         let fake = FakeAPIClient(outcomes: [
-            .failure(NetworkError.timeout), .success, .failure(NetworkError.forbidden()),
+            .failure(NetworkError.timeout(nil)), .success, .failure(NetworkError.forbidden(.status(403))),
         ])
         let queue = MutationQueue(client: fake, store: store, retryPolicy: Self.noDelayPolicy)
         let stream = await queue.events()
@@ -341,7 +347,7 @@ struct MutationQueueTests {
         await queue.enqueue(makeRequest(path: "/other"), key: "other:1")
         let failedEvent = await permanentlyFailed
 
-        #expect(failedEvent?.status == .failed(MutationFailureReason(NetworkError.forbidden())))
+        #expect(failedEvent?.status == .failed(MutationFailureReason(NetworkError.forbidden(.status(403)))))
     }
 
     @Test("status(for:) returns nil for a key that was never enqueued")
@@ -463,7 +469,7 @@ struct MutationQueueTests {
     @Test("MutationFailureReason flags cancellation only for CancellationError")
     func failureReasonFlagsCancellation() {
         #expect(MutationFailureReason(CancellationError()).isCancellation)
-        #expect(!MutationFailureReason(NetworkError.timeout).isCancellation)
+        #expect(!MutationFailureReason(NetworkError.timeout(nil)).isCancellation)
     }
 }
 

@@ -2,10 +2,9 @@ import Foundation
 
 /// The status code, headers, and body of an HTTP response that ``NetworkClient`` rejected.
 ///
-/// Attached to ``NetworkError/unauthorized(response:)`` and
-/// ``NetworkError/forbidden(response:)`` so callers can tell apart failures that share a
-/// status code, for example a `401` whose body carries `"code": "not_authenticated"`
-/// (a token refresh can fix it) from one that does not.
+/// Attached to every ``NetworkError`` case that comes from an HTTP status, so callers can tell
+/// apart failures that share a status code, for example a `401` whose body carries
+/// `"code": "not_authenticated"` (a token refresh can fix it) from one that does not.
 ///
 /// The body is the raw server payload and can contain user-specific data. SwiftyNetwork never
 /// logs it; do the same in your own logging. The `description` and `debugDescription` are
@@ -35,16 +34,40 @@ public struct HTTPErrorResponse: Sendable, Equatable {
     /// The raw response body. Empty when the server sent none.
     public let body: Data
 
+    /// How long the server asked the client to wait before retrying, in seconds.
+    ///
+    /// Parsed from the `Retry-After` header, in either its delta-seconds or HTTP-date form, when
+    /// the status is `429 Too Many Requests` or `503 Service Unavailable` (RFC 9110 §10.2.3).
+    /// `nil` for other statuses and when the header is absent or malformed.
+    /// ``NetworkRetryPolicy`` and ``MutationRetryPolicy`` honor it.
+    public let retryAfter: TimeInterval?
+
+    /// The statuses on which `Retry-After` is meaningful for an error (RFC 9110 §10.2.3).
+    static let retryAfterStatusCodes: Set<Int> = [429, 503]
+
     /// Creates a response snapshot.
+    ///
+    /// ``retryAfter`` is parsed from `headers` for a `429` or `503`.
     ///
     /// - Parameters:
     ///   - statusCode: The HTTP status code.
     ///   - headers: The response headers.
     ///   - body: The raw response body.
-    public init(statusCode: Int, headers: [String: String] = [:], body: Data = Data()) {
+    ///   - receivedAt: The instant the response arrived, used to resolve an HTTP-date
+    ///     `Retry-After`. Defaults to now.
+    public init(statusCode: Int, headers: [String: String] = [:], body: Data = Data(), receivedAt: Date = Date()) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
+        if Self.retryAfterStatusCodes.contains(statusCode),
+            let value = headers.first(where: {
+                $0.key.caseInsensitiveCompare(RetryAfter.headerName) == .orderedSame
+            })?.value
+        {
+            self.retryAfter = RetryAfter.parse(value, now: receivedAt)
+        } else {
+            self.retryAfter = nil
+        }
     }
 
     /// Returns the value of the header named `name`, matching case-insensitively.

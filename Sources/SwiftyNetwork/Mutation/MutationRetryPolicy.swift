@@ -8,7 +8,7 @@ import SwiftCommons
 /// ``NetworkClientConfiguration/retryPolicy`` (idempotent requests only).
 /// `MutationRetryPolicy` is the dedicated retry loop for the mutation queue,
 /// which also replays non-idempotent requests: exponential backoff with
-/// jitter, bounded by ``maxAttempts`` and ``maxDelay``. A `429` response with
+/// jitter, bounded by ``maxAttempts`` and ``maxDelay``. A `429` or `503` response with
 /// a `Retry-After` header makes the queue wait at least that long, bounded by
 /// ``maxRetryAfter``.
 ///
@@ -36,7 +36,7 @@ public struct MutationRetryPolicy: Sendable {
 
     /// The upper bound on how long a server-supplied `Retry-After` is honored, in seconds.
     ///
-    /// Applies to ``NetworkError/tooManyRequests(retryAfter:data:)``. This is
+    /// Applies to ``NetworkError/tooManyRequests(_:)``. This is
     /// the one deliberate exception to ``maxDelay``: a mutation hitting `429`
     /// waits as long as the server asked, up to this bound, rather than
     /// retrying early and being throttled again.
@@ -98,8 +98,9 @@ public struct MutationRetryPolicy: Sendable {
     /// Computes the wait before a retry attempt.
     ///
     /// The result is the jittered exponential backoff, capped at ``maxDelay``.
-    /// When `error` is ``NetworkError/tooManyRequests(retryAfter:data:)`` with a
-    /// `Retry-After`, the result is at least that long, clamped to ``maxRetryAfter``.
+    /// When `error` carries a `Retry-After` (``NetworkError/tooManyRequests(_:)``
+    /// or a `503` ``NetworkError/serverError(_:)``), the result
+    /// is at least that long, clamped to ``maxRetryAfter``.
     ///
     /// - Parameters:
     ///   - attempt: The 1-based retry attempt number about to run.

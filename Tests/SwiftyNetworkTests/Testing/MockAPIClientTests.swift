@@ -33,7 +33,7 @@ struct MockAPIClientTests {
     @Test("Consumes queued responses in order and repeats the last one")
     func consumesQueuedResponsesInOrder() async throws {
         let client = MockAPIClient()
-        await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+        await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 
         await #expect(throws: NetworkError.self) {
             try await client.request(LikeEndpoint())
@@ -115,7 +115,7 @@ struct MockAPIClientTests {
     @Test("MutationQueue retries through the mock with an immediate policy")
     func mutationQueueWithImmediatePolicy() async {
         let client = MockAPIClient()
-        await client.stub(.post, "/likes", with: .failure(NetworkError.timeout), .empty)
+        await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
         let queue = MutationQueue(client: client, retryPolicy: .immediate())
         let events = await queue.events()
 

@@ -57,7 +57,7 @@ public protocol AuthorizationProvider: Sendable {
     /// ``NetworkClient`` calls this before ``refreshAuthorization(rejecting:)``. Return
     /// `false` when the response body or `WWW-Authenticate` header shows that a new
     /// token cannot help, for example an unrelated `401` from a backend. The client then
-    /// throws ``NetworkError/unauthorized(response:)`` without refreshing or retrying.
+    /// throws ``NetworkError/unauthorized(_:)`` without refreshing or retrying.
     ///
     /// The default implementation returns `true`, which keeps the refresh-once behavior.
     ///
