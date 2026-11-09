@@ -72,5 +72,6 @@ you for your report.
   do not remove secrets from the original values.
 - Partition cache keys by account/tenant and clear sensitive data on logout.
   RemoteDataCache keys only by URL; isolate instances for authenticated content.
-- Encrypt sensitive durable mutations, including captured authorization and body
-  data. Persistence and retry do not guarantee exactly-once server execution.
+- Encrypt sensitive durable mutations: `MutationRequest` never captures
+  authorization, but headers and bodies are persisted as given. Persistence and
+  retry do not guarantee exactly-once server execution.

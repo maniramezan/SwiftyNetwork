@@ -17,7 +17,7 @@ import SwiftCommons
 ///
 /// Example:
 /// ```swift
-/// let queue = MutationQueue(client: NetworkClient.shared)
+/// let queue = MutationQueue(client: authenticatedClient)
 ///
 /// // Fire-and-forget: returns immediately, retries in the background.
 /// let request = MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42"))
@@ -77,11 +77,13 @@ public actor MutationQueue {
     /// Creates a mutation queue.
     ///
     /// - Parameters:
-    ///   - client: The client used to execute mutations. Defaults to ``NetworkClient/shared``.
+    ///   - client: The client used to execute mutations. Configure its
+    ///     ``NetworkClientConfiguration/authorizationProvider``: mutations carry no
+    ///     credentials of their own (see ``MutationRequest``).
     ///   - store: Where pending mutations are persisted. Defaults to a fresh ``InMemoryMutationStore``.
     ///   - retryPolicy: Governs retry attempts and backoff. Defaults to ``MutationRetryPolicy/default``.
     public init(
-        client: any APIClient = NetworkClient.shared,
+        client: any APIClient,
         store: any MutationStore = InMemoryMutationStore(),
         retryPolicy: MutationRetryPolicy = .default
     ) {
