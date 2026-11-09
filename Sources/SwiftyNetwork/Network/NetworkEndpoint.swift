@@ -136,8 +136,11 @@ enum EndpointURLBuilder {
             path.isEmpty ? "" : String(path.trimmingPrefix(while: { $0 == "/" })).ensuringStarts(with: "/")
         components.path = basePath + endpointPath
 
+        let existingQueryItems = components.queryItems ?? []
         if let queryItems, !queryItems.isEmpty {
-            components.queryItems = queryItems
+            components.queryItems = existingQueryItems + queryItems
+        } else if !existingQueryItems.isEmpty {
+            components.queryItems = existingQueryItems
         }
 
         guard let url = components.url else {
