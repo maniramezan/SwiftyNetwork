@@ -17,7 +17,7 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
 | Repository | `Repository.swift` | Coordinate local and network sources using `CachePolicy` |
 | Mutations | `Mutation/` | Retry, coalesce, persist, and observe background mutations |
-| Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()` |
+| Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()`, `NetworkRetryPolicy.immediate()` |
 
 Internal building blocks are kept in their own files so they can be reused and
 tested directly: `HTTPStatusValidator` (status → `NetworkError`), `RequestTrace`
@@ -46,9 +46,14 @@ The encoded-body overload uses the configured encoder and preserves an explicitl
 supplied Content-Type header.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
-with `retryDelay` before replay. The client passes the exact provider authorization
+with `authRefreshDelay` before replay. The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
-skips refreshing a token that a concurrent request already replaced. This is **not** general transient-error retry.
+skips refreshing a token that a concurrent request already replaced. This is **not** general transient-error retry;
+that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by default), which `performRequest`
+consults through `retryOrFail` after any failed attempt. It retries `GET`/`HEAD`/`PUT`/`DELETE` only, on 429, 5xx,
+timeout and lost connectivity, with capped jittered backoff and a clamped `Retry-After`. Refresh and policy retries
+have independent budgets (`refreshAttempt`, `retryAttempt`). `HTTPStatusValidator` maps 429 to
+`NetworkError.tooManyRequests`, with `RetryAfter` parsing the header (delta-seconds and HTTP-date).
 Endpoint-specific authorization does not trigger provider refresh. Attempt counts
 include auth replays. Instrumentation callbacks are awaited and therefore add to
 request latency; observers should do bounded work. Durations use `ContinuousClock`

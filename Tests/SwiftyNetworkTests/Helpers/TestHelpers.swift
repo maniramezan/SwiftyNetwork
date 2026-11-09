@@ -16,16 +16,19 @@ struct TestEndpoint: NetworkEndpoint {
     var method: HTTPMethod { .get }
 }
 
-func makeEndpointWithTestId(_ id: String) -> some NetworkEndpoint {
+func makeEndpointWithTestId(_ id: String, method: HTTPMethod = .get) -> some NetworkEndpoint {
     struct E: NetworkEndpoint {
         let testId: String
-        init(testId: String) { self.testId = testId }
+        let method: HTTPMethod
+        init(testId: String, method: HTTPMethod) {
+            self.testId = testId
+            self.method = method
+        }
         let baseURL = "https://api.test.com"
         var path: String { "/users/123" }
-        var method: HTTPMethod { .get }
         var queryItems: [URLQueryItem]? { [URLQueryItem(name: "test-id", value: testId)] }
     }
-    return E(testId: id)
+    return E(testId: id, method: method)
 }
 
 /// A scriptable ``APIClient`` for testing ``MutationQueue`` without going

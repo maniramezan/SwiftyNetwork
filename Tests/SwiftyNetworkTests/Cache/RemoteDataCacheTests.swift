@@ -78,7 +78,8 @@ struct RemoteDataCacheTests {
             (403, .forbidden),
             (404, .notFound),
             (408, .timeout),
-            (429, .serverError(statusCode: 429)),
+            (429, .tooManyRequests),
+            (503, .serverError(statusCode: 503)),
         ]
         let cache = RemoteDataCache(cache: InMemoryCache<Data>(), session: stub.session)
 

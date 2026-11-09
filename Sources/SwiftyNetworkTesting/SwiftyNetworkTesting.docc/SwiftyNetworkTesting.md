@@ -51,3 +51,16 @@ unless you set a fallback with ``MockAPIClient/setFallback(_:)``.
 
 Inject these spies into your network configuration to observe credential refresh
 and request lifecycle events without defining app-specific copies.
+
+### Retry policies
+
+Both policies have a zero-wait `.immediate()` form that also ignores `Retry-After`,
+so a scripted `429` never makes a test sleep:
+
+```swift
+let configuration = NetworkClientConfiguration(retryPolicy: .immediate(maxRetries: 2))
+let queue = MutationQueue(client: client, retryPolicy: .immediate())
+```
+
+These helpers extend `SwiftyNetwork.NetworkRetryPolicy` and
+`SwiftyNetwork.MutationRetryPolicy`.

@@ -37,6 +37,18 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     ///   - data: The response body, if one was returned.
     case serverError(statusCode: Int, data: Data?)
 
+    /// The server returned `429 Too Many Requests`.
+    ///
+    /// The `Retry-After` response header is parsed into `retryAfter` in
+    /// seconds, from either its delta-seconds or HTTP-date form. It is `nil`
+    /// when the header is absent or malformed. A `429` is never reported as
+    /// ``serverError(statusCode:data:)``.
+    ///
+    /// - Parameters:
+    ///   - retryAfter: How long the server asked the client to wait, in seconds.
+    ///   - data: The response body (e.g. a problem+json document). Empty when the server sent no body.
+    case tooManyRequests(retryAfter: TimeInterval?, data: Data)
+
     /// The server returned `401 Unauthorized`, and authorization could not be refreshed.
     case unauthorized
 
@@ -75,6 +87,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "The response data was invalid or corrupted."
         case .serverError(let statusCode, _):
             return "Server error with status code \(statusCode)."
+        case .tooManyRequests:
+            return "Too many requests. Please try again later."
         case .unauthorized:
             return "Unauthorized access. Please check your credentials."
         case .forbidden:
@@ -96,10 +110,27 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         }
     }
 
-    /// The underlying error data for server errors, if available.
-    public var serverErrorData: Data? {
-        if case .serverError(_, let data) = self {
+    /// The response body for ``serverError(statusCode:data:)`` and ``tooManyRequests(retryAfter:data:)``, if available.
+    ///
+    /// `nil` for every other case.
+    public var responseBody: Data? {
+        switch self {
+        case .serverError(_, let data):
             return data
+        case .tooManyRequests(_, let data):
+            return data
+        default:
+            return nil
+        }
+    }
+
+    /// How long the server asked the client to wait before retrying, in seconds.
+    ///
+    /// Non-`nil` only for ``tooManyRequests(retryAfter:data:)`` responses that
+    /// carried a valid `Retry-After` header.
+    public var retryAfter: TimeInterval? {
+        if case .tooManyRequests(let retryAfter, _) = self {
+            return retryAfter
         }
         return nil
     }
@@ -147,6 +178,8 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case invalidData
     /// A non-2xx HTTP status the client doesn't have a more specific case for.
     case serverError(statusCode: Int)
+    /// The server returned `429 Too Many Requests`.
+    case tooManyRequests
     /// The server returned `401` and authorization could not be refreshed.
     case unauthorized
     /// The server returned `403`.
@@ -168,14 +201,15 @@ public enum NetworkErrorClassification: Sendable, Equatable {
 
     /// Whether an error of this classification is generally worth retrying.
     ///
-    /// `true` for timeouts, missing connectivity, malformed responses, and
-    /// 5xx server errors -- conditions a retry can plausibly resolve.
-    /// `false` for everything else, including 4xx client errors (other than
-    /// what ``NetworkClient`` already handles via auth refresh) and
+    /// `true` for timeouts, missing connectivity, malformed responses, `429`
+    /// rate limiting, and 5xx server errors -- conditions a retry can
+    /// plausibly resolve. `false` for everything else, including other 4xx
+    /// client errors (other than what ``NetworkClient`` already handles via
+    /// auth refresh) and
     /// encoding/decoding failures, since a retry can't change their outcome.
     public var isTransient: Bool {
         switch self {
-        case .timeout, .noConnection, .invalidResponse:
+        case .timeout, .noConnection, .invalidResponse, .tooManyRequests:
             return true
         case .serverError(let statusCode):
             return statusCode >= 500
@@ -205,6 +239,8 @@ extension NetworkError {
             return .invalidData
         case .serverError(let statusCode, _):
             return .serverError(statusCode: statusCode)
+        case .tooManyRequests:
+            return .tooManyRequests
         case .unauthorized:
             return .unauthorized
         case .forbidden:
