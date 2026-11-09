@@ -160,7 +160,7 @@ defer { stub.invalidate() }
 stub.session                              // Inject into the client/cache
 
 // Auth testing
-TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:)
+TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:shouldRefresh:)
 
 // Scripted APIClient (no URLSession) -- prefer for MutationQueue / repository / service tests
 let client = MockAPIClient()                              // from SwiftyNetworkTesting
@@ -260,7 +260,10 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
   (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
 - 429 is `NetworkError.tooManyRequests(retryAfter:data:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
-  provider authorization it sent, so providers can skip refreshing a token that was already replaced
+  provider authorization it sent, so providers can skip refreshing a token that was already replaced;
+  it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
+- `NetworkError.unauthorized` / `.forbidden` carry an optional `HTTPErrorResponse` (status, headers, body),
+  built only for 401/403 in `NetworkClient` and `RemoteDataCache`; never log the body
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.mapURLError` is the single transport-error mapping; connectivity-loss codes map to

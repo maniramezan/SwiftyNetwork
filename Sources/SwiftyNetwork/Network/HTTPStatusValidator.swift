@@ -14,19 +14,27 @@ enum HTTPStatusValidator {
     ///     and ``NetworkError/tooManyRequests(retryAfter:data:)``.
     ///   - retryAfter: The parsed `Retry-After` delay, attached to a `429` error. Required so
     ///     callers cannot silently drop the header; pass `nil` when there is none.
-    /// - Throws: ``NetworkError/unauthorized``, ``NetworkError/forbidden``, ``NetworkError/notFound``,
-    ///   ``NetworkError/timeout``, ``NetworkError/tooManyRequests(retryAfter:data:)``, or
+    ///   - response: The full response snapshot, attached to ``NetworkError/unauthorized(response:)``
+    ///     and ``NetworkError/forbidden(response:)``.
+    /// - Throws: ``NetworkError/unauthorized(response:)``, ``NetworkError/forbidden(response:)``,
+    ///   ``NetworkError/notFound``, ``NetworkError/timeout``,
+    ///   ``NetworkError/tooManyRequests(retryAfter:data:)``, or
     ///   ``NetworkError/serverError(statusCode:data:)``.
-    static func validate(statusCode: Int, data: Data, retryAfter: TimeInterval?) throws {
+    static func validate(
+        statusCode: Int,
+        data: Data,
+        retryAfter: TimeInterval?,
+        response: HTTPErrorResponse? = nil
+    ) throws {
         switch statusCode {
         case 200..<300:
             Logger.debug("Request successful with status \(statusCode)")
         case 401:
             Logger.warning("Unauthorized request (401)")
-            throw NetworkError.unauthorized
+            throw NetworkError.unauthorized(response: response)
         case 403:
             Logger.warning("Forbidden request (403)")
-            throw NetworkError.forbidden
+            throw NetworkError.forbidden(response: response)
         case 404:
             Logger.warning("Resource not found (404)")
             throw NetworkError.notFound

@@ -209,6 +209,7 @@ public actor NetworkClient: NetworkDataSource {
                 refreshAttempt: refreshAttempt,
                 retryAttempt: retryAttempt,
                 rejectedAuthorization: providerAuthorization,
+                response: HTTPErrorResponse(httpResponse, body: data),
                 configuration: configuration,
                 trace: trace
             )
@@ -218,7 +219,8 @@ public actor NetworkClient: NetworkDataSource {
             try HTTPStatusValidator.validate(
                 statusCode: httpResponse.statusCode,
                 data: data,
-                retryAfter: RetryAfter.parse(from: httpResponse)
+                retryAfter: RetryAfter.parse(from: httpResponse),
+                response: Self.errorResponse(for: httpResponse, body: data)
             )
             let decoded = try await Self.decodeResponse(
                 data: data,
@@ -288,6 +290,12 @@ public actor NetworkClient: NetworkDataSource {
             configuration: configuration,
             requestID: trace.requestID
         )
+    }
+
+    /// Builds the response snapshot only for statuses whose errors carry one.
+    private static func errorResponse(for httpResponse: HTTPURLResponse, body: Data) -> HTTPErrorResponse? {
+        guard httpResponse.statusCode == 401 || httpResponse.statusCode == 403 else { return nil }
+        return HTTPErrorResponse(httpResponse, body: body)
     }
 
     /// Executes `request`, mapping every transport failure to a ``NetworkError``.
@@ -380,6 +388,7 @@ public actor NetworkClient: NetworkDataSource {
         refreshAttempt: Int,
         retryAttempt: Int,
         rejectedAuthorization: AuthorizationType?,
+        response: HTTPErrorResponse,
         configuration: NetworkClientConfiguration,
         trace: RequestTrace
     ) async throws -> T {
@@ -388,8 +397,16 @@ public actor NetworkClient: NetworkDataSource {
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
-            await trace.failed(.unauthorized)
-            throw NetworkError.unauthorized
+            let error = NetworkError.unauthorized(response: response)
+            await trace.failed(error)
+            throw error
+        }
+
+        guard await provider.shouldRefreshAuthorization(after: response) else {
+            Logger.info("Authorization provider declined to refresh for this 401", category: .auth)
+            let error = NetworkError.unauthorized(response: response)
+            await trace.failed(error)
+            throw error
         }
 
         Logger.info("Attempting to refresh authorization", category: .auth)
