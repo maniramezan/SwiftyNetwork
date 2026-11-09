@@ -173,7 +173,11 @@ public actor NetworkClient: APIClient {
         let data: Data
         let httpResponse: HTTPURLResponse
         do {
-            (data, httpResponse) = try await send(request, session: configuration.session)
+            let redirectGuard = RedirectGuard(
+                policy: configuration.redirectPolicy,
+                authorization: providerAuthorization ?? endpoint.authorization
+            )
+            (data, httpResponse) = try await send(request, session: configuration.session, delegate: redirectGuard)
         } catch let error as CancellationError {
             await trace.failed(.underlying(error))
             throw error
@@ -276,11 +280,15 @@ public actor NetworkClient: APIClient {
 
     /// Executes `request`, mapping every transport failure to a ``NetworkError``,
     /// or to `CancellationError` when the calling task was cancelled.
-    private func send(_ request: URLRequest, session: URLSession) async throws -> (Data, HTTPURLResponse) {
+    private func send(
+        _ request: URLRequest,
+        session: URLSession,
+        delegate: RedirectGuard?
+    ) async throws -> (Data, HTTPURLResponse) {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: delegate)
         } catch {
             let mapped = NetworkError.transportError(error)
             if mapped is CancellationError {
