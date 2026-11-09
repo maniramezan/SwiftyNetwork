@@ -31,10 +31,11 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 - ``NetworkRetryPolicy``
 - ``BackoffPolicy``
 - ``APIClient``
+- ``DecodedResponse``
 - ``EmptyResponse``
 - ``NetworkError``
 - ``NetworkErrorClassification``
-- ``HTTPErrorResponse``
+- ``HTTPResponse``
 
 ### Instrumentation
 

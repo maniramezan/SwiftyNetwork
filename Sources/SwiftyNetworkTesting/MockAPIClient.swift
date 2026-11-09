@@ -27,9 +27,14 @@ import SwiftyNetwork
 public actor MockAPIClient: APIClient {
     /// A scripted outcome for a stubbed route.
     public enum Response: Sendable {
-        /// JSON bytes decoded into the requested type with the mock's decoder.
-        /// Empty data satisfies requests for `EmptyResponse`.
+        /// JSON bytes decoded into the requested type with the mock's decoder,
+        /// returned with a `200` `HTTPResponse` carrying the bytes.
+        /// Empty data satisfies requests for `EmptyResponse`; a `Data` request gets the bytes as-is.
         case json(Data)
+        /// A successful HTTP response whose `HTTPResponse.body` is decoded like ``json(_:)``.
+        /// Use it to script headers, such as `ETag` or `Link`, and the status code.
+        /// For an HTTP failure, stub ``failure(_:)`` with the matching `NetworkError`.
+        case http(HTTPResponse)
         /// A value returned as-is when it matches the requested type.
         case value(any Sendable)
         /// An error thrown to the caller.
@@ -146,13 +151,13 @@ public actor MockAPIClient: APIClient {
     /// - Parameters:
     ///   - endpoint: The endpoint being requested.
     ///   - responseType: The expected response type.
-    /// - Returns: The stubbed value decoded or cast to `responseType`.
+    /// - Returns: The stubbed value decoded or cast to `responseType`, with its `HTTPResponse`.
     /// - Throws: The stubbed error, ``UnstubbedRequestError``,
     ///   ``TypeMismatchError``, or `NetworkError.decodingFailed(underlying:)`.
-    public func request<T: Decodable & Sendable>(
-        _ endpoint: any NetworkEndpoint,
+    public func response<T: Decodable & Sendable>(
+        for endpoint: any NetworkEndpoint,
         responseType: T.Type
-    ) async throws -> T {
+    ) async throws -> DecodedResponse<T> {
         recordedRequests.append(RecordedRequest(endpoint))
 
         switch try nextResponse(for: Route(method: endpoint.method, path: endpoint.path)) {
@@ -165,17 +170,26 @@ public actor MockAPIClient: APIClient {
                     actual: String(describing: type(of: value))
                 )
             }
-            return typed
+            return DecodedResponse(value: typed)
         case .json(let data):
-            if data.isEmpty, let empty = EmptyResponse() as? T {
-                return empty
-            }
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch {
-                let failure = DecodingFailure(description: String(describing: error))
-                throw NetworkError.decodingFailed(underlying: failure)
-            }
+            return try decode(HTTPResponse(statusCode: 200, body: data))
+        case .http(let response):
+            return try decode(response)
+        }
+    }
+
+    private func decode<T: Decodable & Sendable>(_ response: HTTPResponse) throws -> DecodedResponse<T> {
+        if let raw = response.body as? T {
+            return DecodedResponse(value: raw, response: response)
+        }
+        if response.body.isEmpty, let empty = EmptyResponse() as? T {
+            return DecodedResponse(value: empty, response: response)
+        }
+        do {
+            return DecodedResponse(value: try decoder.decode(T.self, from: response.body), response: response)
+        } catch {
+            let failure = DecodingFailure(description: String(describing: error))
+            throw NetworkError.decodingFailed(underlying: failure)
         }
     }
 

@@ -16,8 +16,8 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     /// Credentials rejected by the server, in order.
     public private(set) var rejectedAuthorizations: [AuthorizationType] = []
     /// `401` responses offered to ``shouldRefreshAuthorization(after:)``, in order.
-    public private(set) var inspectedResponses: [HTTPErrorResponse] = []
-    private let refreshDecision: (@Sendable (HTTPErrorResponse) -> Bool)?
+    public private(set) var inspectedResponses: [HTTPResponse] = []
+    private let refreshDecision: (@Sendable (HTTPResponse) -> Bool)?
 
     /// Creates an authorization spy.
     /// - Parameters:
@@ -30,7 +30,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
         current: AuthorizationType,
         refreshResult: Bool,
         refreshedAuthorization: AuthorizationType? = nil,
-        shouldRefresh: (@Sendable (HTTPErrorResponse) -> Bool)? = nil
+        shouldRefresh: (@Sendable (HTTPResponse) -> Bool)? = nil
     ) {
         self.refreshDecision = shouldRefresh
         self.currentAuth = current
@@ -59,7 +59,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     /// Records the `401` response and applies the scripted decision.
     /// - Parameter response: The `401` response the server returned.
     /// - Returns: The scripted decision, or `true` when none was configured.
-    public func shouldRefreshAuthorization(after response: HTTPErrorResponse) async -> Bool {
+    public func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
         inspectedResponses.append(response)
         return refreshDecision?(response) ?? true
     }
