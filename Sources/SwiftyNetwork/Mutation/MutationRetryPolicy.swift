@@ -32,10 +32,7 @@ public struct MutationRetryPolicy: Sendable {
     /// How long to wait before each retry.
     public var backoff: BackoffPolicy
 
-    /// Decides whether an error is worth retrying at all. Read through ``shouldRetry(_:)``.
-    ///
-    /// Defaults to ``defaultShouldRetry(_:)``.
-    public var retryPredicate: @Sendable (any Error) -> Bool
+    private let retryPredicate: @Sendable (any Error) -> Bool
 
     /// A general-purpose default: 5 retries with ``defaultBackoff``.
     public static let `default` = MutationRetryPolicy()
@@ -60,7 +57,8 @@ public struct MutationRetryPolicy: Sendable {
     /// Whether a failed mutation should be retried.
     ///
     /// - Parameter error: The error thrown by the mutation's network call.
-    /// - Returns: The result of ``retryPredicate``.
+    /// - Returns: The result of the `shouldRetry` closure passed to
+    ///   ``init(maxRetries:backoff:shouldRetry:)``.
     public func shouldRetry(_ error: any Error) -> Bool {
         retryPredicate(error)
     }
