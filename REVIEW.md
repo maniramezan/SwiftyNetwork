@@ -46,6 +46,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | JSON encoding/decoding ran on the client actor | maniramezan/SwiftyNetwork#19 (nonisolated static helpers; not benchmarked) |
 | Entry count didn't bound bytes in `RemoteDataCache` | maniramezan/SwiftyNetwork#20 (`InMemoryCache(maxCost:cost:)`, `InMemoryCache<Data>(maxBytes:)`) |
 | `SwiftyNetworkTesting` had no DocC | maniramezan/SwiftyNetwork#21 (catalog, Docs CI validation, `.spi.yml`) |
+| Credentialed requests followed redirects to any host with their headers | `RedirectPolicy`, default `.stripCredentialsAcrossOrigins` (strips credentials across origins, refuses HTTPS downgrades; per-task delegate so injected and pinned sessions are covered, while a session delegate that handles redirects keeps deciding them) |
 
 ## Priority follow-ups
 
@@ -54,7 +55,6 @@ security audit or measured performance gains.
 
 | Priority | Finding | Proposed change and acceptance criteria |
 | --- | --- | --- |
-| High | Credentialed requests accept arbitrary endpoint hosts and URLSession redirects; pinning applies only to listed hosts. | Design an opt-in allowed-origin and redirect policy covering custom API-key headers, scheme downgrade, and injected sessions. Test with a local redirect server. |
 | Medium | Concurrent requests are not coalesced at the repository boundary. (Value and timestamp now come from one `CacheEntry` read.) | Explore explicit repository fetch sharing without conflating cache policies or users. |
 | Medium | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording. | Document ownership and prohibit concurrent external coder reconfiguration; evaluate factory-based configuration in an API proposal. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
@@ -105,5 +105,5 @@ regression, all seven ordering tests passed (including parameterized invalidatio
 and layered-removal cases). The release build, strict formatting, and diff checks
 passed. No performance improvement is claimed for the storage serialization change.
 
-Monotonic timing batch: request event durations now use ContinuousClock, preserving
-the public TimeInterval representation and documenting measured pipeline boundaries.
+Monotonic timing batch: request event durations use ContinuousClock and are exposed
+as `Duration`, documenting measured pipeline boundaries.

@@ -12,6 +12,7 @@ SwiftyNetwork provides:
 - **Repository coordination** with ``GenericRepository`` and ``CachePolicy``.
 - **Pluggable authentication** via ``AuthorizationProvider`` and ``OAuthAuthorizationProvider``.
 - **Optional SSL pinning** via ``SSLPinningConfiguration`` for controlled hosts.
+- **Safe redirects** via ``RedirectPolicy``: credentials are stripped from cross-origin redirects, and HTTPS downgrades are refused.
 - **Opt-in request retries** with ``NetworkRetryPolicy``: idempotent requests retry on `429` and 5xx (honoring `Retry-After` on `429` and `503`), timeouts and lost connectivity, with jittered, capped backoff.
 - **Fire-and-forget mutations** with ``MutationQueue``, including background retry, coalescing, and pluggable persistence via ``MutationStore``.
 - **Single-flight remote data caching** with ``RemoteDataCache`` -- deduplicates concurrent fetches for the same key, composable with any ``Cache`` for app-configurable memory/disk layering.
@@ -19,6 +20,13 @@ SwiftyNetwork provides:
 
 For tests and previews, the separate `SwiftyNetworkTesting` library product provides
 `MockAPIClient`, a scriptable ``APIClient`` that records every request.
+
+### Versioning
+
+SwiftyNetwork follows Semantic Versioning. Its public enums, such as ``NetworkError``,
+``MutationStatus``, and ``MutationFailureReason/Category``, gain new cases only in a major
+release, so an exhaustive `switch` over them keeps compiling across minor and patch releases.
+Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 
 ## Topics
 
@@ -57,6 +65,7 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 ### Security
 
 - ``SSLPinningConfiguration``
+- ``RedirectPolicy``
 
 ### Caching
 

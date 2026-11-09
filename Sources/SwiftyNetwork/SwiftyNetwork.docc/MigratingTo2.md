@@ -4,16 +4,18 @@ Update an app from SwiftyNetwork 1.x to 2.0.
 
 ## Overview
 
-SwiftyNetwork 2.0 is a breaking release. It raises the platform floor, gives every HTTP
-error its response, uses `Duration` for every time value, and removes several
-abstractions that duplicated each other. Most changes are mechanical renames that the
+SwiftyNetwork 2.0 is a breaking release. It gives every HTTP error its response, uses
+`Duration` for every time value, strips credentials from cross-origin redirects, and removes
+several abstractions that duplicated each other. Most changes are mechanical renames that the
 compiler points you to. A few change behavior without a compile error; those are marked
 **Behavior change** below. Read them even if your app builds.
 
 ### Platforms and dependencies
 
-- SwiftyNetwork 2.0 requires iOS 18 / macOS 15 and Swift 6.2. Apps on older releases can
-  stay on 1.4.0.
+- SwiftyNetwork 2.0 requires iOS 18 / macOS 15 and Swift 6.2, the same as 1.5. Apps on
+  older OS releases can stay on 1.4.0.
+- SwiftyNetwork now imports SwiftCommons internally, so SwiftCommons is not part of its API.
+  If your app uses SwiftCommons, depend on it directly instead of through SwiftyNetwork.
 - Point your package at 2.0:
 
 ```swift
@@ -63,6 +65,23 @@ func response<T: Decodable & Sendable>(
 - `NetworkClientConfiguration(sslPinning:sessionConfiguration:delegateQueue:...)` is gone.
   Pass `session: pinning.makeSession(configuration: sessionConfiguration)`.
 - `NetworkClient.updateConfiguration(_:)` is gone. Create a new ``NetworkClient`` instead.
+- `NetworkClient.attemptCount()` is gone. Count attempts with a ``NetworkInstrumentation``
+  (``NetworkRequestAttempt/attempt`` numbers each attempt of a request), or with
+  `NetworkInstrumentationRecorder` from `SwiftyNetworkTesting` in tests.
+
+### Redirects
+
+- **Behavior change:** ``NetworkClient`` now checks every redirect against
+  ``NetworkClientConfiguration/redirectPolicy``. The default,
+  ``RedirectPolicy/stripCredentialsAcrossOrigins``, follows a redirect to another scheme, host,
+  or port without the `Authorization`, `Proxy-Authorization`, and `Cookie` headers or the header
+  an `.apiKey` or `.custom` authorization set, and refuses a redirect from `https` to `http`.
+  In 1.x, `URLSession` forwarded every header to wherever the server redirected.
+- A refused redirect throws ``NetworkError/unexpectedStatus(_:)`` with the `3xx` response.
+- If the session you pass in has a delegate that handles redirects, nothing changes: that
+  delegate still decides every redirect, and the policy is not applied.
+- If your API redirects to another origin that needs the same credentials, set
+  `redirectPolicy: .followAll` to keep the 1.x behavior.
 
 ### Errors
 
@@ -123,9 +142,15 @@ MutationRetryPolicy(maxAttempts: 5, isRetryable: isRetryable)
 MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
 ```
 
-- `delay(forAttempt:after:)` is `delay(forRetry:after:)`, and `policy.baseDelay` is
-  `policy.backoff.baseDelay`. `maxAttempts` was renamed `maxRetries`; its meaning, retries
-  after the first attempt, is unchanged.
+- `delay(forAttempt:after:)` is `delay(forRetry:after:)`. The backoff settings moved into
+  ``BackoffPolicy``: `policy.baseDelay`, `policy.maxDelay`, and `policy.jitterRange` are
+  `policy.backoff.baseDelay`, `policy.backoff.maxDelay`, and `policy.backoff.jitterRange`.
+  `maxAttempts` was renamed `maxRetries`; its meaning, retries after the first attempt, is
+  unchanged.
+- `MutationRetryPolicy.defaultIsRetryable(_:)` is
+  ``MutationRetryPolicy/defaultShouldRetry(_:)``. The `isRetryable` property is gone: pass the
+  predicate as `shouldRetry:` when creating the policy, and call
+  ``MutationRetryPolicy/shouldRetry(_:)`` to evaluate it.
 
 ### Mutations
 
