@@ -13,7 +13,8 @@ SwiftyNetwork is a Swift networking library, depending only on [SwiftCommons](ht
 - `NetworkClient` -- actor that executes requests with retry/auth refresh
 - `InMemoryCache<T>` / `LayeredCache<T>` -- caching implementations
 - `GenericRepository<T>` -- coordinates network + cache with `CachePolicy`
-- `AuthorizationProvider` -- protocol for injectable auth (see `OAuthAuthorizationProvider`)
+- `AuthorizationProvider` -- protocol for injectable auth (see `OAuthAuthorizationProvider`);
+  `currentAuthorization()` throws, surfacing as `NetworkError.authorizationUnavailable` without sending
 - `MutationQueue` -- actor for fire-and-forget mutations with background retry, coalescing by `MutationKey`, and pluggable persistence via `MutationStore`
 
 ## Project Structure

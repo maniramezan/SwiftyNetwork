@@ -67,7 +67,9 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
         case timedOut
 
         /// The server answered `401` and authorization could not be refreshed
-        /// (``NetworkError/unauthorized(_:)`` or ``NetworkError/authorizationRefreshFailed(underlying:)``).
+        /// (``NetworkError/unauthorized(_:)`` or ``NetworkError/authorizationRefreshFailed(underlying:)``),
+        /// or the provider had no authorization to send
+        /// (``NetworkError/authorizationUnavailable(underlying:)``).
         case unauthorized
 
         /// The server rejected the request with a `4xx` status other than `401` and `408`,
@@ -136,7 +138,7 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
             return .offline
         case .timeout:
             return .timedOut
-        case .unauthorized, .authorizationRefreshFailed:
+        case .unauthorized, .authorizationUnavailable, .authorizationRefreshFailed:
             return .unauthorized
         case .forbidden, .notFound, .tooManyRequests, .clientError:
             return .rejected
