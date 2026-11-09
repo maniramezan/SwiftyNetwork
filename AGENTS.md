@@ -28,7 +28,9 @@ Sources/SwiftyNetwork/
 │   ├── DecodedResponse.swift        # Decoded value + HTTPResponse returned by response(for:responseType:)
 │   ├── HTTPResponse.swift           # Status, headers, body (+ Retry-After) for successes and NetworkError
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
-│   ├── NetworkClientConfiguration.swift  # Session, coders, auth, timeouts, instrumentation
+│   ├── NetworkClientConfiguration.swift  # Session, coders, auth, retry/redirect policies, timeouts, instrumentation
+│   ├── RedirectPolicy.swift         # Redirect handling presets (default strips credentials across origins)
+│   ├── RedirectGuard.swift          # Internal: per-task delegate applying RedirectPolicy, Origin comparison
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
 │   ├── BackoffPolicy.swift          # Shared jittered exponential backoff + Retry-After floor
 │   ├── NetworkRetryPolicy.swift     # Opt-in idempotent-request retry policy (429/5xx/timeout/offline)
@@ -72,7 +74,7 @@ Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separa
 └── NetworkRetryPolicy+Testing.swift   # .immediate() zero-backoff request retry policy
 
 Tests/SwiftyNetworkTests/
-├── Helpers/                         # TestHTTPStub, FakeAPIClient, TestAuthorizationProvider, ...
+├── Helpers/                         # TestHTTPStub, RedirectingURLProtocol, FakeAPIClient, TestAuthorizationProvider, ...
 ├── Network/                         # Client, auth, pinning, instrumentation, errors, endpoint tests
 ├── Cache/                           # Cache types, LRUStorage, ordering/single-flight, RemoteDataCache
 ├── Repository/RepositoryTests.swift # All cache policies against a real NetworkClient
@@ -97,6 +99,14 @@ swift format format -i -r -p Sources Tests   # Format in-place
 swift format lint -r -p Sources Tests        # Check violations
 swift format lint --strict -r -p Sources Tests  # CI mode (warnings = errors)
 
+# Test on iOS simulators, fanned out across parallel simulator clones
+xcodebuild test -scheme SwiftyNetwork-Package \
+  -destination 'platform=iOS Simulator,name=<iPhone>' \
+  -parallel-testing-enabled YES -parallel-testing-worker-count 3
+
+# API breaking changes against the latest release (CI job `api-breakage`; see CONTRIBUTING.md)
+swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork SwiftyNetworkTesting
+
 # Documentation (DocC)
 swift package generate-documentation \
   --target SwiftyNetwork \
@@ -114,6 +124,10 @@ swift package generate-documentation \
 - Prefer structured concurrency (`async let`, `TaskGroup`) over unstructured `Task {}`
 - Never use GCD, `NSLock`, or completion handlers in new code
 - `@unchecked Sendable` requires a documented safety invariant
+- Import SwiftCommons with `internal import SwiftCommons`; never expose its types in public API.
+- Public enums gain cases only in a major release (documented in README "Versioning"). For a set of
+  values that should grow in a minor release, use a struct with static members, like `HTTPMethod`
+  and `RedirectPolicy`.
 - Reuse SwiftCommons primitives instead of adding local copies: `AsyncBroadcaster` for multi-consumer
   `AsyncStream`s, `RetryBackoff` for backoff math, `AnySendableError` for boxing errors in
   `NetworkError`, `LibraryLogger` (via the internal `Logger`), `DecodingError.debugSummary`,

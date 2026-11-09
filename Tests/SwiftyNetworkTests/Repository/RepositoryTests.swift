@@ -8,7 +8,7 @@ func testRepositoryAcceptsLayeredCache() async throws {
     let memory = InMemoryCache<TestUser>()
     let layered = LayeredCache(memoryCache: memory)
     let networkUser = TestUser(id: "1", name: "Sam", email: "sam@example.com")
-    let network = MockNetworkDataSource(result: .success(networkUser))
+    let network = StubUserClient(result: .success(networkUser))
     let repository = GenericRepository(client: network, cache: layered)
     let key = CacheKey("layered-repo")
 
@@ -21,7 +21,7 @@ func testRepositoryAcceptsLayeredCache() async throws {
 @Test("GenericRepository returns cached data when available")
 func testRepositoryReturnsCachedData() async throws {
     let cache = InMemoryCache<TestUser>()
-    let network = MockNetworkDataSource(result: .success(TestUser(id: "2", name: "Net", email: "net@example.com")))
+    let network = StubUserClient(result: .success(TestUser(id: "2", name: "Net", email: "net@example.com")))
     let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("repo-cache")
     let cached = TestUser(id: "cached", name: "Cache", email: "cache@example.com")
@@ -38,7 +38,7 @@ func testRepositoryReturnsCachedData() async throws {
 func testRepositoryLoadsFromNetworkOnMiss() async throws {
     let cache = InMemoryCache<TestUser>()
     let networkUser = TestUser(id: "3", name: "Remote", email: "remote@example.com")
-    let network = MockNetworkDataSource(result: .success(networkUser))
+    let network = StubUserClient(result: .success(networkUser))
     let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("repo-miss")
 
@@ -56,7 +56,7 @@ func testRepositoryReloadIgnoringCache() async throws {
     let cached = TestUser(id: "cached", name: "Cache", email: "cache@example.com")
     let networkUser = TestUser(id: "4", name: "Fresh", email: "fresh@example.com")
     await cache.setValue(cached, forKey: CacheKey("reload"))
-    let network = MockNetworkDataSource(result: .success(networkUser))
+    let network = StubUserClient(result: .success(networkUser))
     let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("reload")
 
@@ -75,7 +75,7 @@ func testRepositoryReturnsCacheIfNotExpired() async throws {
     let key = CacheKey("not-expired")
     let now = Date()
     await cache.setEntry(CacheEntry(user, timestamp: now), forKey: key)
-    let network = MockNetworkDataSource(result: .success(TestUser(id: "net", name: "Net", email: "net@example.com")))
+    let network = StubUserClient(result: .success(TestUser(id: "net", name: "Net", email: "net@example.com")))
     let repository = GenericRepository(client: network, cache: cache)
 
     let fetched = try await repository.fetch(
@@ -96,7 +96,7 @@ func testRepositoryRefreshesWhenExpired() async throws {
     let key = CacheKey("expired")
     await cache.setEntry(CacheEntry(expired, timestamp: Date(timeIntervalSince1970: 0)), forKey: key)
     let networkUser = TestUser(id: "6", name: "New", email: "new@example.com")
-    let network = MockNetworkDataSource(result: .success(networkUser))
+    let network = StubUserClient(result: .success(networkUser))
     let repository = GenericRepository(client: network, cache: cache)
 
     let fetched = try await repository.fetch(
@@ -114,7 +114,7 @@ func testRepositoryRefreshesWhenExpired() async throws {
 @Test("GenericRepository surfaces network errors")
 func testRepositoryPropagatesNetworkError() async {
     let cache = InMemoryCache<TestUser>()
-    let network = MockNetworkDataSource(result: .failure(TestRepositoryError.networkFailure))
+    let network = StubUserClient(result: .failure(TestRepositoryError.networkFailure))
     let repository = GenericRepository(client: network, cache: cache)
     let key = CacheKey("error")
 
@@ -129,7 +129,7 @@ private enum TestRepositoryError: Error {
     case networkFailure
 }
 
-private actor MockNetworkDataSource: APIClient {
+private actor StubUserClient: APIClient {
     private let result: Result<TestUser, Error>
     private(set) var requestCount = 0
 

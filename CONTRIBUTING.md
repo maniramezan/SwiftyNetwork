@@ -198,9 +198,10 @@ tests: Add coverage for edge cases in CachePolicy
 2. **Add tests** for new functionality
 3. **Ensure CI passes** - all checks must be green:
    - ✅ swift-format lint (strict mode)
-   - ✅ Build succeeds
-   - ✅ All tests pass
+   - ✅ Build succeeds on the minimum (6.2) and latest Swift toolchains
+   - ✅ All tests pass on macOS and on iOS simulators
    - ✅ Code coverage is maintained or improved
+   - ✅ No API breaking changes against the latest release (see below)
 4. **Describe user-facing changes and migration notes** in your pull request; do not add a changelog file
 5. **Provide clear PR description**:
    - What problem does this solve?
@@ -210,15 +211,30 @@ tests: Add coverage for edge cases in CachePolicy
 
 ### PR Title Format
 
-```
-[Category] Brief description
+PR titles follow [Conventional Commits](https://www.conventionalcommits.org), like commit messages.
+Mark a breaking change with `!`:
 
-Examples:
-[Feature] Add support for WebSocket connections
-[Fix] Resolve race condition in cache eviction
-[Docs] Improve examples in README
-[Refactor] Simplify endpoint URL construction
-[Tests] Add integration tests for OAuth flow
+```
+feat: add a redirect policy to NetworkClientConfiguration
+fix: resolve race condition in cache eviction
+docs: improve examples in README
+feat!: let AuthorizationProvider.currentAuthorization() throw
+```
+
+### API Breaking Changes
+
+The `api-breakage` CI job runs `swift package diagnose-api-breaking-changes` against the latest
+release tag. It is skipped when the PR title marks a breaking change (`feat!:`), which is reserved
+for the next major release.
+
+The checker is stricter than source compatibility. For example, adding a defaulted parameter to an
+initializer is reported as the old initializer being removed, even though callers still compile.
+When a reported change is source-compatible, copy its `API breakage: ...` line from the job log into
+`.api-breakage-allowlist` at the repository root, one per line, and say why in the PR. Run it locally
+with:
+
+```bash
+swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork SwiftyNetworkTesting
 ```
 
 ## Code Review
