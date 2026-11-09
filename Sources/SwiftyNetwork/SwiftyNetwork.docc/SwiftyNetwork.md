@@ -22,6 +22,10 @@ For tests and previews, the separate `SwiftyNetworkTesting` library product prov
 
 ## Topics
 
+### Upgrading
+
+- <doc:MigratingTo2>
+
 ### Essentials
 
 - ``NetworkEndpoint``
