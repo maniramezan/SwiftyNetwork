@@ -27,6 +27,8 @@ Sources/SwiftyNetwork/
 │   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
 │   ├── NetworkClientConfiguration.swift  # Session, coders, auth, timeouts, instrumentation
 │   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
+│   ├── NetworkRetryPolicy.swift     # Opt-in idempotent-request retry policy (429/5xx/timeout/offline)
+│   ├── RetryAfter.swift             # Internal: Retry-After parsing (delta-seconds + HTTP-date)
 │   ├── RequestTrace.swift           # Internal: per-attempt instrumentation reporting
 │   ├── EncodedBodyEndpoint.swift    # Internal: body-override wrapper + HTTPHeaders helpers
 │   ├── HTTPMethod.swift             # HTTP verb enum
@@ -62,7 +64,8 @@ Sources/SwiftyNetwork/
 Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
 ├── MockAPIClient.swift              # Scriptable APIClient/NetworkDataSource that records requests
 ├── RecordedRequest.swift            # Snapshot of a received endpoint
-└── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
+├── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
+└── NetworkRetryPolicy+Testing.swift   # .immediate() zero-backoff request retry policy
 
 Tests/SwiftyNetworkTests/
 ├── Helpers/                         # TestHTTPStub, FakeAPIClient, TestAuthorizationProvider, ...
@@ -175,7 +178,7 @@ gate.open()
 let stub = try TestHTTPStub()
 defer { stub.invalidate() }
 let session = stub.session
-let config = NetworkClientConfiguration(session: session, retryDelay: 0)
+let config = NetworkClientConfiguration(session: session, authRefreshDelay: 0)
 let client = NetworkClient(configuration: config)
 stub.setResponses([.success(data)], for: "test-id")
 let endpoint = makeEndpointWithTestId("test-id")
@@ -252,7 +255,10 @@ RemoteDataCache<Wrapped> (actor, URL → Data, wraps SingleFlightCache)
 - `NetworkEndpoint` is the only endpoint protocol (has defaults, used by NetworkClient)
 - `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
 - `AnyCache` conforms to `Cache` protocol -- struct with immutable `@Sendable` closures
-- `retryDelay` applies `Task.sleep(for:)` before auth retry; use `retryDelay: 0` in tests
+- `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: 0` in tests
+- `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
+  (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
+- 429 is `NetworkError.tooManyRequests(retryAfter:data:)`, never `.serverError`; new status mappings go through `HTTPStatusValidator`
 - On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);

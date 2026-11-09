@@ -7,7 +7,7 @@ import Testing
 func testNetworkErrorDescriptionsAndData() {
     let serverData = Data("err".utf8)
     let serverError = NetworkError.serverError(statusCode: 500, data: serverData)
-    #expect(serverError.serverErrorData == serverData)
+    #expect(serverError.responseBody == serverData)
     #expect(serverError.errorDescription?.contains("500") == true)
 
     let invalidURL = NetworkError.invalidURL(url: "nope")
@@ -59,11 +59,11 @@ func testAllNetworkErrorCases() {
     #expect(encoding.errorDescription?.contains("encode") == true)
 }
 
-@Test("NetworkError serverErrorData returns nil for non-server errors")
+@Test("NetworkError responseBody returns nil for non-server errors")
 func testServerErrorDataReturnsNilForNonServerErrors() {
-    #expect(NetworkError.notFound.serverErrorData == nil)
-    #expect(NetworkError.unauthorized.serverErrorData == nil)
-    #expect(NetworkError.timeout.serverErrorData == nil)
+    #expect(NetworkError.notFound.responseBody == nil)
+    #expect(NetworkError.unauthorized.responseBody == nil)
+    #expect(NetworkError.timeout.responseBody == nil)
 }
 
 @Test("classification maps every NetworkError case to the matching NetworkErrorClassification")
@@ -72,6 +72,7 @@ func testClassificationMapsEveryCase() {
     #expect(NetworkError.invalidResponse.classification == .invalidResponse)
     #expect(NetworkError.invalidData.classification == .invalidData)
     #expect(NetworkError.serverError(statusCode: 503, data: nil).classification == .serverError(statusCode: 503))
+    #expect(NetworkError.tooManyRequests(retryAfter: 5, data: Data()).classification == .tooManyRequests)
     #expect(NetworkError.unauthorized.classification == .unauthorized)
     #expect(NetworkError.forbidden.classification == .forbidden)
     #expect(NetworkError.notFound.classification == .notFound)
@@ -91,6 +92,7 @@ func testIsTransientMatchesClassification() {
         .invalidData,
         .serverError(statusCode: 500, data: nil),
         .serverError(statusCode: 499, data: nil),
+        .tooManyRequests(retryAfter: nil, data: Data()),
         .unauthorized,
         .forbidden,
         .notFound,
@@ -106,13 +108,15 @@ func testIsTransientMatchesClassification() {
     }
 }
 
-@Test("isTransient is true only for timeouts, missing connectivity, invalid responses, and 5xx errors")
+@Test("isTransient is true only for timeouts, missing connectivity, invalid responses, 429, and 5xx errors")
 func testIsTransientClassifiesTransientErrors() {
     #expect(NetworkError.timeout.isTransient)
     #expect(NetworkError.noInternetConnection.isTransient)
     #expect(NetworkError.invalidResponse.isTransient)
     #expect(NetworkError.serverError(statusCode: 500, data: nil).isTransient)
     #expect(NetworkError.serverError(statusCode: 503, data: nil).isTransient)
+    #expect(NetworkError.tooManyRequests(retryAfter: 5, data: Data()).isTransient)
+    #expect(NetworkError.tooManyRequests(retryAfter: nil, data: Data()).isTransient)
 
     #expect(!NetworkError.serverError(statusCode: 499, data: nil).isTransient)
     #expect(!NetworkError.unauthorized.isTransient)
@@ -165,4 +169,17 @@ func testMapURLErrorPreservesUnderlyingURLError() throws {
     }
     let urlError = try #require(underlying as? URLError)
     #expect(urlError.code == .cannotFindHost)
+}
+
+@Test("tooManyRequests exposes retryAfter and its response body, and describes itself")
+func testTooManyRequestsAccessors() {
+    let body = Data(#"{"code":"throttled"}"#.utf8)
+    let error = NetworkError.tooManyRequests(retryAfter: 5, data: body)
+
+    #expect(error.retryAfter == 5)
+    #expect(error.responseBody == body)
+    #expect(error.errorDescription?.contains("Too many requests") == true)
+    #expect(NetworkError.tooManyRequests(retryAfter: nil, data: Data()).retryAfter == nil)
+    #expect(NetworkError.serverError(statusCode: 503, data: nil).retryAfter == nil)
+    #expect(NetworkError.timeout.retryAfter == nil)
 }
