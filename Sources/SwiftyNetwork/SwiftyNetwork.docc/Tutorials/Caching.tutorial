@@ -10,7 +10,7 @@
 
         @Steps {
             @Step {
-                Create an `InMemoryCache` and wrap it in a `CacheBasedLocalDataSource`.
+                Create an `InMemoryCache`. Any `Cache` works here, including `LayeredCache` or your own disk cache.
 
                 @Code(name: "RepositorySetup.swift", file: "Caching-Setup.swift")
             }

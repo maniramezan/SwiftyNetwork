@@ -10,7 +10,7 @@ import SwiftCommons
 /// SwiftyNetwork already provides -- it is not a new storage mechanism. It
 /// wraps whatever ``Cache`` you supply (an `InMemoryCache<Data>` for
 /// memory-only, a `LayeredCache<Data>` for memory + disk, or your own
-/// ``PersistentCache`` conformance) in a ``SingleFlightCache``, and adds a
+/// disk-backed ``Cache``) in a ``SingleFlightCache``, and adds a
 /// `data(for:)` convenience that fetches via `URLSession` on a miss.
 ///
 /// Size limits, eviction policy, and persistence are entirely controlled by
@@ -21,7 +21,7 @@ import SwiftCommons
 /// // Memory-only, LRU-bounded to 200 entries.
 /// let imageCache = RemoteDataCache(cache: InMemoryCache<Data>(maxSize: 200))
 ///
-/// // Memory + your own disk-backed PersistentCache.
+/// // Memory + your own disk-backed cache.
 /// let imageCache = RemoteDataCache(
 ///     cache: LayeredCache(memoryCache: InMemoryCache<Data>(maxSize: 200), persistentCache: myDiskCache)
 /// )
@@ -31,7 +31,7 @@ import SwiftCommons
 ///
 /// Concurrent calls for the same URL before the first completes share a
 /// single fetch rather than issuing duplicate network requests.
-public actor RemoteDataCache<Wrapped: Cache> where Wrapped.Value == Data {
+public actor RemoteDataCache<Wrapped: Cache<Data>> {
     private let cache: SingleFlightCache<Wrapped>
     private let session: URLSession
 

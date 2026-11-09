@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// let userKey = CacheKey.user("123", resource: "profile")
+/// let userKey = CacheKey(components: ["user", "123", "profile"])
 /// let endpointKey = CacheKey.endpoint("/users", parameters: ["page": "1"])
 /// ```
 public struct CacheKey: Hashable, Sendable, ExpressibleByStringLiteral, CustomStringConvertible {
@@ -79,21 +79,6 @@ extension CacheKey {
     private static let unreservedCharacters = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
-
-    /// Creates a cache key for user-specific data.
-    ///
-    /// Example:
-    /// ```swift
-    /// let key = CacheKey.user("123", resource: "settings")
-    /// ```
-    ///
-    /// - Parameters:
-    ///   - userId: The user identifier.
-    ///   - resource: The resource identifier.
-    /// - Returns: A cache key formatted as "user:{userId}:{resource}".
-    public static func user(_ userId: String, resource: String) -> CacheKey {
-        CacheKey(components: ["user", userId, resource])
-    }
 
     /// Creates a cache key for API endpoint data.
     ///

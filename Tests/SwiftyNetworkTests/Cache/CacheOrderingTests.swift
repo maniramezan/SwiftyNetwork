@@ -157,26 +157,22 @@ struct CacheOrderingTests {
 }
 
 /// Suspends the first write before storing, without relying on timing or sleeps.
-private actor SuspendedWriteCache: TimestampedCache {
+private actor SuspendedWriteCache: Cache {
     let writeStarted = AsyncGate()
     let finishWrite = AsyncGate()
     private var suspendNextWrite = true
-    private var storage: [CacheKey: (String, Date)] = [:]
+    private var storage: [CacheKey: CacheEntry<String>] = [:]
 
-    func value(forKey key: CacheKey) async -> String? { storage[key]?.0 }
-    func timestamp(forKey key: CacheKey) async -> Date? { storage[key]?.1 }
+    func entry(forKey key: CacheKey) async -> CacheEntry<String>? { storage[key] }
     func removeValue(forKey key: CacheKey) async { storage[key] = nil }
     func removeAll() async { storage.removeAll() }
-    func setValue(_ value: String, forKey key: CacheKey) async {
-        await setValue(value, forKey: key, timestamp: Date())
-    }
-    func setValue(_ value: String, forKey key: CacheKey, timestamp: Date) async {
+    func setEntry(_ entry: CacheEntry<String>, forKey key: CacheKey) async {
         if suspendNextWrite {
             suspendNextWrite = false
             writeStarted.open()
-            // `setValue` cannot throw; a cancelled wait simply lets the write proceed.
+            // `setEntry` cannot throw; a cancelled wait simply lets the write proceed.
             try? await finishWrite.wait()
         }
-        storage[key] = (value, timestamp)
+        storage[key] = entry
     }
 }

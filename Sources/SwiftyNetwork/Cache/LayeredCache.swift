@@ -5,7 +5,8 @@ import Foundation
 /// A cache that composes an in-memory layer with an optional persistent layer.
 ///
 /// Reads consult the in-memory layer first, then fall back to the persistent layer.
-/// Values loaded from the persistent layer are promoted into memory.
+/// Entries loaded from the persistent layer are promoted into memory with their
+/// original timestamp.
 /// All operations through this wrapper are serialized across suspension points,
 /// so promotion cannot overwrite a later write or removal. Access the underlying
 /// tiers exclusively through this wrapper to preserve this guarantee. Custom
@@ -13,106 +14,76 @@ import Foundation
 ///
 /// Example:
 /// ```swift
-/// let memory = InMemoryCache<User>(maxSize: 100)
-/// let cache = LayeredCache(memoryCache: memory)
-/// await cache.setValue(user, forKey: CacheKey.user("123", resource: "profile"))
+/// let cache = LayeredCache(memoryCache: InMemoryCache<User>(maxSize: 100), persistentCache: diskCache)
+/// await cache.setValue(user, forKey: "user:123:profile")
 /// ```
 public actor LayeredCache<T: Sendable>: Cache {
     let operations = CacheOperationGate()
-    private let memoryCache: AnyCache<T>
-    private let persistentCache: AnyCache<T>?
-    private let setMemoryValueWithTimestamp: (@Sendable (T, CacheKey, Date) async -> Void)?
+    private let memoryCache: any Cache<T>
+    private let persistentCache: (any Cache<T>)?
 
-    /// Creates a layered cache with only a memory cache.
+    /// Creates a layered cache.
     ///
-    /// Use this initializer when you want to depend on ``LayeredCache`` in your
-    /// application architecture but do not yet have a persistent cache.
-    ///
-    /// - Parameter memoryCache: The in-memory cache to use as the first layer.
-    public init<Memory: Cache>(
-        memoryCache: Memory
-    ) where Memory.Value == T {
-        self.memoryCache = AnyCache(memoryCache)
-        self.persistentCache = nil
-        self.setMemoryValueWithTimestamp = nil
-    }
-
-    /// Creates a layered cache that preserves timestamps when promoting values from persistence.
-    ///
-    /// Reads check `memoryCache` first. When a value exists only in `persistentCache`,
-    /// the value is returned and also written into `memoryCache`; if the persistent
-    /// layer reports a timestamp, that timestamp is preserved during promotion.
+    /// Reads check `memoryCache` first. When an entry exists only in `persistentCache`,
+    /// it is returned and also written into `memoryCache` with its original timestamp.
     ///
     /// Example:
     /// ```swift
-    /// let memory = InMemoryCache<User>()
-    /// let layered = LayeredCache(memoryCache: memory, persistentCache: diskCache)
+    /// let layered = LayeredCache(memoryCache: InMemoryCache<User>(), persistentCache: diskCache)
     /// ```
     ///
     /// - Parameters:
-    ///   - memoryCache: A timestamp-capable memory cache.
-    ///   - persistentCache: A persistent cache (disk, database, etc.) provided by the client.
-    public init<Memory: TimestampedCache, Persistent: Cache>(
-        memoryCache: Memory,
-        persistentCache: Persistent
-    ) where Memory.Value == T, Persistent.Value == T {
-        self.memoryCache = AnyCache(memoryCache)
-        self.persistentCache = AnyCache(persistentCache)
-        self.setMemoryValueWithTimestamp = { value, key, timestamp in
-            await memoryCache.setValue(value, forKey: key, timestamp: timestamp)
-        }
+    ///   - memoryCache: The in-memory cache to use as the first layer.
+    ///   - persistentCache: A persistent cache (disk, database, etc.) provided by the client,
+    ///     or `nil` to use only `memoryCache`. Defaults to `nil`.
+    public init(memoryCache: some Cache<T>, persistentCache: (any Cache<T>)? = nil) {
+        self.memoryCache = memoryCache
+        self.persistentCache = persistentCache
     }
 
     // MARK: - Cache API
 
-    /// Retrieves a value from memory first, then persistence if available.
+    /// Retrieves an entry from memory first, then persistence if available.
     ///
     /// - Parameter key: The cache key to look up.
-    /// - Returns: The cached value if it exists in either layer; otherwise `nil`.
-    public func value(forKey key: CacheKey) async -> T? {
-        await operations.run { await self.storageValue(forKey: key) }
+    /// - Returns: The cached entry if it exists in either layer; otherwise `nil`.
+    public func entry(forKey key: CacheKey) async -> CacheEntry<T>? {
+        await operations.run { await self.storageEntry(forKey: key) }
     }
 
-    private func storageValue(forKey key: CacheKey) async -> T? {
-        if let inMemory = await memoryCache.value(forKey: key) {
-            Logger.debug("Cache hit in memory")
+    private func storageEntry(forKey key: CacheKey) async -> CacheEntry<T>? {
+        if let inMemory = await memoryCache.entry(forKey: key) {
+            Logger.debug("Cache hit in memory", category: .cache)
             return inMemory
         }
 
         guard let persistentCache else {
-            Logger.debug("Cache miss")
+            Logger.debug("Cache miss", category: .cache)
             return nil
         }
 
-        guard let persisted = await persistentCache.value(forKey: key) else {
-            Logger.debug("Cache miss in both layers")
+        guard let persisted = await persistentCache.entry(forKey: key) else {
+            Logger.debug("Cache miss in both layers", category: .cache)
             return nil
         }
 
-        Logger.debug("Cache hit in persistent layer, promoting to memory")
-        if let timestamp = await persistentCache.timestamp(forKey: key),
-            let setWithTimestamp = setMemoryValueWithTimestamp
-        {
-            await setWithTimestamp(persisted, key, timestamp)
-        } else {
-            await memoryCache.setValue(persisted, forKey: key)
-        }
-
+        Logger.debug("Cache hit in persistent layer, promoting to memory", category: .cache)
+        await memoryCache.setEntry(persisted, forKey: key)
         return persisted
     }
 
-    /// Stores a value in every configured cache layer.
+    /// Stores an entry in every configured cache layer.
     ///
     /// - Parameters:
-    ///   - value: The value to cache.
-    ///   - key: The cache key to associate with the value.
-    public func setValue(_ value: T, forKey key: CacheKey) async {
-        await operations.run { await self.storageSetValue(value, forKey: key) }
+    ///   - entry: The value and timestamp to store.
+    ///   - key: The cache key to associate with the entry.
+    public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
+        await operations.run { await self.storageSetEntry(entry, forKey: key) }
     }
 
-    private func storageSetValue(_ value: T, forKey key: CacheKey) async {
-        await memoryCache.setValue(value, forKey: key)
-        await persistentCache?.setValue(value, forKey: key)
+    private func storageSetEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
+        await memoryCache.setEntry(entry, forKey: key)
+        await persistentCache?.setEntry(entry, forKey: key)
     }
 
     /// Removes a value from every configured cache layer.
@@ -135,27 +106,5 @@ public actor LayeredCache<T: Sendable>: Cache {
     private func storageRemoveAll() async {
         await memoryCache.removeAll()
         await persistentCache?.removeAll()
-    }
-
-    /// Returns the timestamp from memory first, then persistence if available.
-    ///
-    /// - Parameter key: The cache key to inspect.
-    /// - Returns: The timestamp for the first matching layer, or `nil` if absent.
-    public func timestamp(forKey key: CacheKey) async -> Date? {
-        await operations.run { await self.storageTimestamp(forKey: key) }
-    }
-
-    private func storageTimestamp(forKey key: CacheKey) async -> Date? {
-        // Check memory first to match value() priority order
-        if let memoryTimestamp = await memoryCache.timestamp(forKey: key) {
-            return memoryTimestamp
-        }
-
-        // Fall back to persistent cache
-        if let persistentCache {
-            return await persistentCache.timestamp(forKey: key)
-        }
-
-        return nil
     }
 }
