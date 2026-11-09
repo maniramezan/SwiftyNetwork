@@ -55,6 +55,11 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # The package's minimum toolchain and the latest release.
+        swift-version: ["6.2", "6.4"]
 
     steps:
       - name: Checkout
@@ -63,7 +68,7 @@ jobs:
       - name: Set up Swift
         uses: swift-actions/setup-swift@v3
         with:
-          swift-version: "6.2"
+          swift-version: ${{ matrix.swift-version }}
 
       - name: Cache SwiftPM
         uses: actions/cache@v6
@@ -71,9 +76,9 @@ jobs:
           path: |
             .build
             .swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          key: ${{ runner.os }}-spm-${{ matrix.swift-version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-spm-${{ matrix.swift-version }}-
 
       - name: Build package
         run: swift build -c release
@@ -84,6 +89,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-version: ["6.2", "6.4"]
 
     steps:
       - name: Checkout
@@ -92,7 +101,7 @@ jobs:
       - name: Set up Swift
         uses: swift-actions/setup-swift@v3
         with:
-          swift-version: "6.2"
+          swift-version: ${{ matrix.swift-version }}
 
       - name: Cache SwiftPM
         uses: actions/cache@v6
@@ -100,14 +109,15 @@ jobs:
           path: |
             .build
             .swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          key: ${{ runner.os }}-spm-${{ matrix.swift-version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-spm-${{ matrix.swift-version }}-
 
       - name: Run tests with code coverage
         run: swift test --enable-code-coverage -v
 
       - name: Generate lcov coverage report
+        if: matrix.swift-version == '6.2'
         run: |
           set -e
           PACKAGE_TESTS_XCTEST=".build/debug/SwiftyNetworkPackageTests.xctest"
@@ -122,6 +132,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
+        if: matrix.swift-version == '6.2'
         uses: codecov/codecov-action@v7
         with:
           files: coverage.lcov
@@ -131,3 +142,73 @@ jobs:
         env:
           # For private repos you can still provide CODECOV_TOKEN as a secret.
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  ios-test:
+    needs: format
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Pick an iOS simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available --json \
+            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))] | last | .udid')
+          if [ -z "$udid" ] || [ "$udid" = "null" ]; then
+            echo "No available iPhone simulator" >&2
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests on iOS simulators in parallel
+        run: |
+          set -euo pipefail
+          # Parallel testing clones the simulator, so the suite fans out across workers.
+          xcodebuild test \
+            -scheme SwiftyNetwork-Package \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -parallel-testing-enabled YES \
+            -parallel-testing-worker-count 3 \
+            -derivedDataPath .build/ios-derived-data
+
+  api-breakage:
+    # A PR whose Conventional Commits title marks a breaking change (`feat!:`) is meant to break the API.
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '!:')
+    needs: format
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v3
+        with:
+          swift-version: "6.2"
+
+      - name: Check for API breaking changes
+        run: |
+          set -euo pipefail
+          baseline=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -z "$baseline" ] || [ "${baseline%%.*}" -lt 2 ]; then
+            echo "Latest release ${baseline:-none} predates 2.0.0; skipping."
+            exit 0
+          fi
+          allowlist=()
+          if [ -f .api-breakage-allowlist ]; then
+            allowlist=(--breakage-allowlist-path .api-breakage-allowlist)
+          fi
+          echo "Comparing against $baseline"
+          swift package diagnose-api-breaking-changes "$baseline" \
+            --products SwiftyNetwork SwiftyNetworkTesting \
+            ${allowlist[@]+"${allowlist[@]}"}

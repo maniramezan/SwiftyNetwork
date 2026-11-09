@@ -14,6 +14,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Flexible Caching**: Pluggable caching system with multiple policies
 - **Authentication Support**: Built-in OAuth and custom authentication providers
 - **SSL Pinning**: Optional certificate and public-key pinning for controlled hosts
+- **Safe Redirects**: Credentials are stripped from cross-origin redirects and HTTPS downgrades are refused
 - **Comprehensive Error Handling**: Detailed error types with localized descriptions
 - **Repository Pattern**: Clean separation between network and local data sources
 - **Automatic Auth Refresh**: Refreshes credentials and replays the request once on `401`
@@ -32,7 +33,8 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 
 SwiftyNetwork depends only on [SwiftCommons](https://github.com/maniramezan/SwiftCommons) for its
 string, duration, logging, concurrency, and error helpers. It declares that dependency with `traits: []`, so
-SwiftCommons' SwiftData-backed APIs are not pulled in on its behalf.
+SwiftCommons' SwiftData-backed APIs are not pulled in on its behalf. SwiftCommons is imported internally and is
+not part of SwiftyNetwork's API.
 
 ## Code Quality
 
@@ -51,6 +53,9 @@ swift format lint --recursive --parallel Sources Tests                # Check fo
 
 swift-format runs in strict mode on all PRs (warnings treated as errors).
 Configuration: `.swift-format`
+
+CI also builds and tests with the minimum (6.2) and latest Swift toolchains, runs the suite on iOS
+simulators, and checks pull requests for API breaking changes against the latest release.
 
 ## Installation
 
@@ -488,6 +493,32 @@ openssl s_client -connect api.example.com:443 < /dev/null 2>/dev/null \
 For certificate pins, use `.certificate(_:)` with DER certificate data or `.certificateSHA256(base64Encoded:)`.
 For safer rotations, configure more than one accepted pin during certificate or key rollovers.
 
+### Redirects
+
+`NetworkClient` checks every redirect against `NetworkClientConfiguration.redirectPolicy` before
+`URLSession` follows it. The default, `.stripCredentialsAcrossOrigins`, does what `curl` and browser `fetch` do:
+
+- A redirect within the same origin (scheme, host, and port) is followed unchanged.
+- A redirect to another origin is followed without the `Authorization`, `Proxy-Authorization`, and `Cookie`
+  headers, or the header an `.apiKey` or `.custom` authorization set.
+- A redirect from `https` to plain `http` is refused.
+
+A refused redirect throws `NetworkError.unexpectedStatus` with the `3xx` response, so you can read its
+`Location` header. Use `.never` for an API that should not redirect at all, or `.followAll` to let `URLSession`
+follow every redirect with its headers, as 1.x did:
+
+```swift
+let configuration = NetworkClientConfiguration(redirectPolicy: .never)
+```
+
+Your own redirect handling always wins. If the session you inject has a delegate that implements
+`urlSession(_:task:willPerformHTTPRedirection:newRequest:completionHandler:)`, `NetworkClient` hands every redirect
+to it and uses its answer unchanged, under any policy, so that delegate must remove credentials itself. A
+session delegate that doesn't handle redirects, such as the TLS pinning one, leaves them to the policy.
+
+Credentials sent under another header name through an endpoint's `headers` are not recognized; send them
+through an `AuthorizationType` so they are stripped.
+
 ### Deduplicating Fetches with SingleFlightCache and RemoteDataCache
 
 `SingleFlightCache` wraps any `Cache` so concurrent misses for the same key share one fetch.
@@ -574,7 +605,7 @@ a failing server (5xx), and a device that is offline never look alike:
 | `unauthorized`, `forbidden`, `notFound`, `tooManyRequests` | `401`, `403`, `404`, `429` |
 | `clientError` | Any other `4xx`, such as `400`, `409`, or `422` |
 | `serverError` | Any `5xx` |
-| `unexpectedStatus` | A non-2xx status outside 4xx and 5xx, such as an unfollowed `3xx` |
+| `unexpectedStatus` | A non-2xx status outside 4xx and 5xx, such as a `3xx` the redirect policy refused |
 | `timeout` | A `408`, or a transport timeout (no response) |
 | `noInternetConnection` | The device is offline or the connection dropped |
 
@@ -696,6 +727,7 @@ let configuration = NetworkClientConfiguration(
     authorizationProvider: authProvider,
     maxAuthRefreshAttempts: 3,
     retryPolicy: nil,
+    redirectPolicy: .stripCredentialsAcrossOrigins,
     timeout: .seconds(30)
 )
 
@@ -703,6 +735,14 @@ let client = NetworkClient(configuration: configuration)
 ```
 
 A client keeps its configuration for its lifetime; create a new client to change it.
+
+## Versioning
+
+SwiftyNetwork follows [Semantic Versioning](https://semver.org). The public enums (`NetworkError`,
+`NetworkErrorClassification`, `AuthorizationType`, `CachePolicy`, `MutationStatus`,
+`MutationFailureReason.Category`, `NetworkReachability`, and `LogLevel`) gain new cases only in a major
+release, so an exhaustive `switch` over them keeps compiling across minor and patch releases. Types meant to
+grow, such as `HTTPMethod` and `RedirectPolicy`, are structs, so their new values can arrive in any release.
 
 ### Logging
 
@@ -733,6 +773,7 @@ SwiftyNetwork is built around several key protocols and types:
 - **`Repository`**: Combines a network client and a cache
 - **`AuthorizationProvider`**: Handles authentication
 - **`SSLPinningConfiguration`**: Configures certificate and public-key pinning
+- **`RedirectPolicy`**: Decides how redirects are followed and when credentials are stripped
 - **`MutationQueue`**: Fire-and-forget mutations with background retry and coalescing
 - **`MutationStore`**: Pluggable persistence for pending mutations
 

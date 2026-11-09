@@ -78,4 +78,14 @@ public enum AuthorizationType: Sendable, Equatable {
             request.setValue(value, forHTTPHeaderField: header)
         }
     }
+
+    /// The header this authorization sets, or `nil` for ``AuthorizationType/none``.
+    var headerName: String? {
+        switch self {
+        case .none: nil
+        case .basic, .basicEncoded, .bearer: "Authorization"
+        case .apiKey(_, let header): header
+        case .custom(let header, _): header
+        }
+    }
 }

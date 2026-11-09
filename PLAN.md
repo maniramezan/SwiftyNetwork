@@ -46,7 +46,7 @@ When planning a new feature or significant change, consider:
 
 ### Adding a New Cache Type
 
-1. Conform to `Cache` protocol (or `TimestampedCache` for timestamp preservation)
+1. Conform to `Cache` by implementing `entry(forKey:)`, `setEntry(_:forKey:)`, `removeValue(forKey:)`, and `removeAll()`
 2. Implement as `actor` for thread safety
 3. Add comprehensive tests (store, retrieve, remove, timestamps)
 4. Document example usage in README

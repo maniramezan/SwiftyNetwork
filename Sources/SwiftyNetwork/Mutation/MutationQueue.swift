@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// A fire-and-forget queue for "forgivable" mutations, with background retry,
 /// pluggable persistence, and coalescing by key.

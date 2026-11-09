@@ -2,13 +2,14 @@
 
 ## Supported Versions
 
-Until SwiftyNetwork reaches a `1.0.0` release, only the latest tagged version
-on `main` receives security fixes.
+Security fixes ship in the latest 2.x release. 1.x is no longer supported;
+see the [2.0 migration guide](Sources/SwiftyNetwork/SwiftyNetwork.docc/MigratingTo2.md)
+to upgrade.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| latest `main` | :white_check_mark: |
-| earlier | :x:                |
+| latest 2.x | :white_check_mark: |
+| 1.x and earlier | :x:        |
 
 ## Reporting a Vulnerability
 

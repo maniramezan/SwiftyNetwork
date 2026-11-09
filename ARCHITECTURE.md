@@ -1,7 +1,8 @@
 # SwiftyNetwork architecture
 
 The package uses Swift 6.2 tooling and Swift 6 language mode, iOS 18+, and macOS 15+,
-with SwiftCommons for shared utilities (default traits disabled). It has no
+with SwiftCommons for shared utilities (default traits disabled, imported with
+`internal import` so it never becomes part of the public API). It has no
 package-wide main-actor default isolation or upcoming-feature flags. `Package.swift` is the source of truth.
 
 ## Modules and boundaries
@@ -9,9 +10,10 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Area | Implementation | Responsibility |
 | --- | --- | --- |
 | HTTP | `NetworkEndpoint.swift`, `APIClient.swift`, `NetworkClient.swift` | Describe, assemble, execute, validate, and decode requests |
-| Configuration | `NetworkClientConfiguration.swift` | Session, JSON coders, auth provider, timeouts, instrumentation |
+| Configuration | `NetworkClientConfiguration.swift` | Session, JSON coders, auth provider, retry and redirect policies, timeouts, instrumentation |
 | Authentication | `AuthProvider.swift`, `AuthorizationType.swift` | Inject credentials and coalesce overlapping OAuth refreshes |
 | TLS | `SSLPinningConfiguration.swift` | Optional certificate/SPKI pins with platform trust validation by default |
+| Redirects | `RedirectPolicy.swift`, `RedirectGuard.swift` | Strip credentials on cross-origin redirects and refuse HTTPS downgrades, through a per-task delegate |
 | Observation | `NetworkInstrumentation.swift`, `NetworkMonitor.swift`, `Logger.swift` | Request events, reachability, unified logging |
 | Cache | `Cache.swift`, `InMemoryCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory, persistence composition |
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
@@ -124,16 +126,29 @@ captured credentials and sensitive bodies. The default store is memory-only.
 
 TLS pinning applies only to configured hosts. Exact policies win; otherwise the
 nearest ancestor permitting subdomains wins. Unlisted hosts use system trust.
-Pinning is not a host allowlist or redirect policy. Keep default trust validation
-enabled and plan overlapping pins for rotation.
+Pinning is not a host allowlist. Keep default trust validation enabled and plan
+overlapping pins for rotation.
+
+`RedirectPolicy.stripCredentialsAcrossOrigins` (the default) runs as a per-task
+`URLSessionTaskDelegate` passed to `data(for:delegate:)`, so it applies to injected
+and pinned sessions alike; the session delegate still answers trust challenges.
+A redirect to another origin (scheme, host, effective port, compared to the URL the
+caller requested) loses `Authorization`, `Proxy-Authorization`, `Cookie`, and the
+applied `AuthorizationType`'s header. An `https` to `http` redirect is refused and
+surfaces as `unexpectedStatus` with the `3xx`. `.followAll` installs no delegate.
+A task delegate takes precedence over the session delegate, so the guard forwards
+each redirect to a session delegate that implements the redirect callback and
+returns its answer unchanged: the app's own redirect handling always decides. The
+guard uses the completion-handler callback so it runs on the session's delegate queue.
 
 Logs use `os.Logger`, including in release builds, and default to warning level. The level is package-wide
 (`LogLevel.current`); configurations do not carry one, so creating a client never changes logging.
 URLs and underlying errors are marked private, not structurally scrubbed.
 Instrumentation and error values can contain sensitive URLs and response bodies;
 applications must redact before exporting them. Use HTTPS for sensitive traffic,
-limit credentialed clients to trusted endpoints, and configure URLSession redirect
-handling when using custom authentication headers. See [SECURITY.md](SECURITY.md).
+limit credentialed clients to trusted endpoints, and send credentials through an
+`AuthorizationType` rather than ad hoc endpoint headers so cross-origin redirects
+strip them. See [SECURITY.md](SECURITY.md).
 
 ## Extension points
 

@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 /// Configuration settings for ``NetworkClient``.
 ///
@@ -80,6 +80,14 @@ public struct NetworkClientConfiguration: Sendable {
     /// `POST` and `PATCH` are never retried. See ``NetworkRetryPolicy``.
     public var retryPolicy: NetworkRetryPolicy?
 
+    /// How the client treats HTTP redirects.
+    ///
+    /// Defaults to ``RedirectPolicy/stripCredentialsAcrossOrigins``, which removes
+    /// credentials from a redirect to another origin and refuses an `https` to `http`
+    /// downgrade. If ``session``'s delegate handles redirects itself, it decides every
+    /// redirect and this policy is not applied.
+    public var redirectPolicy: RedirectPolicy
+
     /// The timeout for each request.
     ///
     /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
@@ -103,6 +111,8 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
     ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
+    ///   - redirectPolicy: How redirects are followed. Defaults to
+    ///     ``RedirectPolicy/stripCredentialsAcrossOrigins``.
     ///   - timeout: The timeout for each request. Defaults to 30 seconds.
     ///   - instrumentation: Observer for request lifecycle events. Defaults to `nil`.
     public init(
@@ -113,6 +123,7 @@ public struct NetworkClientConfiguration: Sendable {
         maxAuthRefreshAttempts: Int = 1,
         authRefreshDelay: Duration = .seconds(1),
         retryPolicy: NetworkRetryPolicy? = nil,
+        redirectPolicy: RedirectPolicy = .stripCredentialsAcrossOrigins,
         timeout: Duration = .seconds(30),
         instrumentation: (any NetworkInstrumentation)? = nil
     ) {
@@ -123,6 +134,7 @@ public struct NetworkClientConfiguration: Sendable {
         self.maxAuthRefreshAttempts = max(0, maxAuthRefreshAttempts)
         self.authRefreshDelay = authRefreshDelay
         self.retryPolicy = retryPolicy
+        self.redirectPolicy = redirectPolicy
         self.timeout = timeout
         self.instrumentation = instrumentation
     }

@@ -1,6 +1,6 @@
 import Foundation
 import Network
-import SwiftCommons
+internal import SwiftCommons
 
 /// Reachability status reported by ``NetworkMonitor``.
 public enum NetworkReachability: Sendable, Equatable {

@@ -1,5 +1,5 @@
 import Foundation
-import SwiftCommons
+internal import SwiftCommons
 
 // MARK: - APIClient Protocol
 
