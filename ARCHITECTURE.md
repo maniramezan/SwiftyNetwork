@@ -36,7 +36,8 @@ prefix trimming and SwiftCommons’ suffix trimming normalize endpoint paths.
 HTTP(S) scheme and host and assembles paths/query items. Standalone
 `makeURLRequest()` and `NetworkClient` share header, method, and body assembly.
 The standalone builder applies endpoint authorization; the client additionally
-falls back to its provider when endpoint authorization is `.none`.
+falls back to its provider when endpoint authorization is `.none`. If the provider
+throws, the request fails with `authorizationUnavailable` and is never sent.
 
 Each client call captures its configuration before suspension. It executes
 `URLSession.data(for:)`, validates HTTP status, and decodes a `Decodable & Sendable`

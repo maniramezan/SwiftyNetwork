@@ -148,11 +148,23 @@ public actor NetworkClient: APIClient {
 
         var request = endpoint.makeUnauthenticatedURLRequest(url: url)
         request.timeoutInterval = configuration.timeout.timeInterval
-        let providerAuthorization = await applyAuthorization(
-            to: &request,
-            from: endpoint,
-            configuration: configuration
-        )
+        let providerAuthorization: AuthorizationType?
+        do {
+            providerAuthorization = try await applyAuthorization(
+                to: &request,
+                from: endpoint,
+                configuration: configuration
+            )
+        } catch is CancellationError {
+            Logger.info("Authorization lookup cancelled", category: .auth)
+            await trace.failed(.underlying(CancellationError()))
+            throw CancellationError()
+        } catch {
+            Logger.error("Authorization provider could not supply authorization", error: error, category: .auth)
+            let failure = NetworkError.authorizationUnavailable(underlying: error)
+            await trace.failed(failure)
+            throw failure
+        }
 
         let data: Data
         let httpResponse: HTTPURLResponse
@@ -287,13 +299,14 @@ public actor NetworkClient: APIClient {
     /// - Returns: The provider-supplied authorization that was applied, or `nil`
     ///   when the endpoint's own authorization was used. Only provider
     ///   authorization is eligible for refresh after a `401`.
+    /// - Throws: Whatever ``AuthorizationProvider/currentAuthorization()`` throws.
     private func applyAuthorization(
         to request: inout URLRequest,
         from endpoint: any NetworkEndpoint,
         configuration: NetworkClientConfiguration
-    ) async -> AuthorizationType? {
+    ) async throws -> AuthorizationType? {
         if case .none = endpoint.authorization, let provider = configuration.authorizationProvider {
-            let providerAuthorization = await provider.currentAuthorization()
+            let providerAuthorization = try await provider.currentAuthorization()
             providerAuthorization.apply(to: &request)
             return providerAuthorization
         }

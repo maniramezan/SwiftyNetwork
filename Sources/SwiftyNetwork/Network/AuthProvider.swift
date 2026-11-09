@@ -24,7 +24,16 @@ import Foundation
 /// ```
 public protocol AuthorizationProvider: Sendable {
     /// Returns the current authorization to apply to requests.
-    func currentAuthorization() async -> AuthorizationType
+    ///
+    /// Throw when no usable authorization exists, for example when the user is
+    /// signed out or a proactive token refresh failed. ``NetworkClient`` then
+    /// fails the request with ``NetworkError/authorizationUnavailable(underlying:)``
+    /// without sending it, except that a `CancellationError` propagates unchanged.
+    /// A provider that cannot fail can implement this without `throws`.
+    ///
+    /// - Returns: The authorization to apply.
+    /// - Throws: Any error explaining why no authorization is available.
+    func currentAuthorization() async throws -> AuthorizationType
 
     /// Refreshes credentials after `rejected` was answered with `401`.
     ///
