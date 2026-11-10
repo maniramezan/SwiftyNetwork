@@ -11,7 +11,7 @@ struct FakeAPIClientTests {
 
         async let first: Result<EmptyResponse, any Error> = result(of: fake)
         _ = try await waitUntil(
-            timeout: .seconds(2), operation: { await fake.callCount }, matching: { $0 == 1 })
+            timeout: testTimeout, operation: { await fake.callCount }, matching: { $0 == 1 })
         let second = try await fake.request(TestEndpoint(), responseType: EmptyResponse.self)
         #expect(second == EmptyResponse())
         gate.open()

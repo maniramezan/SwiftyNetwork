@@ -28,6 +28,10 @@ public actor NetworkClient: APIClient {
 
     let configuration: NetworkClientConfiguration
 
+    /// Waits for a retry delay or `authRefreshDelay`. Tests replace it to record waits without
+    /// depending on wall-clock time.
+    let sleeper: @Sendable (Duration) async throws -> Void
+
     /// Shared client with default configuration.
     ///
     /// Suitable for simple apps. For testability, authorization, or multiple
@@ -51,7 +55,20 @@ public actor NetworkClient: APIClient {
     ///
     /// - Parameter configuration: The configuration to use.
     public init(configuration: NetworkClientConfiguration = NetworkClientConfiguration()) {
+        self.init(configuration: configuration, sleeper: { try await Task.sleep(for: $0) })
+    }
+
+    /// Creates a client that waits with `sleeper` instead of `Task.sleep`.
+    ///
+    /// - Parameters:
+    ///   - configuration: The configuration to use.
+    ///   - sleeper: Called with each retry delay and `authRefreshDelay`; throws on cancellation.
+    init(
+        configuration: NetworkClientConfiguration,
+        sleeper: @escaping @Sendable (Duration) async throws -> Void
+    ) {
         self.configuration = configuration
+        self.sleeper = sleeper
     }
 
     // MARK: - Public Request API
@@ -265,7 +282,7 @@ public actor NetworkClient: APIClient {
         )
         if delay > .zero {
             do {
-                try await Task.sleep(for: delay)
+                try await sleeper(delay)
             } catch {
                 // Cancelled while waiting: close out this attempt for observers.
                 Logger.info("Retry wait cancelled")
@@ -474,7 +491,7 @@ public actor NetworkClient: APIClient {
 
         if configuration.authRefreshDelay > .zero {
             Logger.debug("Waiting \(configuration.authRefreshDelay) before retry")
-            try await Task.sleep(for: configuration.authRefreshDelay)
+            try await sleeper(configuration.authRefreshDelay)
         }
     }
 }
