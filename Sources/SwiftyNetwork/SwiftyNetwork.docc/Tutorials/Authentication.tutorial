@@ -36,7 +36,7 @@
             }
 
             @Step {
-                Or implement a custom provider for full control over header injection and refresh.
+                Or implement a custom provider for full control over header injection and refresh. Route its refresh through `AuthorizationRefreshCoalescer` so requests that fail together share one refresh.
 
                 @Code(name: "CustomProvider.swift", file: "Auth-CustomProvider.swift")
             }

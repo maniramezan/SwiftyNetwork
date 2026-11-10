@@ -434,8 +434,37 @@ client passes it a `401` response, or a `403` response to a request the provider
 new token cannot fix the failure. The default refreshes `401` and does not refresh `403`; an API that uses legacy
 `403` codes for expired tokens can opt in by inspecting the response body or headers.
 
-Inside `refreshAuthorization(rejecting:)`, `guard await isCurrentAuthorization(rejected) else { return }` skips a
-refresh that another request already did.
+A custom provider gets the same coalescing as `OAuthAuthorizationProvider` from `AuthorizationRefreshCoalescer`.
+Requests that fail together share one refresh, a `401` for a credential that was already replaced skips the refresh,
+and an app-initiated refresh joins one already running:
+
+```swift
+actor SessionAuthorizationProvider: AuthorizationProvider {
+    private let refreshes = AuthorizationRefreshCoalescer()
+    private var token: String
+
+    func currentAuthorization() async -> AuthorizationType { .bearer(token: token) }
+
+    func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+        try await refreshes.refresh(rejecting: rejected, of: self) {
+            let newToken = try await sessionService.reauthenticate()
+            await self.store(newToken)
+        }
+    }
+
+    func forceRefresh() async throws {
+        try await refreshes.refresh {
+            let newToken = try await sessionService.reauthenticate()
+            await self.store(newToken)
+        }
+    }
+
+    private func store(_ newToken: String) { token = newToken }
+}
+```
+
+The refresh closure must store the new credential before it returns. `isCurrentAuthorization(_:)` alone skips a
+refresh that another request already finished, but it does not stop requests that fail together from each refreshing.
 
 #### Endpoints without the user's credentials
 
@@ -453,8 +482,8 @@ struct RefreshTokenEndpoint: NetworkEndpoint {
 ```
 
 If the refresh handler calls the same client, its endpoint must opt out. Otherwise it carries the expired token, and a
-`401` from it would ask the provider to refresh from inside its own refresh. `OAuthAuthorizationProvider` fails that
-nested refresh with `ReentrantRefreshError` rather than waiting on itself.
+`401` from it would ask the provider to refresh from inside its own refresh. `AuthorizationRefreshCoalescer`, and so
+`OAuthAuthorizationProvider`, fails that nested refresh with `ReentrantRefreshError` rather than waiting on itself.
 
 ### Streaming and Other Transports
 

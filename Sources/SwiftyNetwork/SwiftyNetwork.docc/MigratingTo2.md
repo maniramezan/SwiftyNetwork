@@ -189,8 +189,13 @@ case .rejected, .serverError, .other: showGenericError()
   public endpoint, returns `false` from ``NetworkEndpoint/usesAuthorizationProvider``. In 1.x there
   was no way to opt out: `.none` always meant "use the provider". If your refresh handler calls the
   same client, its endpoint must opt out; ``OAuthAuthorizationProvider`` now fails a refresh requested
-  from inside its own refresh with ``OAuthAuthorizationProvider/ReentrantRefreshError`` instead of
-  hanging.
+  from inside its own refresh with ``ReentrantRefreshError`` (also reachable as
+  `OAuthAuthorizationProvider.ReentrantRefreshError`) instead of hanging.
+- A custom provider that coalesced refreshes by hand can store an ``AuthorizationRefreshCoalescer`` and
+  call ``AuthorizationRefreshCoalescer/refresh(rejecting:of:_:)`` from
+  ``AuthorizationProvider/refreshAuthorization(rejecting:)``. It shares one refresh across requests that
+  fail together, skips a stale rejection, and detects a nested refresh the same way
+  ``OAuthAuthorizationProvider`` does.
 
 #### Converting a `Bool` refresh
 
