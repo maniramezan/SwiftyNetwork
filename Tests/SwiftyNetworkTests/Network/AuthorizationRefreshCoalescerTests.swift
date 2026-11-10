@@ -67,38 +67,81 @@ struct AuthorizationRefreshCoalescerTests {
 
     // MARK: - Forced refresh
 
-    @Test("Concurrent forced refreshes run the operation once")
-    func forcedRefreshesCoalesce() async throws {
+    @Test("Forced refreshes that arrive during a running refresh share one refresh that starts after it")
+    func forcedRefreshesRunAfterOlderRefreshAndCoalesce() async throws {
         let coalescer = AuthorizationRefreshCoalescer()
-        let counter = Counter()
-        let started = AsyncGate()
-        let finish = AsyncGate()
-        let operation: @Sendable () async throws -> Void = {
-            await counter.increment()
-            started.open()
-            try await finish.wait()
+        let olderRuns = Counter()
+        let forcedRuns = Counter()
+        let forcedReturned = Counter()
+        let olderStarted = AsyncGate()
+        let finishOlder = AsyncGate()
+        let finishForced = AsyncGate()
+
+        let older = Task {
+            try await coalescer.refresh {
+                await olderRuns.increment()
+                olderStarted.open()
+                try await finishOlder.wait()
+            }
         }
-
-        let first = Task { try await coalescer.refresh(operation) }
-        try await started.wait()
-        let joiners = (0..<9).map { _ in Task { try await coalescer.refresh(operation) } }
+        try await olderStarted.wait()
+        let forced = (0..<9).map { _ in
+            Task {
+                try await coalescer.refresh {
+                    await forcedRuns.increment()
+                    try await finishForced.wait()
+                }
+                await forcedReturned.increment()
+            }
+        }
+        // All nine wait on the older refresh, which must not satisfy them.
         await waitForJoiners(9, on: coalescer)
-        finish.open()
+        finishOlder.open()
+        try await older.value
+        // One of them starts the next refresh and the other eight join it. Stop waiting if they
+        // all returned instead, which happens only when the older refresh wrongly satisfied them.
+        while await coalescer.joinedCallers < 17, await forcedReturned.count < 9 { await Task.yield() }
+        finishForced.open()
 
-        try await first.value
-        for joiner in joiners { try await joiner.value }
-        #expect(await counter.count == 1)
+        for call in forced { try await call.value }
+        #expect(await olderRuns.count == 1)
+        #expect(await forcedRuns.count == 1)
+    }
+
+    @Test("A forced refresh ignores the failure of a refresh that started before it")
+    func forcedRefreshIgnoresOlderFailure() async throws {
+        let coalescer = AuthorizationRefreshCoalescer()
+        let forcedRuns = Counter()
+        let olderStarted = AsyncGate()
+        let finishOlder = AsyncGate()
+
+        let older = Task {
+            try await coalescer.refresh {
+                olderStarted.open()
+                try await finishOlder.wait()
+                throw RefreshFailed()
+            }
+        }
+        try await olderStarted.wait()
+        let forced = Task { try await coalescer.refresh { await forcedRuns.increment() } }
+        await waitForJoiners(1, on: coalescer)
+        finishOlder.open()
+
+        await #expect(throws: RefreshFailed.self) { try await older.value }
+        try await forced.value
+        #expect(await forcedRuns.count == 1)
     }
 
     @Test("A failed refresh reaches every joiner and is not remembered")
     func failureReachesJoinersAndIsRetried() async throws {
         let coalescer = AuthorizationRefreshCoalescer()
+        let provider = SwappableProvider(token: "old")
         let counter = Counter()
         let started = AsyncGate()
         let finish = AsyncGate()
 
         let first = Task {
-            try await coalescer.refresh {
+            try await coalescer.refresh(rejecting: .bearer(token: "old"), of: provider) {
                 await counter.increment()
                 started.open()
                 try await finish.wait()
@@ -106,7 +149,9 @@ struct AuthorizationRefreshCoalescerTests {
             }
         }
         try await started.wait()
-        let joiner = Task { try await coalescer.refresh { await counter.increment() } }
+        let joiner = Task {
+            try await coalescer.refresh(rejecting: .bearer(token: "old"), of: provider) { await counter.increment() }
+        }
         await waitForJoiners(1, on: coalescer)
         finish.open()
 
@@ -162,7 +207,9 @@ struct AuthorizationRefreshCoalescerTests {
             }
         }
         try await started.wait()
-        let joiner = Task { try await coalescer.refresh {} }
+        let joiner = Task {
+            try await coalescer.refresh(rejecting: .bearer(token: "t"), of: SwappableProvider(token: "t")) {}
+        }
         await waitForJoiners(1, on: coalescer)
         first.cancel()
         joiner.cancel()

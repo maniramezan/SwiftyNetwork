@@ -46,7 +46,7 @@ public struct ReentrantRefreshError: Error, Sendable, Equatable, CustomStringCon
 ///         }
 ///     }
 ///
-///     /// An app-initiated refresh that joins any refresh already running.
+///     /// An app-initiated refresh that always reflects state as of this call.
 ///     func forceRefresh() async throws {
 ///         try await refreshes.refresh {
 ///             let token = try await sessionService.reauthenticate()
@@ -64,7 +64,9 @@ public struct ReentrantRefreshError: Error, Sendable, Equatable, CustomStringCon
 /// arriving afterward see that the rejected credential is no longer current.
 ///
 /// Only the operation passed by the caller that starts a refresh runs; callers that join it
-/// share its result, and their operations are discarded. Every joiner receives the same error
+/// share its result, and their operations are discarded. A forced ``refresh(_:)`` never joins a
+/// refresh that started before it was called, because that refresh may have requested
+/// credentials before the change the app is reacting to. Every joiner receives the same error
 /// when the refresh fails. A failure is not remembered, so the next call refreshes again.
 ///
 /// A canceled caller does not cancel the shared refresh; it receives the refresh's result when it
@@ -74,13 +76,15 @@ public actor AuthorizationRefreshCoalescer {
     @TaskLocal private static var activeCoalescers: Set<ObjectIdentifier> = []
 
     private struct Flight: Sendable {
-        let id: UUID
+        /// Increases with every started flight, so a caller can tell whether a flight started after it.
+        let sequence: Int
         let task: Task<Void, any Error>
     }
 
     private var inFlight: Flight?
+    private var startedFlights = 0
     private var completedFlights = 0
-    /// How many calls have joined a refresh started by another caller, so tests can wait for joiners.
+    /// How many calls have waited on a refresh started by another caller, so tests can wait for them.
     private(set) var joinedCallers = 0
 
     /// Creates a coalescer with no refresh in flight.
@@ -125,20 +129,29 @@ public actor AuthorizationRefreshCoalescer {
         try await start(refresh)
     }
 
-    /// Refreshes unconditionally, joining a refresh that is already running.
+    /// Refreshes unconditionally, with a refresh that starts after this call.
     ///
-    /// Use it for refreshes the app starts itself, for example after the user changes plans or
-    /// when the app returns to the foreground. If a refresh is in flight, this waits for it and
-    /// returns its result without running `refresh`.
+    /// Use it for refreshes the app starts itself, for example after the user changes plans, so
+    /// the new credential reflects the change. A refresh already in flight may have requested its
+    /// credential before the change, so this waits for it to finish, ignores its result, and then
+    /// runs another. Every forced call that arrives while the same refresh is running shares that
+    /// one next refresh. A ``refresh(rejecting:of:_:)`` call joins whichever refresh is running.
     ///
     /// - Parameter refresh: Obtains and stores a new credential, or throws when it cannot.
-    /// - Throws: The shared refresh's error, `CancellationError` when the shared refresh was
-    ///   canceled, or ``ReentrantRefreshError`` when called from inside the running refresh.
+    /// - Throws: The error of the refresh that started after this call, `CancellationError` when
+    ///   that refresh was canceled, or ``ReentrantRefreshError`` when called from inside the
+    ///   running refresh.
     public func refresh(_ refresh: @escaping @Sendable () async throws -> Void) async throws {
         try checkReentrancy()
-        if let flight = inFlight {
-            try await join(flight)
-            return
+        let lastStartedBeforeCall = startedFlights
+        while let flight = inFlight {
+            if flight.sequence > lastStartedBeforeCall {
+                try await join(flight)
+                return
+            }
+            Logger.debug("Waiting for an older authorization refresh before forcing a new one", category: .auth)
+            joinedCallers += 1
+            _ = await flight.task.result
         }
         try await start(refresh)
     }
@@ -161,7 +174,8 @@ public actor AuthorizationRefreshCoalescer {
     }
 
     private func start(_ refresh: @escaping @Sendable () async throws -> Void) async throws {
-        let id = UUID()
+        startedFlights += 1
+        let sequence = startedFlights
         let active = Self.activeCoalescers.union([ObjectIdentifier(self)])
         Logger.debug("Starting an authorization refresh", category: .auth)
         let task = Task<Void, any Error> {
@@ -170,20 +184,20 @@ public actor AuthorizationRefreshCoalescer {
                     try await refresh()
                 }
             } catch {
-                finish(id, error: error)
+                finish(sequence, error: error)
                 throw error
             }
-            finish(id, error: nil)
+            finish(sequence, error: nil)
         }
-        inFlight = Flight(id: id, task: task)
+        inFlight = Flight(sequence: sequence, task: task)
         try await task.value
     }
 
-    private func finish(_ id: UUID, error: (any Error)?) {
+    private func finish(_ sequence: Int, error: (any Error)?) {
         if let error, !(error is CancellationError) {
             Logger.error("Authorization refresh failed", error: error, category: .auth)
         }
-        guard inFlight?.id == id else { return }
+        guard inFlight?.sequence == sequence else { return }
         inFlight = nil
         completedFlights += 1
     }

@@ -328,7 +328,9 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
   `EncodedBodyEndpoint` must forward it
 - `AuthorizationRefreshCoalescer` is the single refresh single-flight (`OAuthAuthorizationProvider` uses it).
   It checks reentrancy, then staleness (`isCurrentAuthorization`), then joins; a completed-flight counter
-  re-checks staleness when a whole refresh finished during the check. It marks the running refresh with
+  re-checks staleness when a whole refresh finished during the check. The forced `refresh(_:)` never
+  joins a flight that started before the call (it may predate the change being reacted to); it waits for
+  it, then joins or starts the next one, keyed by a flight sequence number. It marks the running refresh with
   a task-local, so a refresh requested from inside it throws `ReentrantRefreshError` instead of joining
   (and waiting on) its own in-flight task
 - `NetworkErrorCategory` and `MutationFailureReason.Category` must stay in step: 429 is `rateLimited`, TLS

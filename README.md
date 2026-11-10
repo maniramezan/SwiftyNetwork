@@ -436,7 +436,7 @@ new token cannot fix the failure. The default refreshes `401` and does not refre
 
 A custom provider gets the same coalescing as `OAuthAuthorizationProvider` from `AuthorizationRefreshCoalescer`.
 Requests that fail together share one refresh, a `401` for a credential that was already replaced skips the refresh,
-and an app-initiated refresh joins one already running:
+and an app-initiated refresh runs after any refresh already in flight, so its credential reflects state as of the call:
 
 ```swift
 actor SessionAuthorizationProvider: AuthorizationProvider {
