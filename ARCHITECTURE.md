@@ -18,7 +18,7 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Cache | `Cache.swift`, `InMemoryCache.swift`, `DiskCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory/disk, persistence composition |
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
 | Repository | `Repository.swift`, `RepositoryResult.swift`, `FetchCoalescer.swift` | Coordinate a cache and the network using `CachePolicy`, report freshness, share same-key requests |
-| Mutations | `Mutation/`, `FileMutationStore.swift` | Retry, coalesce, persist, and observe background mutations |
+| Mutations | `Mutation/`, `Mutation/Store/` | Retry, coalesce, persist, and observe background mutations |
 | Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()`, `NetworkRetryPolicy.immediate()` |
 
 Internal building blocks are kept in their own files so they can be reused and

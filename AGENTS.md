@@ -23,55 +23,64 @@ SwiftyNetwork is a Swift networking library, depending only on [SwiftCommons](ht
 Sources/SwiftyNetwork/
 ├── Logger.swift              # Internal logging (SwiftCommons LibraryLogger, privacy-aware)
 ├── Network/
-│   ├── NetworkEndpoint.swift        # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
-│   ├── TypedEndpoint.swift           # Endpoint with its associated response type
-│   ├── APIClient.swift              # APIClient protocol (response(for:) requirement) + request conveniences
-│   ├── DecodedResponse.swift        # Decoded value + HTTPResponse returned by response(for:responseType:)
-│   ├── HTTPResponse.swift           # Status, headers, body (+ Retry-After) for successes and NetworkError
-│   ├── NetworkClient.swift          # Actor: request pipeline, 401 refresh + replay
-│   ├── NetworkClient+RawRequests.swift  # sendAuthorized: raw URLRequest + caller transport with auth/refresh-once
-│   ├── NetworkClientConfiguration.swift  # Session, coders, auth, retry/redirect policies, timeouts, instrumentation
-│   ├── RedirectPolicy.swift         # Redirect handling presets (default strips credentials across origins)
-│   ├── RedirectGuard.swift          # Internal: per-task delegate applying RedirectPolicy, Origin comparison
-│   ├── HTTPStatusValidator.swift    # Internal: status code -> NetworkError mapping
-│   ├── BackoffPolicy.swift          # Shared jittered exponential backoff + Retry-After floor
-│   ├── NetworkRetryPolicy.swift     # Opt-in idempotent-request retry policy (429/5xx/timeout/offline)
-│   ├── RetryAfter.swift             # Internal: Retry-After parsing (delta-seconds + HTTP-date)
-│   ├── RequestTrace.swift           # Internal: per-attempt instrumentation reporting
-│   ├── EncodedBodyEndpoint.swift    # Internal: body-override wrapper + HTTPHeaders helpers
-│   ├── HTTPMethod.swift             # Extensible HTTP method struct (string literals for custom verbs)
-│   ├── EmptyResponse.swift          # Decodable for bodiless responses
-│   ├── AuthorizationType.swift      # Auth header strategies
-│   ├── AuthProvider.swift           # AuthorizationProvider protocol + OAuth actor
-│   ├── AuthorizationRefreshCoalescer.swift  # Shared single-flight refresh for custom providers + ReentrantRefreshError
-│   ├── NetworkError.swift           # Error enum, classification, category, isTransient, URLError mapping
-│   ├── NetworkInstrumentation.swift # Observability hook + event types
-│   ├── NetworkMonitor.swift         # NWPathMonitor reachability actor
-│   └── SSLPinningConfiguration.swift  # Pins, host policies, trust evaluation
+│   ├── Client/
+│   │   ├── NetworkClient.swift             # Actor: request pipeline, 401 refresh + replay
+│   │   ├── NetworkClient+RawRequests.swift # sendAuthorized: raw URLRequest + caller transport with auth/refresh-once
+│   │   ├── NetworkClientConfiguration.swift# Session, coders, auth, retry/redirect policies, timeouts, instrumentation
+│   │   ├── RequestTrace.swift              # Internal: per-attempt instrumentation reporting
+│   │   ├── NetworkInstrumentation.swift    # Observability hook + event types
+│   │   └── NetworkMonitor.swift            # NWPathMonitor reachability actor
+│   ├── Endpoint/
+│   │   ├── NetworkEndpoint.swift           # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
+│   │   ├── TypedEndpoint.swift             # Endpoint with its associated response type
+│   │   ├── EncodedBodyEndpoint.swift       # Internal: body-override wrapper + HTTPHeaders helpers
+│   │   ├── HTTPMethod.swift                # Extensible HTTP method struct (string literals for custom verbs)
+│   │   ├── EmptyResponse.swift             # Decodable for bodiless responses
+│   │   ├── APIClient.swift                 # APIClient protocol (response(for:) requirement) + request conveniences
+│   │   └── DecodedResponse.swift           # Decoded value + HTTPResponse returned by response(for:responseType:)
+│   ├── Authorization/
+│   │   ├── AuthorizationType.swift         # Auth header strategies
+│   │   ├── AuthProvider.swift              # AuthorizationProvider protocol + OAuth actor
+│   │   └── AuthorizationRefreshCoalescer.swift# Shared single-flight refresh for custom providers + ReentrantRefreshError
+│   ├── Response/
+│   │   ├── NetworkError.swift              # Error enum, classification, category, isTransient, URLError mapping
+│   │   ├── HTTPResponse.swift              # Status, headers, body (+ Retry-After) for successes and NetworkError
+│   │   └── HTTPStatusValidator.swift       # Internal: status code -> NetworkError mapping
+│   ├── Retry/
+│   │   ├── BackoffPolicy.swift             # Shared jittered exponential backoff + Retry-After floor
+│   │   ├── NetworkRetryPolicy.swift        # Opt-in idempotent-request retry policy (429/5xx/timeout/offline)
+│   │   └── RetryAfter.swift                # Internal: Retry-After parsing (delta-seconds + HTTP-date)
+│   └── Security/
+│       ├── SSLPinningConfiguration.swift   # Pins, host policies, trust evaluation
+│       ├── RedirectGuard.swift             # Internal: per-task delegate applying RedirectPolicy, Origin comparison
+│       └── RedirectPolicy.swift            # Redirect handling presets (default strips credentials across origins)
 ├── Cache/
-│   ├── Cache.swift                  # Cache<Value> protocol, CacheEntry, value/setValue conveniences
-│   ├── CacheKey.swift               # Hashable, string-literal key with factories
-│   ├── CachePolicy.swift            # Cache-first, reload, expiry, fallback, revalidation policies
-│   ├── LRUStorage.swift             # Internal: O(1) LRU dictionary (value type)
-│   ├── InMemoryCache.swift          # Actor over LRUStorage with timestamps
-│   ├── DiskCache.swift              # Codable file cache with byte and idle-time limits
-│   ├── LayeredCache.swift           # Memory + persistent with promotion
-│   ├── CacheOperationGate.swift     # Internal: FIFO gate serializing compound cache ops
-│   ├── SingleFlightCache.swift      # Coalesces concurrent same-key fetches
-│   └── RemoteDataCache.swift        # URL-keyed byte cache on top of SingleFlightCache
+│   ├── Cache.swift                     # Cache<Value> protocol, CacheEntry, value/setValue conveniences
+│   ├── CacheKey.swift                  # Hashable, string-literal key with factories
+│   ├── CachePolicy.swift               # Cache-first, reload, expiry, fallback, revalidation policies
+│   ├── Storage/
+│   │   ├── InMemoryCache.swift             # Actor over LRUStorage with timestamps
+│   │   ├── LRUStorage.swift                # Internal: O(1) LRU dictionary (value type)
+│   │   ├── DiskCache.swift                 # Codable file cache with byte and idle-time limits
+│   │   └── LayeredCache.swift              # Memory + persistent with promotion
+│   └── Coordination/
+│       ├── CacheOperationGate.swift        # Internal: FIFO gate serializing compound cache ops
+│       ├── SingleFlightCache.swift         # Coalesces concurrent same-key fetches
+│       └── RemoteDataCache.swift           # URL-keyed byte cache on top of SingleFlightCache
 ├── Repository/
 │   ├── Repository.swift             # Repository<Entity> protocol, GenericRepository (client + any Cache)
 │   ├── RepositoryResult.swift       # Value + source + fetch timestamp
 │   └── FetchCoalescer.swift         # Same-key repository network request coalescing
 └── Mutation/
-    ├── MutationQueue.swift          # Actor: enqueue, background retry, coalescing, status via AsyncStream
-    ├── MutationRequest.swift        # Codable NetworkEndpoint value type (endpoint + body), replayable
-    ├── MutationKey.swift            # Coalescing key
-    ├── MutationStatus.swift         # pending/retrying/succeeded/failed + MutationFailureReason (category: offline/rejected/...)
-    ├── MutationRetryPolicy.swift    # Exponential backoff + jitter (capped), transient classification
-    ├── MutationStore.swift          # Pluggable persistence protocol
-    ├── InMemoryMutationStore.swift  # Default in-memory MutationStore
-    └── FileMutationStore.swift      # Durable file-backed MutationStore
+    ├── MutationQueue.swift             # Actor: enqueue, background retry, coalescing, status via AsyncStream
+    ├── MutationRequest.swift           # Codable NetworkEndpoint value type (endpoint + body), replayable
+    ├── MutationKey.swift               # Coalescing key
+    ├── MutationStatus.swift            # pending/retrying/succeeded/failed + MutationFailureReason (category: offline/rejected/...)
+    ├── MutationRetryPolicy.swift       # Exponential backoff + jitter (capped), transient classification
+    └── Store/
+        ├── MutationStore.swift             # Pluggable persistence protocol
+        ├── InMemoryMutationStore.swift     # Default in-memory MutationStore
+        └── FileMutationStore.swift         # Durable file-backed MutationStore
 
 Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
 ├── MockAPIClient.swift              # Scriptable APIClient that records requests
@@ -82,10 +91,10 @@ Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separa
 
 Tests/SwiftyNetworkTests/
 ├── Helpers/                         # TestHTTPStub, RedirectingURLProtocol, FakeAPIClient, TestAuthorizationProvider, ...
-├── Network/                         # Client, auth, pinning, instrumentation, errors, endpoint tests
-├── Cache/                           # Cache types, LRUStorage, ordering/single-flight, RemoteDataCache
+├── Network/                         # Client/, Endpoint/, Authorization/, Response/, Retry/, Security/ tests
+├── Cache/                           # Storage/ (types, LRUStorage, disk) and Coordination/ (ordering, single-flight, RemoteDataCache)
 ├── Repository/RepositoryTests.swift # All cache policies against a real NetworkClient
-├── Mutation/                        # Queue retry/coalescing/status, request/store/policy unit tests
+├── Mutation/                        # Queue retry/coalescing/status, request/policy tests; Store/ for stores
 └── Testing/                         # MockAPIClient tests (the public SwiftyNetworkTesting module)
 ```
 

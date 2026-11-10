@@ -22,10 +22,17 @@ commitment for every app that depends on it. Follow these steps in order.
 
 | Kind | Location |
 |---|---|
-| HTTP pipeline / auth / TLS / observation | `Sources/SwiftyNetwork/Network/` |
-| Cache types and cache helpers | `Sources/SwiftyNetwork/Cache/` |
+| HTTP pipeline / observation | `Sources/SwiftyNetwork/Network/Client/` |
+| Endpoints, methods, API client protocol | `Sources/SwiftyNetwork/Network/Endpoint/` |
+| Auth providers and refresh | `Sources/SwiftyNetwork/Network/Authorization/` |
+| Errors, responses, status mapping | `Sources/SwiftyNetwork/Network/Response/` |
+| Backoff / retry policies | `Sources/SwiftyNetwork/Network/Retry/` |
+| TLS pinning, redirects | `Sources/SwiftyNetwork/Network/Security/` |
+| Cache protocol, keys, policies | `Sources/SwiftyNetwork/Cache/` |
+| Cache implementations | `Sources/SwiftyNetwork/Cache/Storage/` |
+| Cache coordination (gate, single-flight) | `Sources/SwiftyNetwork/Cache/Coordination/` |
 | Repository coordination | `Sources/SwiftyNetwork/Repository/` |
-| Mutation queue pieces | `Sources/SwiftyNetwork/Mutation/` |
+| Mutation queue pieces | `Sources/SwiftyNetwork/Mutation/` (stores in `Mutation/Store/`) |
 | Public fakes/mocks for consumers | `Sources/SwiftyNetworkTesting/` |
 
 One primary type per file; file name = type name. Split internal helpers into
