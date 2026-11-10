@@ -1,0 +1,71 @@
+name: NetworkIdentity
+options:
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  SwiftyNetwork:
+    path: ../..
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  OtherFramework:
+    type: framework
+    platform: iOS
+    sources: [OtherFramework]
+    dependencies:
+      - package: SwiftyNetwork
+        product: SwiftyNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.swiftynetwork.integration.other
+  AppFramework:
+    type: framework
+    platform: iOS
+    sources: [AppFramework]
+    dependencies:
+      - target: OtherFramework
+        embed: false
+      - package: SwiftyNetwork
+        product: SwiftyNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.swiftynetwork.integration.framework
+  IntegrationHost:
+    type: application
+    platform: iOS
+    sources: [IntegrationHost]
+    dependencies:
+      - target: AppFramework
+      - target: OtherFramework
+      - package: SwiftyNetwork
+        product: SwiftyNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.swiftynetwork.integration.host
+  NetworkIdentityTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [NetworkIdentityTests]
+    dependencies:
+      - target: IntegrationHost
+      - target: AppFramework
+        embed: false
+      - target: OtherFramework
+        embed: false
+      - package: SwiftyNetwork
+        product: SwiftyNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.swiftynetwork.integration.tests
+schemes:
+  NetworkIdentity:
+    build:
+      targets:
+        IntegrationHost: all
+        NetworkIdentityTests: [test]
+    test:
+      targets:
+        - NetworkIdentityTests

@@ -22,7 +22,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Fire-and-Forget Mutations**: Background retry, key-based coalescing, and pluggable persistence via `MutationQueue`
 - **Fetch Deduplication**: `SingleFlightCache` and `RemoteDataCache` share one fetch across concurrent callers
 - **Reachability & Instrumentation**: `NetworkMonitor` streams reachability; `NetworkInstrumentation` exposes request timing and outcomes
-- **Test Doubles**: The `SwiftyNetworkTesting` product ships `MockAPIClient` for unit tests and previews
+- **Test Doubles**: `@_spi(Testing) import SwiftyNetwork` gives tests and previews `MockAPIClient` and `TestAuthorizationProvider`
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
 ## Requirements
@@ -465,6 +465,24 @@ actor SessionAuthorizationProvider: AuthorizationProvider {
 
 The refresh closure must store the new credential before it returns. `isCurrentAuthorization(_:)` alone skips a
 refresh that another request already finished, but it does not stop requests that fail together from each refreshing.
+
+`refresh(rejecting:of:_:)` treats a thrown `currentAuthorization()` as "refresh" and any different value as "already
+replaced, skip". A provider that reports "no usable credential" as a value (for example `.none`, because throwing would
+turn a transient failure into a sign-in prompt) would skip a refresh that is still needed. Pass the staleness check
+yourself instead; return `true` while the rejected credential still needs replacing:
+
+```swift
+try await refreshes.refresh(
+    rejecting: rejected,
+    isCurrentAuthorization: {
+        let current = await self.currentAuthorization()
+        return current == .none || current == rejected
+    }
+) {
+    let newToken = try await sessionService.reauthenticate()
+    await self.store(newToken)
+}
+```
 
 #### Endpoints without the user's credentials
 
@@ -1015,32 +1033,27 @@ All operations in SwiftyNetwork are thread-safe:
 
 ## Testing
 
-Link `SwiftyNetwork` from your app or library target and `SwiftyNetworkTesting` only from its
-**test target**. `SwiftyNetworkTesting` already depends on `SwiftyNetwork`, so do not add the core
-product to the test target again; this keeps Swift Package Manager's dependency graph to one copy
-of `SwiftyNetwork`.
+SwiftyNetwork's test doubles live in the `SwiftyNetwork` module behind the `Testing` SPI, so a test
+target needs only the `SwiftyNetwork` product your app already links. Import the SPI in tests and
+previews, never in production code:
 
 ```swift
-.target(
-    name: "MyApp",
-    dependencies: [
-        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
-    ]
-),
 .testTarget(
     name: "MyAppTests",
     dependencies: [
         "MyApp",
-        .product(name: "SwiftyNetworkTesting", package: "SwiftyNetwork"),
+        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
     ]
 )
 ```
 
-This makes `MockAPIClient` and `TestAuthorizationProvider` available to the test target.
+`@testable import` alone doesn't expose SPI; write `@testable @_spi(Testing) import SwiftyNetwork`
+when you need both. Keeping the doubles in the core module means a test target always uses the same
+copy of SwiftyNetwork as the app, including Xcode apps that load it through dynamic frameworks, so
+`NetworkError` casts and retroactive conformances work in tests.
 
 ```swift
-import SwiftyNetwork
-import SwiftyNetworkTesting
+@_spi(Testing) import SwiftyNetwork
 import Testing
 
 @Test func likeRetriesTransientFailures() async throws {
@@ -1065,8 +1078,9 @@ import Testing
 ```
 
 `TestAuthorizationProvider` is a scriptable `AuthorizationProvider` for the same targets: a fixed bearer token, a
-`refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)` to change the refresh outcome mid-test.
-Like the rest of `SwiftyNetworkTesting`, it is for test targets and previews only.
+`refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)`,
+`setRefreshedAuthorization(_:)`, and `setCurrentAuthorization(_:)` to change the script mid-test.
+Like the other `Testing` SPI doubles, it is for test targets and previews only.
 
 Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))` to script response headers
 for code that reads `response(for:responseType:)`. Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw

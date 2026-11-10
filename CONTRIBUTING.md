@@ -30,6 +30,23 @@ swift build
 swift test
 ```
 
+The Xcode framework-linkage regression test requires an available iOS simulator:
+
+```bash
+bash Tests/XcodeIntegration/verify.sh <simulator-udid>
+```
+
+It exercises error type identity across two dynamic frameworks and checks that the test bundle
+defines no SwiftyNetwork symbols, which would mean it embeds a second copy of the core. The
+checked-in project is generated from `Tests/XcodeIntegration/project.yml`; after editing that
+specification, regenerate it with `xcodegen generate --spec Tests/XcodeIntegration/project.yml`.
+
+Public test doubles live in `Sources/SwiftyNetwork/Testing/` and are marked `@_spi(Testing) public`.
+Don't add a separate testing library product: its target would depend on the `SwiftyNetwork` target,
+so Xcode links a second copy of the core into test bundles of apps that share SwiftyNetwork across
+dynamic frameworks. `type: .dynamic` on either or both products doesn't prevent that, and a target
+can't depend on its own package's product.
+
 ### Code Formatting
 
 This project uses [swift-format](https://github.com/swiftlang/swift-format) for consistent code style.
@@ -234,7 +251,7 @@ When a reported change is source-compatible, copy its `API breakage: ...` line f
 with:
 
 ```bash
-swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork SwiftyNetworkTesting
+swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork
 ```
 
 ## Code Review

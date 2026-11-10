@@ -74,16 +74,15 @@ Sources/SwiftyNetwork/
 ├── Network/          # HTTP client, endpoints, auth, TLS, errors, observation
 ├── Cache/            # Cache protocols, implementations, single-flight, LRU storage
 ├── Repository/       # Data coordination layer
-└── Mutation/         # Fire-and-forget mutation queue, stores, retry policy
-
-Sources/SwiftyNetworkTesting/  # Public test doubles (MockAPIClient) for consumers
+├── Mutation/         # Fire-and-forget mutation queue, stores, retry policy
+└── Testing/          # Public test doubles (`@_spi(Testing)`) for consumers
 
 Tests/SwiftyNetworkTests/
 ├── Network/          # Network client tests
 ├── Cache/            # Cache implementation tests
 ├── Repository/       # Repository pattern tests
 ├── Mutation/         # Mutation queue tests
-├── Testing/          # SwiftyNetworkTesting tests
+├── Testing/          # `Testing` SPI double tests
 └── Helpers/          # Test utilities and mocks
 ```
 

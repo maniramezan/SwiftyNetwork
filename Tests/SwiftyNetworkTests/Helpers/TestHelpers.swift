@@ -1,8 +1,7 @@
 import Foundation
-import SwiftyNetworkTesting
 import TestCommons
 
-@testable import SwiftyNetwork
+@testable @_spi(Testing) import SwiftyNetwork
 
 struct TestUser: Codable, Sendable, Equatable {
     let id: String
@@ -95,5 +94,4 @@ func firstEvent<T: Sendable>(
     return observation.values.last
 }
 
-typealias TestAuthorizationProvider = SwiftyNetworkTesting.TestAuthorizationProvider
 typealias FakeNetworkInstrumentation = NetworkInstrumentationRecorder
