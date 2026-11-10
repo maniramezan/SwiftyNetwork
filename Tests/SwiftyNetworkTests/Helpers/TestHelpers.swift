@@ -3,6 +3,13 @@ import TestCommons
 
 @testable @_spi(Testing) import SwiftyNetwork
 
+/// How long a test waits for something that should happen before failing instead of hanging.
+///
+/// A wait returns as soon as its condition holds, so this only bounds a broken test. It is generous
+/// because shared CI simulators can stall a single test for tens of seconds; never use it to assert
+/// that something does not happen.
+let testTimeout: Duration = .seconds(60)
+
 struct TestUser: Codable, Sendable, Equatable {
     let id: String
     let name: String
@@ -75,7 +82,7 @@ actor FakeAPIClient: APIClient {
 /// Backed by `observeStream`, so a stalled stream cannot hang the test. A timeout finishes the
 /// stream, so only reuse a stream after this returns `count` events.
 func collectEvents<T: Sendable>(
-    _ stream: AsyncStream<T>, count: Int, timeout: Duration = .seconds(5)
+    _ stream: AsyncStream<T>, count: Int, timeout: Duration = testTimeout
 ) async -> [T] {
     (try? await observeStream(stream, maxCount: count, timeout: timeout).values) ?? []
 }
@@ -85,7 +92,7 @@ func collectEvents<T: Sendable>(
 func firstEvent<T: Sendable>(
     in stream: AsyncStream<T>,
     maxCount: Int = 50,
-    timeout: Duration = .seconds(5),
+    timeout: Duration = testTimeout,
     where predicate: @escaping @Sendable (T) -> Bool
 ) async -> T? {
     guard let observation = try? await observeStream(stream, maxCount: maxCount, timeout: timeout, until: predicate),

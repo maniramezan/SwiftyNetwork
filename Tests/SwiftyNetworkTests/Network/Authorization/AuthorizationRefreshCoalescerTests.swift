@@ -364,7 +364,7 @@ struct AuthorizationRefreshCoalescerTests {
         }
         try await provider.refreshStarted.wait()
         _ = try await waitUntil(
-            timeout: .seconds(5),
+            timeout: testTimeout,
             operation: { await provider.rejectionCount },
             matching: { $0 == ids.count }
         )

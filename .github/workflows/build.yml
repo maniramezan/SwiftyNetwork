@@ -175,7 +175,37 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -parallel-testing-enabled YES \
             -parallel-testing-worker-count 3 \
-            -derivedDataPath .build/ios-derived-data
+            -derivedDataPath .build/ios-derived-data \
+            -resultBundlePath .build/ios-test.xcresult
+
+      # xcodebuild's console output names failing tests but not why they failed, and a crashed
+      # test process only shows up as tests failing in 0 seconds. Print the failure messages and
+      # keep the result bundle and crash reports so flaky failures can be diagnosed.
+      - name: Summarize iOS test failures
+        if: failure()
+        run: |
+          if [ -d .build/ios-test.xcresult ]; then
+            xcrun xcresulttool get test-results tests --path .build/ios-test.xcresult --compact \
+              | jq -r '.. | objects | select(.nodeType == "Test Case" and .result == "Failed")
+                  | "\(.nodeIdentifier // .name): \([.children[]? | select(.nodeType == "Failure Message") | .name] | join(" | "))"' \
+              || true
+          fi
+          mkdir -p .build/ios-crash-reports
+          find ~/Library/Logs/DiagnosticReports -newer .build/ios-derived-data \
+            \( -name '*xctest*' -o -name '*SwiftyNetwork*' \) \
+            -exec cp {} .build/ios-crash-reports/ \; 2>/dev/null || true
+          ls -l .build/ios-crash-reports
+
+      - name: Upload iOS test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-test-results
+          path: |
+            .build/ios-test.xcresult
+            .build/ios-crash-reports
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Verify Xcode framework type identity
         run: bash Tests/XcodeIntegration/verify.sh "${{ steps.simulator.outputs.udid }}"

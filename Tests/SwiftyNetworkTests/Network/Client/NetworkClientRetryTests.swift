@@ -56,6 +56,7 @@ struct NetworkClientRetryTests {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        let start = ContinuousClock.now
         let date = formatter.string(from: Date(timeIntervalSinceNow: 60))
         stub.setResponses([.status(429, headers: ["Retry-After": date])], for: testId)
         let client = makeClient(stub, retryPolicy: nil)
@@ -63,9 +64,14 @@ struct NetworkClientRetryTests {
         let error = await #expect(throws: NetworkError.self) {
             try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
         }
+        let elapsed = start.duration(to: .now)
 
+        // The delay counts down from when the header was formatted, so subtract the time since
+        // then (a loaded CI simulator can take many seconds) and the header's whole-second
+        // truncation.
         let retryAfter = try #require(error?.retryAfter)
-        #expect(retryAfter > .seconds(50) && retryAfter <= .seconds(60))
+        #expect(retryAfter <= .seconds(60))
+        #expect(retryAfter >= .seconds(59) - elapsed)
     }
 
     @Test("A 429 without Retry-After reports a nil delay")
@@ -424,7 +430,8 @@ struct NetworkClientRetryTests {
         task.cancel()
 
         let result = await task.result
-        #expect(start.duration(to: .now) < .seconds(5))
+        // Well under the 30-second Retry-After, with room for a stalled CI simulator.
+        #expect(start.duration(to: .now) < .seconds(20))
         #expect(stub.requests.count == 1)
         switch result {
         case .success:
