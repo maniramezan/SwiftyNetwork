@@ -116,10 +116,11 @@ swift format format -i -r -p Sources Tests   # Format in-place
 swift format lint -r -p Sources Tests        # Check violations
 swift format lint --strict -r -p Sources Tests  # CI mode (warnings = errors)
 
-# Test on iOS simulators, fanned out across parallel simulator clones
+# Test on an iOS simulator. xcodebuild can't spread Swift Testing across simulator clones; the
+# suite still runs in parallel inside one test process.
 xcodebuild test -scheme SwiftyNetwork \
   -destination 'platform=iOS Simulator,name=<iPhone>' \
-  -parallel-testing-enabled YES -parallel-testing-worker-count 3
+  -parallel-testing-enabled NO
 
 # API breaking changes against the latest release (CI job `api-breakage`; see CONTRIBUTING.md)
 swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork

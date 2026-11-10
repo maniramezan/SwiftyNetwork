@@ -611,30 +611,48 @@ struct NetworkClientIntegrationTests {
             maxAuthRefreshAttempts: 1,
             authRefreshDelay: .zero
         )
-        let client = NetworkClient(configuration: configuration)
+        let sleeps = SleepRecorder()
+        let client = NetworkClient(configuration: configuration, sleeper: sleeps.sleeper)
         let user = TestUser(id: "nodelay", name: "NoDelay", email: "nodelay@example.com")
         let data = try JSONEncoder().encode(user)
         let testId = "zero-delay"
-        let warmUpId = "zero-delay-warm-up"
-        stub.setResponses([.success(data)], for: warmUpId)
         stub.setResponses(
             [.status(401), .success(data)],
             for: testId
         )
 
-        // Pay the one-off session and simulator start-up cost before timing, so the
-        // measurement below reflects only the refresh-and-retry path.
-        _ = try await client.request(makeEndpointWithTestId(warmUpId), responseType: TestUser.self)
-
-        let endpoint = makeEndpointWithTestId(testId)
-        let start = ContinuousClock().now
-        let response = try await client.request(endpoint, responseType: TestUser.self)
-        let elapsed = ContinuousClock().now - start
+        let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
 
         #expect(response == user)
-        // A generous ceiling: shared CI simulators can stall for seconds, so this only
-        // guards against an unexpectedly long wait rather than asserting a tight bound.
-        #expect(elapsed < .seconds(5))
+        #expect(await provider.refreshCallCount == 1)
+        #expect(await sleeps.durations.isEmpty)
+    }
+
+    @Test("NetworkClient waits exactly authRefreshDelay before retrying a 401")
+    func testNetworkClientRetryDelayIsExact() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "expired"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "fresh")
+        )
+        let configuration = NetworkClientConfiguration(
+            session: stub.session,
+            authorizationProvider: provider,
+            maxAuthRefreshAttempts: 1,
+            authRefreshDelay: .seconds(3)
+        )
+        let sleeps = SleepRecorder()
+        let client = NetworkClient(configuration: configuration, sleeper: sleeps.sleeper)
+        let user = TestUser(id: "exact-delay", name: "Exact", email: "exact@example.com")
+        let testId = "exact-delay"
+        stub.setResponses([.status(401), .success(try JSONEncoder().encode(user))], for: testId)
+
+        let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+
+        #expect(response == user)
+        #expect(await sleeps.durations == [.seconds(3)])
     }
 
     // MARK: - Auth Retry Exhaustion

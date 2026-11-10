@@ -10,6 +10,22 @@ import TestCommons
 /// that something does not happen.
 let testTimeout: Duration = .seconds(60)
 
+/// Records the waits a `NetworkClient` requests and returns at once, so tests can assert retry
+/// and refresh delays exactly instead of timing them.
+actor SleepRecorder {
+    /// Requested waits, in order.
+    private(set) var durations: [Duration] = []
+
+    /// Pass as `NetworkClient(configuration:sleeper:)`'s `sleeper`.
+    nonisolated var sleeper: @Sendable (Duration) async throws -> Void {
+        { duration in await self.record(duration) }
+    }
+
+    private func record(_ duration: Duration) {
+        durations.append(duration)
+    }
+}
+
 struct TestUser: Codable, Sendable, Equatable {
     let id: String
     let name: String

@@ -166,15 +166,16 @@ jobs:
           fi
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
-      - name: Run tests on iOS simulators in parallel
+      - name: Run tests on an iOS simulator
         run: |
           set -euo pipefail
-          # Parallel testing clones the simulator, so the suite fans out across workers.
+          # xcodebuild runs Swift Testing in a single process, so simulator clones never receive
+          # tests; Swift Testing still runs the suite in parallel inside that process. Disabling
+          # parallel testing skips booting an unused clone on the small runner.
           xcodebuild test \
             -scheme SwiftyNetwork \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
-            -parallel-testing-enabled YES \
-            -parallel-testing-worker-count 3 \
+            -parallel-testing-enabled NO \
             -derivedDataPath .build/ios-derived-data \
             -resultBundlePath .build/ios-test.xcresult
 

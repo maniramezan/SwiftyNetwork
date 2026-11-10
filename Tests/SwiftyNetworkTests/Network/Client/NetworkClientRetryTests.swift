@@ -11,16 +11,17 @@ struct NetworkClientRetryTests {
     private func makeClient(
         _ stub: TestHTTPStub,
         retryPolicy: NetworkRetryPolicy?,
-        instrumentation: (any NetworkInstrumentation)? = nil
+        instrumentation: (any NetworkInstrumentation)? = nil,
+        sleeper: (@Sendable (Duration) async throws -> Void)? = nil
     ) -> NetworkClient {
-        NetworkClient(
-            configuration: NetworkClientConfiguration(
-                session: stub.session,
-                authRefreshDelay: .zero,
-                retryPolicy: retryPolicy,
-                instrumentation: instrumentation
-            )
+        let configuration = NetworkClientConfiguration(
+            session: stub.session,
+            authRefreshDelay: .zero,
+            retryPolicy: retryPolicy,
+            instrumentation: instrumentation
         )
+        guard let sleeper else { return NetworkClient(configuration: configuration) }
+        return NetworkClient(configuration: configuration, sleeper: sleeper)
     }
 
     // MARK: - 429 surfaces Retry-After
@@ -363,20 +364,19 @@ struct NetworkClientRetryTests {
             [.status(429, headers: ["Retry-After": "3600"]), .success(try JSONEncoder().encode(user))],
             for: testId
         )
+        let sleeps = SleepRecorder()
         let client = makeClient(
             stub,
             retryPolicy: .init(
                 backoff: BackoffPolicy(
-                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3)))
+                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3))),
+            sleeper: sleeps.sleeper
         )
 
-        let start = ContinuousClock.now
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
-        let elapsed = start.duration(to: .now)
 
         #expect(response == user)
-        #expect(elapsed >= .milliseconds(290))
-        #expect(elapsed < .seconds(30))
+        #expect(await sleeps.durations == [.seconds(0.3)])
     }
 
     @Test("A 503 Retry-After is honored, bounded by maxRetryAfter")
@@ -388,20 +388,19 @@ struct NetworkClientRetryTests {
             [.status(503, headers: ["Retry-After": "3600"]), .success(try JSONEncoder().encode(user))],
             for: testId
         )
+        let sleeps = SleepRecorder()
         let client = makeClient(
             stub,
             retryPolicy: .init(
                 backoff: BackoffPolicy(
-                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3)))
+                    baseDelay: .zero, maxDelay: .zero, jitterRange: 1...1, maxRetryAfter: .seconds(0.3))),
+            sleeper: sleeps.sleeper
         )
 
-        let start = ContinuousClock.now
         let response = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
-        let elapsed = start.duration(to: .now)
 
         #expect(response == user)
-        #expect(elapsed >= .milliseconds(290))
-        #expect(elapsed < .seconds(30))
+        #expect(await sleeps.durations == [.seconds(0.3)])
     }
 
     @Test("Cancelling the caller during the retry wait stops the request")
