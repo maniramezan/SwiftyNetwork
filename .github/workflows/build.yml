@@ -171,7 +171,7 @@ jobs:
           set -euo pipefail
           # Parallel testing clones the simulator, so the suite fans out across workers.
           xcodebuild test \
-            -scheme SwiftyNetwork-Package \
+            -scheme SwiftyNetwork \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -parallel-testing-enabled YES \
             -parallel-testing-worker-count 3 \

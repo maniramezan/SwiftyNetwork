@@ -117,7 +117,7 @@ swift format lint -r -p Sources Tests        # Check violations
 swift format lint --strict -r -p Sources Tests  # CI mode (warnings = errors)
 
 # Test on iOS simulators, fanned out across parallel simulator clones
-xcodebuild test -scheme SwiftyNetwork-Package \
+xcodebuild test -scheme SwiftyNetwork \
   -destination 'platform=iOS Simulator,name=<iPhone>' \
   -parallel-testing-enabled YES -parallel-testing-worker-count 3
 
