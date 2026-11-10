@@ -33,6 +33,16 @@
     public private(set) var inspectedResponses: [HTTPResponse] = []
     private let refreshDecision: (@Sendable (HTTPResponse) -> Bool)?
 
+    /// Number of refresh calls that joined a refresh another call had already started.
+    ///
+    /// A call is added to ``rejectedAuthorizations`` before it reaches the shared refresh, so a test
+    /// that holds a refresh open with `refreshOperation` should wait for this count, not only for
+    /// ``rejectedAuthorizations``, before letting the refresh finish. A call that arrives after the
+    /// refresh finished starts another one.
+    public var joinedRefreshCount: Int {
+        get async { await refreshes.joinedCallers }
+    }
+
     /// Creates an authorization spy.
     /// - Parameters:
     ///   - current: The initial authorization.

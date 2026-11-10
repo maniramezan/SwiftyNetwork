@@ -34,10 +34,12 @@ struct PublicNetworkTestHelpersTests {
         }
 
         try await refreshStarted.wait()
+        // Every other request must have joined the refresh before it finishes; one that arrives
+        // later finds no refresh running and starts a second one.
         _ = try await waitUntil(
             timeout: .seconds(5),
-            operation: { await provider.rejectedAuthorizations.count },
-            matching: { $0 == ids.count }
+            operation: { await provider.joinedRefreshCount },
+            matching: { $0 == ids.count - 1 }
         )
         finishRefresh.open()
 

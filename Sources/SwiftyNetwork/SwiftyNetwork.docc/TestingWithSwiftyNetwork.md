@@ -53,7 +53,10 @@ lifecycle events without defining app-specific copies:
 - `TestAuthorizationProvider` is a scriptable ``AuthorizationProvider``. It covers the usual
   hand-written fixture: a fixed bearer token (`current: .bearer(token: "t")`), a refresh counter
   (`refreshCallCount`), the credentials the server rejected (`rejectedAuthorizations`), and a
-  refresh outcome you can change after creation.
+  refresh outcome you can change after creation. To test that concurrent `401`s share one
+  refresh, hold the refresh open with `refreshOperation` and wait for `joinedRefreshCount` to
+  reach the number of other requests before letting it finish; a request that arrives later
+  starts a second refresh.
 - `NetworkInstrumentationRecorder` is a ``NetworkInstrumentation`` that records every started,
   retried, completed, and failed event in delivery order.
 
