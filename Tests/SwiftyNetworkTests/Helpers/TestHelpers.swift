@@ -1,7 +1,7 @@
 import Foundation
 import TestCommons
 
-@_spi(Testing) @testable import SwiftyNetwork
+@testable @_spi(Testing) import SwiftyNetwork
 
 struct TestUser: Codable, Sendable, Equatable {
     let id: String

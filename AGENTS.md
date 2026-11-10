@@ -198,7 +198,7 @@ stub.session                              // Inject into the client/cache
 TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:shouldRefresh:)
 
 // Scripted APIClient (no URLSession) -- prefer for MutationQueue / repository / service tests
-// MockAPIClient and the other doubles need `@_spi(Testing) @testable import SwiftyNetwork`
+// MockAPIClient and the other doubles need `@testable @_spi(Testing) import SwiftyNetwork`
 let client = MockAPIClient()
 await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 let queue = MutationQueue(client: client, retryPolicy: .immediate())

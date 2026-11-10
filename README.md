@@ -1047,7 +1047,7 @@ previews, never in production code:
 )
 ```
 
-`@testable import` alone doesn't expose SPI; write `@_spi(Testing) @testable import SwiftyNetwork`
+`@testable import` alone doesn't expose SPI; write `@testable @_spi(Testing) import SwiftyNetwork`
 when you need both. Keeping the doubles in the core module means a test target always uses the same
 copy of SwiftyNetwork as the app, including Xcode apps that load it through dynamic frameworks, so
 `NetworkError` casts and retroactive conformances work in tests.

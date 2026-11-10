@@ -85,7 +85,7 @@ func response<T: Decodable & Sendable>(
   `.product(name: "SwiftyNetworkTesting", package: "SwiftyNetwork")` dependency from test targets,
   link `SwiftyNetwork` instead if the target doesn't already, and replace
   `import SwiftyNetworkTesting` with `@_spi(Testing) import SwiftyNetwork`. `@testable import`
-  alone doesn't expose SPI, so write `@_spi(Testing) @testable import SwiftyNetwork` where you need
+  alone doesn't expose SPI, so write `@testable @_spi(Testing) import SwiftyNetwork` where you need
   both. The type names are unchanged.
 - In Xcode apps that load SwiftyNetwork through dynamic frameworks, the separate product could
   link a second copy of SwiftyNetwork into the test bundle, so casts to ``NetworkError`` and

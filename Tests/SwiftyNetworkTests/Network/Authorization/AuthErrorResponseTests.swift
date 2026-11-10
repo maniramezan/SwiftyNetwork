@@ -2,7 +2,7 @@ import Foundation
 import TestCommons
 import Testing
 
-@_spi(Testing) @testable import SwiftyNetwork
+@testable @_spi(Testing) import SwiftyNetwork
 
 private struct APIErrorBody: Decodable, Equatable {
     let code: String

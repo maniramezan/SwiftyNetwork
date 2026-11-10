@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@_spi(Testing) @testable import SwiftyNetwork
+@testable @_spi(Testing) import SwiftyNetwork
 
 @Suite("Endpoints that opt out of the authorization provider", .serialized)
 struct AuthorizationProviderOptOutTests {

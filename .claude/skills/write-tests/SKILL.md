@@ -13,7 +13,7 @@ Tests live in `Tests/SwiftyNetworkTests/<Area>/<TypeName>Tests.swift`.
 | Code under test | Use |
 |---|---|
 | `NetworkClient` request pipeline, headers, status mapping, auth refresh | a locally owned `TestHTTPStub` (wraps TestCommons `StubbedURLSession` and `ScriptedValues`), with `defer { stub.invalidate() }` with a unique `makeEndpointWithTestId("...")` per test |
-| Anything that only needs an `APIClient` (MutationQueue, repositories, services) | `MockAPIClient` (`@_spi(Testing) @testable import SwiftyNetwork`) |
+| Anything that only needs an `APIClient` (MutationQueue, repositories, services) | `MockAPIClient` (`@testable @_spi(Testing) import SwiftyNetwork`) |
 | MutationQueue races (supersede while in flight, etc.) | `FakeAPIClient(outcomes:)` (wraps `ScriptedResponder`) + `await fake.hold(call:)` (TestCommons; `try await gate.wait()`, synchronous `open()`) |
 | Instrumentation events | `FakeNetworkInstrumentation` |
 | Auth refresh | `TestAuthorizationProvider` (records `refreshCallCount`, `rejectedAuthorizations`, `inspectedResponses`; pass `shouldRefresh:` to veto a 401 refresh) |
