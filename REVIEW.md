@@ -59,6 +59,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | Entry count didn't bound bytes in `RemoteDataCache` | maniramezan/SwiftyNetwork#20 (`InMemoryCache(maxCost:cost:)`, `InMemoryCache<Data>(maxBytes:)`) |
 | `SwiftyNetworkTesting` had no DocC | maniramezan/SwiftyNetwork#21 (catalog, Docs CI validation, `.spi.yml`) |
 | Credentialed requests followed redirects to any host with their headers | `RedirectPolicy`, default `.stripCredentialsAcrossOrigins` (strips credentials across origins, refuses HTTPS downgrades; per-task delegate so injected and pinned sessions are covered, while a session delegate that handles redirects keeps deciding them) |
+| In Xcode apps with dynamic frameworks, `SwiftyNetworkTesting` embedded a second copy of `SwiftyNetwork`, breaking error casts and retroactive conformances | Removed the product; its doubles moved into `SwiftyNetwork` as `@_spi(Testing)` API. `Tests/XcodeIntegration/verify.sh` passes, and its test bundle defines no SwiftyNetwork symbols |
 | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 
 ## Priority follow-ups

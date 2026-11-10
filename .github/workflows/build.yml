@@ -171,11 +171,14 @@ jobs:
           set -euo pipefail
           # Parallel testing clones the simulator, so the suite fans out across workers.
           xcodebuild test \
-            -scheme SwiftyNetwork-Package \
+            -scheme SwiftyNetwork \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -parallel-testing-enabled YES \
             -parallel-testing-worker-count 3 \
             -derivedDataPath .build/ios-derived-data
+
+      - name: Verify Xcode framework type identity
+        run: bash Tests/XcodeIntegration/verify.sh "${{ steps.simulator.outputs.udid }}"
 
   api-breakage:
     # A PR whose Conventional Commits title marks a breaking change (`feat!:`) is meant to break the API.
@@ -210,5 +213,5 @@ jobs:
           fi
           echo "Comparing against $baseline"
           swift package diagnose-api-breaking-changes "$baseline" \
-            --products SwiftyNetwork SwiftyNetworkTesting \
+            --products SwiftyNetwork \
             ${allowlist[@]+"${allowlist[@]}"}

@@ -16,13 +16,12 @@ SwiftyNetwork provides:
 - **Opt-in request retries** with ``NetworkRetryPolicy``: idempotent requests retry on `429`, 5xx, timeouts, lost connectivity, and unreachable hosts, with jittered, capped backoff.
 - **Mutations** with ``MutationQueue``, including background retry, coalescing, waiting for connectivity, and pluggable persistence via ``MutationStore`` or ``FileMutationStore``.
 - **Single-flight remote data caching** with ``RemoteDataCache`` -- deduplicates concurrent fetches for the same key, composable with any ``Cache`` for app-configurable memory/disk layering.
-- **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with shared ``NetworkError/classification`` for retry policies and telemetry alike.
+- **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with
+  ``NetworkError/classification`` for retry policies and ``NetworkError/category`` for user-facing outcomes.
 
-For tests and previews, the separate `SwiftyNetworkTesting` library product provides
-`MockAPIClient`, a scriptable ``APIClient`` that records every request, and
-`TestAuthorizationProvider`, a scriptable ``AuthorizationProvider`` that counts refreshes. Link it
-from test targets only, never from production targets. It already depends on `SwiftyNetwork`; add
-the core product only to the app or library target so Swift Package Manager resolves one copy.
+For tests and previews, `@_spi(Testing) import SwiftyNetwork` provides `MockAPIClient`, a
+scriptable ``APIClient`` that records every request, and `TestAuthorizationProvider`, a
+scriptable ``AuthorizationProvider`` that counts refreshes. See <doc:TestingWithSwiftyNetwork>.
 
 For streaming or other transports ``NetworkClient`` cannot model, use
 ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)`` to keep its authorization, `401` refresh-once,
@@ -111,6 +110,7 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 ### Guides
 
 - <doc:CustomDiskCache>
+- <doc:TestingWithSwiftyNetwork>
 
 ### Reachability
 

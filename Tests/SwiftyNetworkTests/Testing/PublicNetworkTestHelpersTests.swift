@@ -1,17 +1,77 @@
 import Foundation
-import SwiftyNetwork
-import SwiftyNetworkTesting
+@_spi(Testing) import SwiftyNetwork
+import TestCommons
 import Testing
 
 @Suite("Public network test helpers integration", .serialized)
 struct PublicNetworkTestHelpersTests {
+    @Test("Concurrent 401s share one TestAuthorizationProvider refresh")
+    func concurrentUnauthorizedResponsesShareRefresh() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let ids = (0..<5).map { _ in UUID().uuidString }
+        for id in ids { stub.setResponses([.status(401), .status(204)], for: id) }
+        let refreshStarted = AsyncGate()
+        let finishRefresh = AsyncGate()
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "original"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "refreshed"),
+            refreshOperation: {
+                refreshStarted.open()
+                try await finishRefresh.wait()
+            }
+        )
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: stub.session,
+                authorizationProvider: provider,
+                authRefreshDelay: .zero
+            )
+        )
+        let requests = ids.map { id in
+            Task { try await client.request(makeEndpointWithTestId(id)) }
+        }
+
+        try await refreshStarted.wait()
+        // Every other request must have joined the refresh before it finishes; one that arrives
+        // later finds no refresh running and starts a second one.
+        _ = try await waitUntil(
+            timeout: .seconds(5),
+            operation: { await provider.joinedRefreshCount },
+            matching: { $0 == ids.count - 1 }
+        )
+        finishRefresh.open()
+
+        for request in requests { try await request.value }
+        #expect(await provider.refreshCallCount == 1)
+        #expect(await provider.rejectedAuthorizations == Array(repeating: .bearer(token: "original"), count: ids.count))
+        for id in ids {
+            #expect(stub.getLastRequestHeaders(for: id)?["Authorization"] == "Bearer refreshed")
+        }
+    }
+
+    @Test("TestAuthorizationProvider refreshes even when the rejected value differs from its current one")
+    func refreshesRejectionThatDiffersFromCurrent() async throws {
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "current"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "refreshed")
+        )
+
+        try await provider.refreshAuthorization(rejecting: .bearer(token: "older"))
+
+        #expect(await provider.refreshCallCount == 1)
+        #expect(await provider.currentAuthorization() == .bearer(token: "refreshed"))
+    }
+
     @Test("Repeated 401 responses exhaust the refresh budget and close the retried attempt")
     func repeatedUnauthorizedResponses() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
         let id = UUID().uuidString
         stub.setResponses([.status(401), .status(401)], for: id)
-        let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
+        let provider = TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: true,
             refreshedAuthorization: .bearer(token: "refreshed")
         )
@@ -53,7 +113,7 @@ struct PublicNetworkTestHelpersTests {
         defer { stub.invalidate() }
         let id = UUID().uuidString
         stub.setResponses([.status(401)], for: id)
-        let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
+        let provider = TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: false,
             refreshedAuthorization: .bearer(token: "must-not-be-used")
         )
@@ -90,7 +150,7 @@ struct PublicNetworkTestHelpersTests {
         defer { stub.invalidate() }
         let id = UUID().uuidString
         stub.setResponses([.status(401), .success(Data("not-json".utf8))], for: id)
-        let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
+        let provider = TestAuthorizationProvider(
             current: .bearer(token: "original"), refreshResult: true,
             refreshedAuthorization: .bearer(token: "refreshed")
         )
