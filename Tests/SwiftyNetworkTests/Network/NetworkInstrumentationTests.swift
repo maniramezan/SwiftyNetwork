@@ -3,7 +3,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("NetworkClient Instrumentation Tests")
+@Suite("NetworkClient Instrumentation Tests", .serialized)
 struct NetworkInstrumentationTests {
 
     @Test("A successful request emits requestStarted then requestCompleted with matching requestID")
@@ -35,6 +35,36 @@ struct NetworkInstrumentationTests {
         #expect(completedEvent.statusCode == 200)
         #expect(completedEvent.duration >= .zero)
         #expect(completedEvent.method == .get)
+    }
+
+    @Test("The endpoint operation name is carried by every request event")
+    func operationNameIsRecorded() async throws {
+        struct NamedEndpoint: NetworkEndpoint {
+            let baseURL = "https://api.test.com"
+            let path = "/users/1"
+            let method: HTTPMethod = .get
+            let operationName: String? = "users.fetch"
+            var queryItems: [URLQueryItem]? {
+                [URLQueryItem(name: "test-id", value: "instrumentation-operation-name")]
+            }
+        }
+
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let instrumentation = FakeNetworkInstrumentation()
+        let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        stub.setResponses(
+            [.success(try JSONEncoder().encode(user))],
+            for: "instrumentation-operation-name"
+        )
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(session: stub.session, instrumentation: instrumentation)
+        )
+
+        _ = try await client.request(NamedEndpoint(), responseType: TestUser.self)
+
+        #expect(await instrumentation.started.first?.operationName == "users.fetch")
+        #expect(await instrumentation.completed.first?.operationName == "users.fetch")
     }
 
     @Test("A server error emits requestStarted then requestFailed with the classified error")

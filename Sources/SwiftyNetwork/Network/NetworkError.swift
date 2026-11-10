@@ -42,7 +42,9 @@ public enum NetworkError: Error, LocalizedError, Sendable {
 
     /// The server returned `403 Forbidden`.
     ///
-    /// ``NetworkClient`` never refreshes authorization for a `403`.
+    /// ``NetworkClient`` refreshes authorization for a `403` only when the provider's
+    /// ``AuthorizationProvider/shouldRefreshAuthorization(after:)`` returns `true` for it,
+    /// which the default implementation does not.
     ///
     /// - Parameter response: The rejected response.
     case forbidden(HTTPResponse)
@@ -82,6 +84,15 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The transport layer reported that no internet connection is available.
     case noInternetConnection
 
+    /// The device has a network, but the server could not be reached: its host name did not
+    /// resolve, or the connection was refused or could not be opened.
+    ///
+    /// Typical during a deployment, a DNS outage, or behind a captive portal. The request was
+    /// never delivered, so it is safe to retry; ``isTransient`` is `true`.
+    ///
+    /// - Parameter underlying: The `URLError` reported by the transport, for its `code`.
+    case serverUnreachable(URLError)
+
     /// The response body could not be decoded as the requested `Decodable` type.
     case decodingFailed(underlying: any Error & Sendable)
 
@@ -95,7 +106,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     ///   ``AuthorizationProvider/currentAuthorization()``.
     case authorizationUnavailable(underlying: any Error & Sendable)
 
-    /// The configured ``AuthorizationProvider`` failed to refresh credentials after a `401`.
+    /// The configured ``AuthorizationProvider`` failed to refresh credentials after a `401` or accepted `403`.
     ///
     /// - Parameter underlying: The error thrown by
     ///   ``AuthorizationProvider/refreshAuthorization(rejecting:)``.
@@ -129,6 +140,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return "The request timed out. Please try again."
         case .noInternetConnection:
             return "No internet connection available."
+        case .serverUnreachable:
+            return "The server could not be reached. Please try again."
         case .decodingFailed(let underlying):
             return "Failed to decode response: \(underlying.localizedDescription)"
         case .encodingFailed(let underlying):
@@ -161,7 +174,7 @@ public enum NetworkError: Error, LocalizedError, Sendable {
             return response
         case .timeout(let response):
             return response
-        case .invalidURL, .invalidResponse, .noInternetConnection, .decodingFailed,
+        case .invalidURL, .invalidResponse, .noInternetConnection, .serverUnreachable, .decodingFailed,
             .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed, .underlying:
             return nil
         }
@@ -187,12 +200,14 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// failures are classified identically everywhere in the package.
     ///
     /// Connectivity-loss codes (a dropped connection, cellular data disabled,
-    /// roaming off) map to ``noInternetConnection`` so they are classified as
-    /// transient and retried by ``MutationQueue``. Other codes keep the original
-    /// `URLError` in ``underlying(_:)`` so callers can still inspect `code`.
+    /// roaming off) map to ``noInternetConnection``, and a host that cannot be
+    /// resolved or connected to maps to ``serverUnreachable(_:)``. Both are
+    /// classified as transient, so ``NetworkRetryPolicy`` and ``MutationQueue``
+    /// retry them. Other codes keep the original `URLError` in ``underlying(_:)``
+    /// so callers can still inspect `code`.
     ///
     /// Callers translate `URLError.cancelled` into `CancellationError` first
-    /// (see `transportError(_:)`) when the calling task was cancelled; a
+    /// (see `transportError(_:session:)`) when the request was cancelled; a
     /// `.cancelled` that reaches this function, such as a rejected TLS pin,
     /// stays in ``underlying(_:)``.
     ///
@@ -202,6 +217,8 @@ public enum NetworkError: Error, LocalizedError, Sendable {
         switch error.code {
         case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
             return .noInternetConnection
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            return .serverUnreachable(error)
         case .timedOut:
             return .timeout(nil)
         default:
@@ -215,15 +232,21 @@ extension NetworkError {
     ///
     /// Use it for errors that reach you outside ``NetworkClient``, so they get the same
     /// ``category`` and ``classification`` as the client's own. The common case is a stream
-    /// returned by ``NetworkClient/sendAuthorized(_:errorBody:transport:)``: the client maps
+    /// returned by ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)``: the client maps
     /// errors only until the response headers arrive, so a connection that drops while you read
     /// the stream throws a raw `URLError`.
     ///
     /// - A ``NetworkError`` is returned unchanged.
     /// - A `CancellationError`, or `URLError.cancelled` while the current task is cancelled,
     ///   becomes `CancellationError`.
-    /// - A `URLError` maps as ``NetworkClient`` maps it, for example to
-    ///   ``noInternetConnection`` or ``timeout(_:)``.
+    /// - A `URLError.cancelled` while the task is not cancelled depends on `session`. A session
+    ///   with a delegate can reject an authentication challenge, such as a certificate pin, which
+    ///   `URLSession` reports as `.cancelled`; that stays in ``underlying(_:)`` and is classified as
+    ///   ``NetworkErrorClassification/secureConnectionFailed``. A session without a delegate
+    ///   cannot, so the request was cancelled some other way, for example because the session was
+    ///   invalidated, and it becomes `CancellationError`.
+    /// - Any other `URLError` maps as ``NetworkClient`` maps it, for example to
+    ///   ``noInternetConnection``, ``serverUnreachable(_:)`` or ``timeout(_:)``.
     /// - Anything else is wrapped in ``underlying(_:)``.
     ///
     /// Example:
@@ -235,10 +258,14 @@ extension NetworkError {
     /// }
     /// ```
     ///
-    /// - Parameter error: The error to map.
-    /// - Returns: `CancellationError` for task cancellation, otherwise a ``NetworkError``.
-    public static func mapTransportError(_ error: any Error) -> any Error {
-        transportError(error)
+    /// - Parameters:
+    ///   - error: The error to map.
+    ///   - session: The session that threw `error`. Pass it so a `URLError.cancelled` from a session
+    ///     without a delegate is reported as a cancellation. When `nil`, the default, such an error
+    ///     is treated as a rejected authentication challenge.
+    /// - Returns: `CancellationError` for a cancellation, otherwise a ``NetworkError``.
+    public static func mapTransportError(_ error: any Error, session: URLSession? = nil) -> any Error {
+        transportError(error, session: session)
     }
 
     /// Maps any error thrown by `URLSession` to what SwiftyNetwork rethrows.
@@ -246,20 +273,26 @@ extension NetworkError {
     /// Task cancellation surfaces as `CancellationError`, the same error a
     /// cancelled retry or auth-refresh wait throws, so callers have one shape
     /// to check. `URLSession` reports a cancelled task as `URLError.cancelled`,
-    /// but so does a rejected TLS pin; only the former is translated, by
-    /// checking `Task.isCancelled`. A ``NetworkError`` passes through unchanged.
+    /// but so does a rejected TLS pin. Only a session delegate can reject a pin,
+    /// so `.cancelled` is translated when the task is cancelled or `session` has
+    /// no delegate. A ``NetworkError`` passes through unchanged.
     ///
-    /// - Parameter error: The error thrown by `URLSession`.
-    /// - Returns: `CancellationError` for task cancellation, otherwise a ``NetworkError``.
-    static func transportError(_ error: any Error) -> any Error {
+    /// - Parameters:
+    ///   - error: The error thrown by `URLSession`.
+    ///   - session: The session that threw it, or `nil` when unknown.
+    /// - Returns: `CancellationError` for a cancellation, otherwise a ``NetworkError``.
+    static func transportError(_ error: any Error, session: URLSession? = nil) -> any Error {
         if error is CancellationError || error is NetworkError {
             return error
         }
         guard let urlError = error as? URLError else {
             return NetworkError.underlying(AnySendableError(error))
         }
-        if urlError.code == .cancelled, Task.isCancelled {
-            return CancellationError()
+        if urlError.code == .cancelled {
+            let canRejectChallenge = session.map { $0.delegate != nil } ?? true
+            if Task.isCancelled || !canRejectChallenge {
+                return CancellationError()
+            }
         }
         return mapURLError(urlError)
     }
@@ -297,6 +330,8 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     case timeout
     /// No internet connection was available.
     case noInternetConnection
+    /// The server's host did not resolve or accept a connection.
+    case serverUnreachable
     /// The response body failed to decode.
     case decodingFailed
     /// The request body failed to encode.
@@ -310,22 +345,24 @@ public enum NetworkErrorClassification: Sendable, Equatable {
     ///
     /// The error is ``NetworkError/underlying(_:)`` carrying the `URLError`. `URLSession` reports a
     /// rejected pin, like any cancelled authentication challenge, as `URLError.cancelled` while the
-    /// calling task is not cancelled, so that code is classified here too.
+    /// calling task is not cancelled, so that code is classified here too. ``NetworkClient`` reports
+    /// a `URLError.cancelled` from a session without a delegate as `CancellationError` instead,
+    /// because nothing in such a session can reject a challenge.
     case secureConnectionFailed
     /// A lower-level error with no more specific classification.
     case underlying
 
     /// Whether an error of this classification is generally worth retrying.
     ///
-    /// `true` for timeouts, missing connectivity, `429` rate limiting, and 5xx
-    /// server errors -- conditions a retry can plausibly resolve. `false` for
+    /// `true` for timeouts, missing connectivity, an unreachable server, `429` rate
+    /// limiting, and 5xx server errors -- conditions a retry can plausibly resolve. `false` for
     /// everything else: 4xx client errors (other than what ``NetworkClient``
     /// already handles via auth refresh), a response that is not HTTP (usually
     /// a broken server or proxy), encoding/decoding failures, and an untrusted
     /// TLS connection, since a retry can't change their outcome.
     public var isTransient: Bool {
         switch self {
-        case .timeout, .noInternetConnection, .tooManyRequests, .serverError:
+        case .timeout, .noInternetConnection, .serverUnreachable, .tooManyRequests, .serverError:
             return true
         case .invalidURL, .invalidResponse, .clientError, .unexpectedStatus, .unauthorized, .forbidden, .notFound,
             .decodingFailed, .encodingFailed, .authorizationUnavailable, .authorizationRefreshFailed,
@@ -359,8 +396,8 @@ public enum NetworkErrorClassification: Sendable, Equatable {
 /// ```swift
 /// catch let error as NetworkError {
 ///     switch error.category {
-///     case .offline, .timedOut:
-///         showBanner("You're offline.")
+///     case .offline, .serverUnreachable, .timedOut:
+///         showBanner("Can't reach the server. Check your connection.")
 ///     case .unauthorized:
 ///         promptSignIn()
 ///     case .rateLimited:
@@ -375,6 +412,11 @@ public enum NetworkErrorClassification: Sendable, Equatable {
 public enum NetworkErrorCategory: Sendable, Equatable {
     /// The device had no usable connection (``NetworkError/noInternetConnection``).
     case offline
+
+    /// The device is online but the server could not be reached
+    /// (``NetworkError/serverUnreachable(_:)``): its host did not resolve or accept a connection.
+    /// The request was not delivered; trying again later may succeed.
+    case serverUnreachable
 
     /// The request timed out (``NetworkError/timeout(_:)``), at the transport layer or with a `408`.
     /// The server may or may not have processed it.
@@ -419,6 +461,8 @@ extension NetworkErrorClassification {
         switch self {
         case .noInternetConnection:
             return .offline
+        case .serverUnreachable:
+            return .serverUnreachable
         case .timeout:
             return .timedOut
         case .unauthorized, .authorizationUnavailable, .authorizationRefreshFailed:
@@ -470,6 +514,8 @@ extension NetworkError {
             return .timeout
         case .noInternetConnection:
             return .noInternetConnection
+        case .serverUnreachable:
+            return .serverUnreachable
         case .decodingFailed:
             return .decodingFailed
         case .encodingFailed:

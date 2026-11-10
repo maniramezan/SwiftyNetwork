@@ -109,11 +109,47 @@ func testEndpointInvalidBaseURL() throws {
     }
 }
 
+@Test("Endpoint request options override cache policy and timeout defaults")
+func testEndpointRequestOptions() throws {
+    struct E: NetworkEndpoint {
+        let baseURL = "https://api.test.com"
+        let path = "/balance"
+        let method: HTTPMethod = .post
+        let operationName: String? = "balance.refresh"
+        let timeout: Duration? = .seconds(12)
+        let cachePolicy: URLRequest.CachePolicy? = .reloadIgnoringLocalCacheData
+        let isIdempotent = true
+    }
+
+    let request = try E().makeURLRequest()
+
+    #expect(request.timeoutInterval == 12)
+    #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+    #expect(E().operationName == "balance.refresh")
+    #expect(E().isIdempotent)
+}
+
 @Test("Endpoint normalizes repeated leading slashes without changing the host")
 func testEndpointRepeatedLeadingSlashes() throws {
     let url = try EndpointURLBuilder.url(
         baseURL: "https://api.example.com/base///", path: "///items", queryItems: nil)
     #expect(url.absoluteString == "https://api.example.com/base/items")
+}
+
+@Test("A complete URL in baseURL keeps its percent-encoded query exactly")
+func testEndpointPreservesPresignedQuery() throws {
+    let presigned =
+        "https://bucket.s3.amazonaws.com/v.mp4?X-Amz-Credential=AKIA%2F20250101%2Fus-east-1&X-Amz-Signature=ab%2Bcd"
+    let unchanged = try EndpointURLBuilder.url(baseURL: presigned, path: "", queryItems: nil)
+    #expect(unchanged.absoluteString == presigned)
+
+    let appended = try EndpointURLBuilder.url(
+        baseURL: presigned, path: "", queryItems: [URLQueryItem(name: "range", value: "0-100")])
+    #expect(appended.absoluteString == presigned + "&range=0-100")
+
+    let emptyExisting = try EndpointURLBuilder.url(
+        baseURL: "https://api.example.com/items?", path: "", queryItems: [URLQueryItem(name: "page", value: "2")])
+    #expect(emptyExisting.absoluteString == "https://api.example.com/items?page=2")
 }
 
 @Test("Endpoint normalization preserves empty paths and collapses slash-only paths")

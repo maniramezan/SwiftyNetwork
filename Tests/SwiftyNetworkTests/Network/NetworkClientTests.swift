@@ -10,7 +10,7 @@ func testNetworkClientConformsToAPIClient() {
     #expect(client is NetworkClient)
 }
 
-@Suite("NetworkClient Integration Tests")
+@Suite("NetworkClient Integration Tests", .serialized)
 struct NetworkClientIntegrationTests {
     @Test("NetworkClient decodes response and counts requests")
     func testNetworkClientDecodesResponseAndCountsRequests() async throws {
@@ -486,8 +486,8 @@ struct NetworkClientIntegrationTests {
         }
     }
 
-    @Test("NetworkClient maps unrecognized URLError codes to underlying")
-    func testNetworkClientMapsUnrecognizedURLErrorToUnderlying() async throws {
+    @Test("NetworkClient maps unreachable hosts to serverUnreachable")
+    func testNetworkClientMapsUnreachableHosts() async throws {
         let stub = try TestHTTPStub()
         defer { stub.invalidate() }
         let session = stub.session
@@ -504,9 +504,9 @@ struct NetworkClientIntegrationTests {
             try await client.request(endpoint, responseType: TestUser.self)
         } throws: { error in
             guard let networkError = error as? NetworkError,
-                case .underlying(let underlying) = networkError
+                case .serverUnreachable(let underlying) = networkError
             else { return false }
-            return !underlying.localizedDescription.isEmpty
+            return underlying.code == .cannotFindHost
         }
     }
 

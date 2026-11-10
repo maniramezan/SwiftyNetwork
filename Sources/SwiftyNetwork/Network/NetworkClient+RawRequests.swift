@@ -15,11 +15,12 @@ extension NetworkClient {
     ///    ``NetworkError/authorizationUnavailable(underlying:)`` and nothing is sent.
     /// 2. Calls `transport`, passing the URL session from the configuration and a per-task delegate that
     ///    enforces the ``NetworkClientConfiguration/redirectPolicy``. Pass both to the session call.
-    /// 3. On a `401`, asks ``AuthorizationProvider/shouldRefreshAuthorization(after:)``, then calls
+    /// 3. On a `401`, or a `403` the provider chooses to refresh, asks
+    ///    ``AuthorizationProvider/shouldRefreshAuthorization(after:)``, then calls
     ///    ``AuthorizationProvider/refreshAuthorization(rejecting:)`` with the exact authorization it sent,
     ///    waits ``NetworkClientConfiguration/authRefreshDelay``, and sends the request again, up to
     ///    ``NetworkClientConfiguration/maxAuthRefreshAttempts`` times.
-    /// 4. Reports each attempt to the configured ``NetworkInstrumentation``.
+    /// 4. Reports each attempt to the configured ``NetworkInstrumentation``, tagged with `operationName`.
     ///
     /// It returns only for a `2xx` response. Every other outcome throws what ``NetworkClient`` would
     /// throw for an endpoint request:
@@ -31,6 +32,7 @@ extension NetworkClient {
     /// | `401` and the refresh threw | ``NetworkError/authorizationRefreshFailed(underlying:)`` |
     /// | Other non-`2xx` status | E.g. ``NetworkError/notFound(_:)`` or ``NetworkError/serverError(_:)`` |
     /// | Offline or timeout | ``NetworkError/noInternetConnection`` or ``NetworkError/timeout(_:)`` |
+    /// | Host unresolved or connection refused | ``NetworkError/serverUnreachable(_:)`` |
     /// | Other transport failure | ``NetworkError/underlying(_:)`` |
     /// | The calling task was cancelled | `CancellationError` |
     ///
@@ -42,13 +44,13 @@ extension NetworkClient {
     ///
     /// - Instrumentation reports the attempt as completed then, not when you finish reading.
     /// - Errors thrown while you read a streamed payload come straight from `URLSession`. Map them with
-    ///   ``NetworkError/mapTransportError(_:)`` to get the same ``NetworkError`` cases, as the
+    ///   ``NetworkError/mapTransportError(_:session:)`` to get the same ``NetworkError`` cases, as the
     ///   example below does.
     ///
     /// Send only requests to your own API's origin. The provider's credentials are applied to any URL,
     /// so a presigned upload or download URL, or another service's URL, would receive the user's
     /// token, and such services often reject a request that carries one. Call `URLSession` directly for
-    /// those, and map its errors with ``NetworkError/mapTransportError(_:)``. Background
+    /// those, and map its errors with ``NetworkError/mapTransportError(_:session:)``. Background
     /// `URLSession`s are not supported, because they don't support the async methods or per-task
     /// delegates this call relies on.
     ///
@@ -75,6 +77,8 @@ extension NetworkClient {
     ///
     /// - Parameters:
     ///   - request: The request to send. Its URL must be set.
+    ///   - operationName: A stable name for instrumentation events, like
+    ///     ``NetworkEndpoint/operationName``. Defaults to `nil`.
     ///   - errorBody: Reads the body of a non-`2xx` response from the payload, so the thrown
     ///     ``NetworkError`` carries it in ``HTTPResponse/body`` and ``AuthorizationProvider`` can
     ///     inspect a `401` body in ``AuthorizationProvider/shouldRefreshAuthorization(after:)``.
@@ -86,6 +90,7 @@ extension NetworkClient {
     /// - Throws: A ``NetworkError`` as described above, or `CancellationError`.
     public func sendAuthorized<Payload: Sendable>(
         _ request: URLRequest,
+        operationName: String? = nil,
         errorBody: (@Sendable (Payload) async -> Data)? = nil,
         transport:
             @Sendable (URLRequest, URLSession, (any URLSessionTaskDelegate)?) async throws -> (
@@ -106,7 +111,8 @@ extension NetworkClient {
                 requestID: requestID,
                 url: url,
                 method: method,
-                attempt: refreshAttempt + 1
+                attempt: refreshAttempt + 1,
+                operationName: operationName
             )
             await trace.start()
             Logger.debug("Starting raw request (attempt \(trace.attempt))")
@@ -138,7 +144,7 @@ extension NetworkClient {
             do {
                 (payload, urlResponse) = try await transport(authorizedRequest, configuration.session, redirectGuard)
             } catch {
-                let mapped = NetworkError.transportError(error)
+                let mapped = NetworkError.transportError(error, session: configuration.session)
                 if let networkError = mapped as? NetworkError {
                     Logger.error("Transport error during raw request", error: error)
                     await trace.failed(networkError)
@@ -161,7 +167,12 @@ extension NetworkClient {
 
             let body = await errorBody?(payload) ?? Data()
             let response = HTTPResponse(httpResponse, body: body)
-            guard httpResponse.statusCode == 401 else {
+            guard
+                Self.isAuthorizationRejection(
+                    statusCode: httpResponse.statusCode,
+                    providerAuthorization: providerAuthorization
+                )
+            else {
                 let failure = HTTPStatusValidator.error(for: response)
                 await trace.failed(failure)
                 throw failure

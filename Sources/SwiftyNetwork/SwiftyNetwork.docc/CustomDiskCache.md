@@ -5,11 +5,13 @@ the last-use time apart.
 
 ## Overview
 
-SwiftyNetwork ships ``InMemoryCache`` but no on-disk cache, because the right storage depends on your
-values: files, a database, or SwiftData. The ``Cache`` protocol has four requirements, so a disk cache is small. The
-one decision that is easy to get wrong is time.
+SwiftyNetwork includes ``DiskCache`` for per-file storage with optional byte and idle-time limits.
+Use it directly or as the persistent tier of ``LayeredCache``. Implement ``Cache`` yourself when
+you need a database, SwiftData, encryption, or a storage format specific to your app.
 
-A disk cache needs two different times for each entry:
+The example below shows the core design of a custom file cache. A disk cache needs two different
+times for each entry:
+
 
 - **When the value was written.** This is ``CacheEntry/timestamp``. ``CachePolicy/returnCacheIfNotExpired(maxAge:)``
   and ``CacheEntry/age(at:)`` read it to decide whether the value is stale. It must not change when
@@ -25,9 +27,9 @@ Keep the two apart. Store the write time **inside** the file, next to the value,
 modification date only for recency. ``Cache/entry(forKey:)`` returns the stored time, and touches the
 modification date.
 
-## A complete example
+## A custom implementation
 
-`DiskCache` stores each value as a JSON file in a directory, named by the SHA-256 hash of
+`ExampleDiskCache` stores each value as a JSON file in a directory, named by the SHA-256 hash of
 its key. A hash has a fixed length, so long keys stay under the file system's 255-byte name limit,
 and it is lowercase, so keys that differ only in case can't share a file on a case-insensitive
 volume, such as the macOS default. Each file also stores its key, and a read checks it. A read touches only the
@@ -37,7 +39,7 @@ until the directory is under `maxBytes`.
 ```swift
 import CryptoKit
 
-actor DiskCache<Value: Codable & Sendable>: Cache {
+actor ExampleDiskCache<Value: Codable & Sendable>: Cache {
     private struct Envelope: Codable {
         var key: String
         var timestamp: Date
@@ -127,7 +129,7 @@ Use it anywhere a ``Cache`` goes:
 
 ```swift
 let directory = URL.cachesDirectory.appending(path: "users", directoryHint: .isDirectory)
-let cache = try DiskCache<User>(directory: directory)
+let cache = try ExampleDiskCache<User>(directory: directory)
 let repository = GenericRepository<User>(client: client, cache: cache)
 ```
 

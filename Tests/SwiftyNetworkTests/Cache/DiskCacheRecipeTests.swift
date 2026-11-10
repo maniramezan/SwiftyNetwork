@@ -6,7 +6,7 @@ import Testing
 
 // The recipe in SwiftyNetwork.docc/CustomDiskCache.md. Keep the two in sync.
 
-actor DiskCache<Value: Codable & Sendable>: Cache {
+actor ExampleDiskCache<Value: Codable & Sendable>: Cache {
     private struct Envelope: Codable {
         var key: String
         var timestamp: Date
@@ -101,7 +101,7 @@ struct DiskCacheRecipeTests {
     func readsPreserveTimestamp() async throws {
         let directory = makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cache = try DiskCache<String>(directory: directory)
+        let cache = try ExampleDiskCache<String>(directory: directory)
         let written = Date(timeIntervalSinceNow: -3600)
 
         await cache.setEntry(CacheEntry("hello", timestamp: written), forKey: "greeting")
@@ -118,7 +118,7 @@ struct DiskCacheRecipeTests {
         let directory = makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let payload = String(repeating: "x", count: 1_000)
-        let cache = try DiskCache<String>(directory: directory, maxBytes: 2_500)
+        let cache = try ExampleDiskCache<String>(directory: directory, maxBytes: 2_500)
 
         await cache.setValue(payload, forKey: "a")
         try await Task.sleep(for: .milliseconds(20))
@@ -137,7 +137,7 @@ struct DiskCacheRecipeTests {
     func longKeyRoundTrips() async throws {
         let directory = makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cache = try DiskCache<Int>(directory: directory)
+        let cache = try ExampleDiskCache<Int>(directory: directory)
         let key = CacheKey("user:" + String(repeating: "q", count: 400))
 
         await cache.setValue(7, forKey: key)
@@ -149,7 +149,7 @@ struct DiskCacheRecipeTests {
     func caseDistinctKeys() async throws {
         let directory = makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cache = try DiskCache<Int>(directory: directory)
+        let cache = try ExampleDiskCache<Int>(directory: directory)
 
         await cache.setValue(1, forKey: "user:ABC")
         await cache.setValue(2, forKey: "user:abc")
@@ -162,7 +162,7 @@ struct DiskCacheRecipeTests {
     func removal() async throws {
         let directory = makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cache = try DiskCache<Int>(directory: directory)
+        let cache = try ExampleDiskCache<Int>(directory: directory)
         await cache.setValue(1, forKey: "a")
         await cache.setValue(2, forKey: "b")
 

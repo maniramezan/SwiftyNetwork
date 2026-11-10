@@ -11,8 +11,8 @@ internal import SwiftCommons
 /// a mutation and return immediately; execution, retry, and status reporting
 /// happen in the background.
 ///
-/// `MutationQueue` only reports outcomes via ``events()`` / ``status(for:)``
-/// -- it does not manage UI state. Optimistic updates and rollback on
+/// `MutationQueue` only reports outcomes via ``events()`` / ``status(for:)``, or to a caller
+/// that waits with ``enqueueAndWait(_:key:)`` -- it does not manage UI state. Optimistic updates and rollback on
 /// permanent failure remain the caller's responsibility.
 ///
 /// Mutations for different keys run independently and may finish in any order.
@@ -24,15 +24,16 @@ internal import SwiftCommons
 /// one with ``MutationRequest/addingIdempotencyKey(_:header:)`` so a replay can't apply
 /// the mutation twice.
 ///
-/// By default, an offline failure counts as a retry like any other, so a mutation is
-/// dropped after ``MutationRetryPolicy/maxRetries`` attempts. With a durable
-/// ``MutationStore``, pass `waitForConnectivity` so offline mutations wait for the
-/// network instead:
+/// By default, pending mutations live in memory and an offline failure counts as a retry
+/// like any other, so a mutation is dropped after ``MutationRetryPolicy/maxRetries`` attempts
+/// or when the app is terminated. To keep them, use the durable ``FileMutationStore`` and pass
+/// `waitForConnectivity` so offline mutations wait for the network instead:
 ///
 /// ```swift
-/// let queue = MutationQueue(client: client, store: fileStore) {
+/// let queue = MutationQueue(client: client, store: FileMutationStore(directory: directory)) {
 ///     await NetworkMonitor.shared.waitUntilReachable()
 /// }
+/// await queue.resumePendingMutations()
 /// ```
 ///
 /// Example:
@@ -101,11 +102,25 @@ public actor MutationQueue {
         let task: Task<Void, Never>
     }
 
-    private var latestStatusByKey: [MutationKey: MutationStatus] = [:]
+    private enum FinishResult: Sendable {
+        case completed
+        case superseded
+        case noLongerCurrent
+    }
+
+    /// How many finished mutations ``status(for:)`` remembers. Older ones are forgotten, so a
+    /// queue that sees an unbounded number of keys does not grow without limit.
+    static let retainedFinishedStatusLimit = 500
+
+    /// The status of every mutation that is still pending, retrying, or waiting.
+    private var activeStatusByKey: [MutationKey: MutationStatus] = [:]
+    /// The outcome of the most recently finished mutations, oldest first.
+    private var finishedStatusByKey = LRUStorage<MutationKey, MutationStatus>()
     private var workerByKey: [MutationKey: Worker] = [:]
-    /// Serializes enqueue, cancel, and resume across storage suspension points.
+    /// Serializes enqueue and cancel per key, and resume and cancel-all against everything,
+    /// across storage suspension points.
     /// Internal visibility lets regression tests observe gate admission.
-    let operations = CacheOperationGate()
+    let operations = CacheOperationGate<MutationKey>()
     private let eventBroadcaster = AsyncBroadcaster<MutationEvent>()
 
     /// Creates a mutation queue.
@@ -147,7 +162,62 @@ public actor MutationQueue {
     ///   - request: The mutation to execute.
     ///   - key: The logical mutation this belongs to, for coalescing.
     public func enqueue(_ request: MutationRequest, key: MutationKey) async {
-        await operations.run { await self.performEnqueue(request, key: key) }
+        await operations.run(for: key) { await self.performEnqueue(request, key: key) }
+    }
+
+    /// Enqueues a mutation and waits for the outcome of its key.
+    ///
+    /// Use it when the caller needs the result, for example to roll back an optimistic update,
+    /// but should still get the queue's retries, coalescing, and persistence. It replaces
+    /// subscribing to ``events()`` before calling ``enqueue(_:key:)``.
+    ///
+    /// The outcome is that of the key, not of this request alone: if a newer mutation for the
+    /// same key replaces this one, the call returns or throws with the replacement's outcome,
+    /// which is the state the server ends up in.
+    ///
+    /// Cancelling the calling task stops the wait with `CancellationError`, but the mutation
+    /// stays in the queue. Use ``cancel(_:)`` to cancel the mutation itself.
+    ///
+    /// Example:
+    /// ```swift
+    /// do {
+    ///     try await queue.enqueueAndWait(MutationRequest(endpoint: LikeEndpoint(id: 42)), key: "like:42")
+    /// } catch let reason as MutationFailureReason where !reason.isCancellation {
+    ///     rollBackOptimisticLike()
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - request: The mutation to execute.
+    ///   - key: The logical mutation this belongs to, for coalescing.
+    /// - Returns: The server's response to the mutation that settled the key.
+    /// - Throws: ``MutationFailureReason`` when the mutation failed permanently or was cancelled
+    ///   with ``cancel(_:)`` or ``cancelAll()``; `CancellationError` when the calling task was cancelled.
+    @discardableResult
+    public func enqueueAndWait(_ request: MutationRequest, key: MutationKey) async throws -> HTTPResponse {
+        // Subscribe first, so the outcome can't be published before the loop starts.
+        let events = eventBroadcaster.makeStream()
+        await enqueue(request, key: key)
+        // Events before this enqueue's own `.pending` belong to an earlier mutation for the key.
+        var isEnqueued = false
+        for await event in events where event.key == key {
+            switch event.status {
+            case .pending:
+                isEnqueued = true
+            case .retrying, .waitingForConnectivity:
+                continue
+            case .succeeded:
+                guard isEnqueued else { continue }
+                guard let response = event.response else {
+                    throw NetworkError.invalidResponse
+                }
+                return response
+            case .failed(let reason):
+                guard isEnqueued else { continue }
+                throw reason
+            }
+        }
+        throw CancellationError()
     }
 
     private func performEnqueue(_ request: MutationRequest, key: MutationKey) async {
@@ -168,7 +238,7 @@ public actor MutationQueue {
     ///
     /// - Parameter key: The logical mutation to cancel.
     public func cancel(_ key: MutationKey) async {
-        await operations.run { await self.performCancel(key) }
+        await operations.run(for: key) { await self.performCancel(key) }
     }
 
     /// Cancels every pending mutation and clears the store.
@@ -176,7 +246,7 @@ public actor MutationQueue {
     /// Call this on sign-out. Persisted mutations can carry credentials and
     /// must not be replayed for the next user.
     public func cancelAll() async {
-        await operations.run {
+        await operations.runExclusive {
             var keys = Set(await self.store.allKeys())
             keys.formUnion(await self.activeKeys())
             for key in keys {
@@ -199,11 +269,16 @@ public actor MutationQueue {
         setStatus(.failed(MutationFailureReason(CancellationError())), for: key)
     }
 
-    /// The most recently observed status for `key`, if it has ever been enqueued.
+    /// The most recently observed status for `key`.
+    ///
+    /// A mutation that is still in progress always has a status. The outcome of a finished
+    /// mutation, ``MutationStatus/succeeded`` or ``MutationStatus/failed(_:)``, is remembered
+    /// for the most recent few hundred keys.
     ///
     /// - Parameter key: The logical mutation to look up.
+    /// - Returns: The status, or `nil` when `key` was never enqueued or its outcome was forgotten.
     public func status(for key: MutationKey) -> MutationStatus? {
-        latestStatusByKey[key]
+        activeStatusByKey[key] ?? finishedStatusByKey.peekValue(forKey: key)
     }
 
     /// Resumes processing for every mutation currently persisted in the
@@ -216,7 +291,7 @@ public actor MutationQueue {
     /// call unconditionally, including with ``InMemoryMutationStore``, which
     /// is simply empty on a fresh launch).
     public func resumePendingMutations() async {
-        await operations.run { await self.performResumePendingMutations() }
+        await operations.runExclusive { await self.performResumePendingMutations() }
     }
 
     private func performResumePendingMutations() async {
@@ -264,8 +339,13 @@ public actor MutationQueue {
         }
 
         var attempt = 0
+        var attemptedRequest: MutationRequest?
         while isCurrentWorker(workerID, for: key) {
             guard let request = await store.load(for: key), isCurrentWorker(workerID, for: key) else { return }
+            if request != attemptedRequest {
+                attempt = 0
+                attemptedRequest = request
+            }
 
             Logger.debug("Executing mutation for key \(key) (attempt \(attempt + 1))", category: .mutation)
             do {
@@ -274,21 +354,21 @@ public actor MutationQueue {
                 // cancellation, so ignore this outcome entirely.
                 guard isCurrentWorker(workerID, for: key) else { return }
 
-                let removed = await store.removeIfCurrent(request, for: key)
-                guard isCurrentWorker(workerID, for: key) else { return }
-                if removed {
+                switch await finish(
+                    request, for: key, workerID: workerID, status: .succeeded, response: result.response)
+                {
+                case .completed:
                     Logger.debug("Mutation succeeded for key \(key)", category: .mutation)
-                    setStatus(.succeeded, for: key, response: result.response)
+                    return
+                case .superseded:
+                    Logger.debug(
+                        "Mutation for key \(key) was superseded while in flight; processing replacement",
+                        category: .mutation
+                    )
+                    attempt = 0
+                case .noLongerCurrent:
                     return
                 }
-                // A newer value was enqueued while this call was in flight.
-                // Process it next instead of discarding it.
-                Logger.debug(
-                    "Mutation for key \(key) was superseded while in flight; processing replacement",
-                    category: .mutation
-                )
-                attempt = 0
-                setStatus(.pending, for: key)
             } catch {
                 guard isCurrentWorker(workerID, for: key) else { return }
                 if let waitForConnectivity, (error as? NetworkError)?.category == .offline {
@@ -309,22 +389,23 @@ public actor MutationQueue {
                 }
                 attempt += 1
                 guard retryPolicy.shouldRetry(error), attempt <= retryPolicy.maxRetries else {
-                    let removed = await store.removeIfCurrent(request, for: key)
-                    guard isCurrentWorker(workerID, for: key) else { return }
-                    if removed {
+                    switch await finish(
+                        request, for: key, workerID: workerID, status: .failed(MutationFailureReason(error)))
+                    {
+                    case .completed:
                         Logger.error("Mutation failed permanently for key \(key)", error: error, category: .mutation)
-                        setStatus(.failed(MutationFailureReason(error)), for: key)
                         return
+                    case .noLongerCurrent:
+                        return
+                    case .superseded:
+                        // A newer value replaced this one while it was failing
+                        // permanently; that replacement deserves its own attempts.
+                        Logger.debug(
+                            "Mutation for key \(key) was superseded during a permanent failure; processing replacement",
+                            category: .mutation
+                        )
+                        attempt = 0
                     }
-                    // A newer value replaced this one while it was failing
-                    // permanently; that replacement deserves its own attempts
-                    // rather than being discarded alongside the old failure.
-                    Logger.debug(
-                        "Mutation for key \(key) was superseded during a permanent failure; processing replacement",
-                        category: .mutation
-                    )
-                    attempt = 0
-                    setStatus(.pending, for: key)
                     continue
                 }
                 Logger.warning(
@@ -340,10 +421,49 @@ public actor MutationQueue {
         }
     }
 
+    /// Serializes terminal cleanup with enqueue so a replacement cannot be saved after the
+    /// current value is removed but before its worker is cleared.
+    private func finish(
+        _ request: MutationRequest,
+        for key: MutationKey,
+        workerID: UUID,
+        status: MutationStatus,
+        response: HTTPResponse? = nil
+    ) async -> FinishResult {
+        await operations.run(for: key) {
+            guard await self.isCurrentWorker(workerID, for: key) else { return .noLongerCurrent }
+            let removed = await self.store.removeIfCurrent(request, for: key)
+            guard await self.isCurrentWorker(workerID, for: key) else { return .noLongerCurrent }
+            guard removed else {
+                await self.setStatus(.pending, for: key)
+                return .superseded
+            }
+            await self.setStatus(status, for: key, response: response)
+            await self.clearWorker(workerID, for: key)
+            return .completed
+        }
+    }
+
+    private func clearWorker(_ workerID: UUID, for key: MutationKey) {
+        if workerByKey[key]?.id == workerID {
+            workerByKey[key] = nil
+        }
+    }
+
     // MARK: - Status Broadcasting
 
     private func setStatus(_ status: MutationStatus, for key: MutationKey, response: HTTPResponse? = nil) {
-        latestStatusByKey[key] = status
+        switch status {
+        case .pending, .retrying, .waitingForConnectivity:
+            finishedStatusByKey.removeValue(forKey: key)
+            activeStatusByKey[key] = status
+        case .succeeded, .failed:
+            activeStatusByKey[key] = nil
+            finishedStatusByKey.setValue(status, forKey: key)
+            while finishedStatusByKey.count > Self.retainedFinishedStatusLimit {
+                finishedStatusByKey.removeLeastRecentlyUsed()
+            }
+        }
         eventBroadcaster.yield(MutationEvent(key: key, status: status, response: response))
     }
 }

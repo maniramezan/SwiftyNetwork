@@ -6,13 +6,15 @@ import Foundation
 /// The policy is **off by default**; assign one to
 /// ``NetworkClientConfiguration/retryPolicy`` to enable it. When enabled:
 ///
-/// - Only idempotent methods are retried (``retryableMethods``: `GET`, `HEAD`,
-///   `PUT`, `DELETE`). `POST` and `PATCH` are never replayed, not even on a
-///   `429`, so a request that may have been processed is never duplicated.
+/// - Only idempotent requests are retried (``NetworkEndpoint/isIdempotent``, by default
+///   `GET`, `HEAD`, `PUT`, `DELETE`, and `OPTIONS`). A `POST` or `PATCH` is not replayed,
+///   not even on a `429`, so a request that may have been processed is never duplicated,
+///   unless its endpoint declares itself idempotent.
 /// - Retried failures are `429` (``NetworkError/tooManyRequests(_:)``),
 ///   5xx (``NetworkError/serverError(_:)``), timeouts
-///   (``NetworkError/timeout(_:)``) and lost connectivity
-///   (``NetworkError/noInternetConnection``). Everything else, including
+///   (``NetworkError/timeout(_:)``), lost connectivity
+///   (``NetworkError/noInternetConnection``) and an unreachable server
+///   (``NetworkError/serverUnreachable(_:)``). Everything else, including
 ///   decoding failures and other 4xx responses, is reported immediately.
 /// - Waits follow ``backoff``, honoring `Retry-After` on a `429` or `503`.
 /// - At most ``maxRetries`` retries follow the first attempt.
@@ -33,9 +35,6 @@ import Foundation
 /// let client = NetworkClient(configuration: configuration)
 /// ```
 public struct NetworkRetryPolicy: Sendable, Equatable {
-    /// The HTTP methods that are safe to replay: `GET`, `HEAD`, `PUT` and `DELETE`.
-    public static let retryableMethods: Set<HTTPMethod> = [.get, .head, .put, .delete]
-
     /// The default backoff: 0.5s doubling up to 8s, ±50% jitter, and `Retry-After` honored up to 30s.
     public static let defaultBackoff = BackoffPolicy(
         baseDelay: .milliseconds(500),
@@ -67,13 +66,13 @@ public struct NetworkRetryPolicy: Sendable, Equatable {
     ///
     /// - Parameters:
     ///   - error: The failure of the attempt that just ran.
-    ///   - method: The HTTP method of the request.
-    /// - Returns: `true` only for an idempotent ``retryableMethods`` request whose
-    ///   failure is ``NetworkError/isTransient``: `429`, a 5xx status, a timeout,
-    ///   or lost connectivity.
-    public func shouldRetry(_ error: NetworkError, method: HTTPMethod) -> Bool {
-        guard Self.retryableMethods.contains(method) else { return false }
-        return error.isTransient
+    ///   - isIdempotent: Whether the request is safe to send again, from
+    ///     ``NetworkEndpoint/isIdempotent``.
+    /// - Returns: `true` only for an idempotent request whose failure is
+    ///   ``NetworkError/isTransient``: `429`, a 5xx status, a timeout, lost
+    ///   connectivity, or an unreachable server.
+    public func shouldRetry(_ error: NetworkError, isIdempotent: Bool) -> Bool {
+        isIdempotent && error.isTransient
     }
 
     /// Computes how long to wait before a retry.

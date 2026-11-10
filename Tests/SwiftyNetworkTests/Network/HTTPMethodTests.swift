@@ -37,7 +37,11 @@ func testHTTPMethodCodable() throws {
     #expect(try JSONDecoder().decode([HTTPMethod].self, from: data) == [.post, "PROPFIND"])
 }
 
-@Test("Custom methods are never retried by NetworkRetryPolicy")
+@Test("Custom methods are not idempotent by default")
 func testCustomMethodIsNotRetried() {
-    #expect(!NetworkRetryPolicy().shouldRetry(.serverError(.status(503)), method: "PROPFIND"))
+    #expect(
+        !NetworkRetryPolicy().shouldRetry(
+            .serverError(.status(503)), isIdempotent: HTTPMethod(rawValue: "PROPFIND").isIdempotent
+        )
+    )
 }

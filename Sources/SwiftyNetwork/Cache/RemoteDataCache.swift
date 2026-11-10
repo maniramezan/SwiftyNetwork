@@ -52,7 +52,10 @@ public actor RemoteDataCache<Wrapped: Cache<Data>> {
     /// Concurrent calls for the same `url` before the first fetch completes
     /// share that single fetch instead of each issuing their own request.
     ///
-    /// - Parameter url: The URL to fetch bytes from.
+    /// - Parameters:
+    ///   - url: The URL to fetch bytes from.
+    ///   - maxAge: The oldest cached bytes to return. Older bytes are fetched again.
+    ///     Defaults to `nil`, which returns cached bytes of any age.
     /// - Returns: The cached or freshly fetched response body.
     /// - Throws: ``NetworkError/invalidResponse`` if the server response
     ///   isn't an HTTP response; for a non-2xx status, the same mapping as
@@ -63,9 +66,9 @@ public actor RemoteDataCache<Wrapped: Cache<Data>> {
     ///   or ``NetworkError/unexpectedStatus(_:)``; ``NetworkError/timeout(_:)``,
     ///   ``NetworkError/noInternetConnection``, or ``NetworkError/underlying(_:)``
     ///   for transport failures; `CancellationError` if the fetch was cancelled.
-    public func data(for url: URL) async throws -> Data {
+    public func data(for url: URL, maxAge: Duration? = nil) async throws -> Data {
         let key = CacheKey(url: url)
-        return try await cache.value(forKey: key) { [session] in
+        return try await cache.value(forKey: key, maxAge: maxAge) { [session] in
             try await Self.fetch(url, session: session)
         }
     }
@@ -96,7 +99,7 @@ public actor RemoteDataCache<Wrapped: Cache<Data>> {
         do {
             (data, response) = try await session.data(from: url)
         } catch {
-            throw NetworkError.transportError(error)
+            throw NetworkError.transportError(error, session: session)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
