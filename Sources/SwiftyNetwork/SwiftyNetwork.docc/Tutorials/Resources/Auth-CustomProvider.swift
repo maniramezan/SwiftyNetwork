@@ -1,8 +1,7 @@
 import SwiftyNetwork
 
 actor SessionAuthProvider: AuthorizationProvider {
-    struct SessionExpired: Error {}
-
+    private let refreshes = AuthorizationRefreshCoalescer()
     private var sessionToken: String
 
     init(sessionToken: String) {
@@ -14,7 +13,15 @@ actor SessionAuthProvider: AuthorizationProvider {
     }
 
     func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
-        // Reauthenticate via your backend and update sessionToken, or throw when you can't.
-        throw SessionExpired()
+        // Requests that fail together share one refresh; a stale rejection skips it.
+        try await refreshes.refresh(rejecting: rejected, of: self) {
+            // Reauthenticate via your backend, or throw when you can't.
+            let token = try await SessionStore.shared.reauthenticate()
+            await self.store(token)
+        }
+    }
+
+    private func store(_ token: String) {
+        sessionToken = token
     }
 }

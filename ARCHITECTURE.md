@@ -11,7 +11,7 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | --- | --- | --- |
 | HTTP | `NetworkEndpoint.swift`, `TypedEndpoint.swift`, `APIClient.swift`, `NetworkClient.swift` | Describe, assemble, execute, validate, and decode requests |
 | Configuration | `NetworkClientConfiguration.swift` | Session, JSON coders, auth provider, retry and redirect policies, timeouts, instrumentation |
-| Authentication | `AuthProvider.swift`, `AuthorizationType.swift` | Inject credentials and coalesce overlapping OAuth refreshes |
+| Authentication | `AuthProvider.swift`, `AuthorizationType.swift`, `AuthorizationRefreshCoalescer.swift` | Inject credentials and coalesce overlapping refreshes for OAuth and custom providers |
 | TLS | `SSLPinningConfiguration.swift` | Optional certificate/SPKI pins with platform trust validation by default |
 | Redirects | `RedirectPolicy.swift`, `RedirectGuard.swift` | Strip credentials on cross-origin redirects and refuse HTTPS downgrades, through a per-task delegate |
 | Observation | `NetworkInstrumentation.swift`, `NetworkMonitor.swift`, `Logger.swift` | Request events, reachability, unified logging |
@@ -60,8 +60,8 @@ the configured timeout or URL request cache policy, and declare request idempote
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `authRefreshDelay` before replay. The client passes the exact provider authorization
-it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
-skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
+it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider` (and any custom provider that
+routes through `AuthorizationRefreshCoalescer`) skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
 `shouldRefreshAuthorization(after:)` with a `401` response or a provider-authorized `403`; the default refreshes
 only `401`. Every non-2xx error (`401`, `403`, `404`, `408`, `429`, 5xx, ...) carries an `HTTPResponse`
 (status, headers, body), exposed as `NetworkError.response`. Neither auth replay nor request retry is general
@@ -98,7 +98,7 @@ The gate serializes storage operations across keys, so slow storage can cause he
 blocking; defer changing this until the image-grid workload is measured. `entry(forKey:)`
 returns a value and its timestamp as one snapshot.
 
-Shared OAuth refreshes and single-flight fetches use owned unstructured tasks
+Shared authorization refreshes and single-flight fetches use owned unstructured tasks
 because multiple independent callers share their lifetime. Mutation workers must
 outlive enqueue calls. Reachability and URLSession delegate callbacks require
 bridges from synchronous platform APIs. The synchronous logger uses
