@@ -61,6 +61,22 @@ struct SingleFlightCacheTests {
         #expect(await cache.value(forKey: CacheKey("k")) == "fetched")
     }
 
+    @Test("maxAge refreshes an old cached value before returning")
+    func maxAgeRefreshesOldEntry() async throws {
+        let storage = InMemoryCache<String>()
+        let cache = SingleFlightCache(storage)
+        let key: CacheKey = "aged"
+        await storage.setEntry(
+            CacheEntry("stale", timestamp: Date(timeIntervalSince1970: 1)),
+            forKey: key
+        )
+
+        let result = try await cache.value(forKey: key, maxAge: .seconds(60)) { "fresh" }
+
+        #expect(result == "fresh")
+        #expect(await storage.value(forKey: key) == "fresh")
+    }
+
     @Test("Concurrent misses for the same key coalesce into a single fetch")
     func concurrentMissesCoalesce() async throws {
         let cache = SingleFlightCache(InMemoryCache<String>())

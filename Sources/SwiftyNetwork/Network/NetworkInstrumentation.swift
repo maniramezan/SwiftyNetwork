@@ -42,6 +42,9 @@ import Foundation
 /// this protocol's job -- it's already possible via ``NetworkEndpoint/headers``,
 /// fully under the caller's control.
 ///
+/// Group requests by ``NetworkRequestAttempt/operationName``, which an endpoint sets with
+/// ``NetworkEndpoint/operationName``, rather than by URL: it is stable and free of identifiers.
+///
 /// Events contain complete URLs and errors, potentially including sensitive query
 /// parameters and response bodies. Redact these before exporting telemetry.
 /// Callbacks are awaited and should finish promptly to avoid delaying requests.
@@ -97,11 +100,26 @@ public struct NetworkRequestAttempt: Sendable, Equatable {
     /// first auth-refresh retry, and so on.
     public let attempt: Int
 
-    public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int) {
+    /// The endpoint's ``NetworkEndpoint/operationName``, or `nil` when it has none.
+    ///
+    /// A stable, low-cardinality name such as `"videos.list"`, suitable as a span name or a
+    /// metric dimension.
+    public let operationName: String?
+
+    /// Creates an attempt event, for example in a test.
+    ///
+    /// - Parameters:
+    ///   - requestID: Identifies the logical request.
+    ///   - url: The resolved request URL.
+    ///   - method: The HTTP method.
+    ///   - attempt: The 1-based attempt number.
+    ///   - operationName: The endpoint's operation name. Defaults to `nil`.
+    public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, operationName: String? = nil) {
         self.requestID = requestID
         self.url = url
         self.method = method
         self.attempt = attempt
+        self.operationName = operationName
     }
 }
 
@@ -129,13 +147,35 @@ public struct NetworkRequestCompletion: Sendable, Equatable {
     /// `requestCompleted` callback itself. System clock changes do not affect it.
     public let duration: Duration
 
-    public init(requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, statusCode: Int, duration: Duration) {
+    /// See ``NetworkRequestAttempt/operationName``.
+    public let operationName: String?
+
+    /// Creates a completion event, for example in a test.
+    ///
+    /// - Parameters:
+    ///   - requestID: Identifies the logical request.
+    ///   - url: The resolved request URL.
+    ///   - method: The HTTP method.
+    ///   - attempt: The 1-based attempt number.
+    ///   - statusCode: The HTTP status code returned.
+    ///   - duration: The elapsed time of the attempt.
+    ///   - operationName: The endpoint's operation name. Defaults to `nil`.
+    public init(
+        requestID: UUID,
+        url: URL,
+        method: HTTPMethod,
+        attempt: Int,
+        statusCode: Int,
+        duration: Duration,
+        operationName: String? = nil
+    ) {
         self.requestID = requestID
         self.url = url
         self.method = method
         self.attempt = attempt
         self.statusCode = statusCode
         self.duration = duration
+        self.operationName = operationName
     }
 }
 
@@ -164,8 +204,27 @@ public struct NetworkRequestFailure: Sendable {
     /// for a stable category to tag onto a span attribute.
     public let error: NetworkError
 
+    /// See ``NetworkRequestAttempt/operationName``.
+    public let operationName: String?
+
+    /// Creates a failure event, for example in a test.
+    ///
+    /// - Parameters:
+    ///   - requestID: Identifies the logical request.
+    ///   - url: The resolved request URL.
+    ///   - method: The HTTP method.
+    ///   - attempt: The 1-based attempt number.
+    ///   - duration: The elapsed time of the attempt.
+    ///   - error: The error that terminated the attempt.
+    ///   - operationName: The endpoint's operation name. Defaults to `nil`.
     public init(
-        requestID: UUID, url: URL, method: HTTPMethod, attempt: Int, duration: Duration, error: NetworkError
+        requestID: UUID,
+        url: URL,
+        method: HTTPMethod,
+        attempt: Int,
+        duration: Duration,
+        error: NetworkError,
+        operationName: String? = nil
     ) {
         self.requestID = requestID
         self.url = url
@@ -173,5 +232,6 @@ public struct NetworkRequestFailure: Sendable {
         self.attempt = attempt
         self.duration = duration
         self.error = error
+        self.operationName = operationName
     }
 }

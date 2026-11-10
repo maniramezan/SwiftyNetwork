@@ -106,7 +106,7 @@ struct HTTPResponseTests {
     }
 }
 
-@Suite("NetworkClient auth error responses")
+@Suite("NetworkClient auth error responses", .serialized)
 struct NetworkClientAuthErrorResponseTests {
     @Test("A 401 without a provider keeps status, headers, and body")
     func unauthorizedWithoutProviderCarriesResponse() async throws {
@@ -294,6 +294,42 @@ struct NetworkClientAuthErrorResponseTests {
         #expect(stub.requests.count == 1)
     }
 
+    @Test("A provider can refresh a legacy 403 authentication rejection")
+    func providerCanRefreshLegacy403() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let provider = TestAuthorizationProvider(
+            current: .bearer(token: "expired"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "fresh"),
+            shouldRefresh: { response in
+                response.statusCode == 403
+                    && (try? response.decodeBody(APIErrorBody.self))?.code == "legacy_token_expired"
+            }
+        )
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: stub.session,
+                authorizationProvider: provider,
+                maxAuthRefreshAttempts: 1,
+                authRefreshDelay: .zero
+            )
+        )
+        let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+        let testId = "auth-response-legacy-403"
+        stub.setResponses(
+            [.status(403, data: errorBody("legacy_token_expired")), .success(try JSONEncoder().encode(user))],
+            for: testId
+        )
+
+        let result = try await client.request(makeEndpointWithTestId(testId), responseType: TestUser.self)
+
+        #expect(result == user)
+        #expect(await provider.refreshCallCount == 1)
+        #expect(await provider.inspectedResponses.map(\.statusCode) == [403])
+        #expect(stub.requests.count == 2)
+    }
+
     @Test("A provider can decline to refresh after inspecting the 401 body")
     func providerCanDeclineRefresh() async throws {
         let stub = try TestHTTPStub()
@@ -361,7 +397,7 @@ struct NetworkClientAuthErrorResponseTests {
     }
 }
 
-@Suite("RemoteDataCache auth error responses")
+@Suite("RemoteDataCache auth error responses", .serialized)
 struct RemoteDataCacheAuthErrorResponseTests {
     @Test("401, 403, 404 and 408 from the byte cache carry the response")
     func cacheErrorsCarryResponse() async throws {

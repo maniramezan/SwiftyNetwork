@@ -172,6 +172,71 @@ struct MutationQueueConsumerGapTests {
         #expect(generated.headers?[MutationRequest.idempotencyKeyHeader]?.isEmpty == false)
     }
 
+    @Test("An enqueue after terminal storage removal starts a new worker")
+    func enqueueAfterTerminalRemovalStartsWorker() async throws {
+        let fake = FakeAPIClient(outcomes: [.success, .success])
+        let secondCall = await fake.hold(call: 1)
+        let store = SuspendedRemoveMutationStore()
+        let queue = MutationQueue(client: fake, store: store, retryPolicy: .immediate())
+        let stream = await queue.events()
+        let first = makeRequest()
+        let replacement = MutationRequest(
+            baseURL: "https://api.test.com",
+            path: "/posts",
+            method: .post,
+            body: Data(#"{"liked":false}"#.utf8)
+        )
+
+        async let events = collectEvents(stream, count: 4)
+        await queue.enqueue(first, key: key)
+        try await store.removeStarted.wait()
+
+        let enqueue = Task { await queue.enqueue(replacement, key: key) }
+        _ = try await waitUntil(
+            timeout: .seconds(5),
+            operation: { await queue.operations.queuedOperationCount },
+            matching: { $0 == 1 }
+        )
+        store.allowRemoveToReturn.open()
+        await enqueue.value
+        _ = try await waitUntil(
+            timeout: .seconds(5),
+            operation: { await fake.callCount },
+            matching: { $0 == 2 }
+        )
+        secondCall.open()
+
+        let observed = await events
+        #expect(observed.map(\.status) == [.pending, .succeeded, .pending, .succeeded])
+        #expect(await fake.recordedRequests.map(\.body) == [first.body, replacement.body])
+        #expect(await store.allKeys().isEmpty)
+    }
+
+    @Test("enqueueAndWait returns the server response")
+    func enqueueAndWaitReturnsResponse() async throws {
+        let client = MockAPIClient()
+        await client.stub(.post, "/posts", with: .http(HTTPResponse(statusCode: 201, body: Data("created".utf8))))
+        let queue = MutationQueue(client: client, retryPolicy: .immediate())
+
+        let response = try await queue.enqueueAndWait(makeRequest(), key: key)
+
+        #expect(response.statusCode == 201)
+        #expect(response.body == Data("created".utf8))
+    }
+
+    @Test("Finished mutation statuses are bounded")
+    func finishedStatusesArePruned() async throws {
+        let queue = MutationQueue(client: FakeAPIClient(outcomes: []), retryPolicy: .immediate())
+        let count = MutationQueue.retainedFinishedStatusLimit + 1
+
+        for index in 0..<count {
+            try await queue.enqueueAndWait(makeRequest(), key: MutationKey("key:\(index)"))
+        }
+
+        #expect(await queue.status(for: "key:0") == nil)
+        #expect(await queue.status(for: MutationKey("key:\(count - 1)")) == .succeeded)
+    }
+
     @Test("MutationRequest keeps an endpoint's provider opt-out through encoding")
     func providerOptOutPersists() throws {
         struct SignIn: NetworkEndpoint {
@@ -191,6 +256,40 @@ struct MutationQueueConsumerGapTests {
         #expect(!request.usesAuthorizationProvider)
         #expect(decoded == request)
         #expect(legacy.usesAuthorizationProvider)
+    }
+
+    private actor SuspendedRemoveMutationStore: MutationStore {
+        let removeStarted = AsyncGate()
+        let allowRemoveToReturn = AsyncGate()
+        private var requests: [MutationKey: MutationRequest] = [:]
+        private var shouldSuspendRemoval = true
+
+        func save(_ request: MutationRequest, for key: MutationKey) async {
+            requests[key] = request
+        }
+
+        func load(for key: MutationKey) async -> MutationRequest? {
+            requests[key]
+        }
+
+        func remove(for key: MutationKey) async {
+            requests[key] = nil
+        }
+
+        func removeIfCurrent(_ request: MutationRequest, for key: MutationKey) async -> Bool {
+            guard requests[key] == request else { return false }
+            requests[key] = nil
+            if shouldSuspendRemoval {
+                shouldSuspendRemoval = false
+                removeStarted.open()
+                try? await allowRemoveToReturn.wait()
+            }
+            return true
+        }
+
+        func allKeys() async -> [MutationKey] {
+            Array(requests.keys)
+        }
     }
 
     @Test("waitUntilReachable returns when the calling task is cancelled")

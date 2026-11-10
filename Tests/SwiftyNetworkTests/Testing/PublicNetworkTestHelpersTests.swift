@@ -3,7 +3,7 @@ import SwiftyNetwork
 import SwiftyNetworkTesting
 import Testing
 
-@Suite("Public network test helpers integration")
+@Suite("Public network test helpers integration", .serialized)
 struct PublicNetworkTestHelpersTests {
     @Test("Repeated 401 responses exhaust the refresh budget and close the retried attempt")
     func repeatedUnauthorizedResponses() async throws {

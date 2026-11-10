@@ -12,6 +12,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Swift 6 Concurrency**: Built with async/await and actors for thread-safe operations
 - **Type-Safe Endpoints**: Protocol-based endpoint definitions with compile-time safety
 - **Flexible Caching**: Pluggable caching system with multiple policies
+- **Disk Caching**: Optional file-backed `DiskCache` with byte and idle-time limits
 - **Authentication Support**: Built-in OAuth and custom authentication providers
 - **SSL Pinning**: Optional certificate and public-key pinning for controlled hosts
 - **Safe Redirects**: Credentials are stripped from cross-origin redirects and HTTPS downgrades are refused
@@ -106,6 +107,24 @@ public struct UserEndpoint: NetworkEndpoint {
 string literal away, for example `let method: HTTPMethod = "PROPFIND"`. `HTTPMethod` is a struct, so a `switch`
 over it needs a `default` case.
 
+When a group of endpoints shares a host and headers, keep `baseURL` required on `NetworkEndpoint` and provide
+shared defaults through a protocol refinement. An endpoint can still override the host for a CDN or another service.
+For a complete absolute URL returned by a server, use it as `baseURL` and leave `path` empty.
+
+```swift
+protocol ExampleAPIEndpoint: NetworkEndpoint {}
+
+extension ExampleAPIEndpoint {
+    var baseURL: String { "https://api.example.com" }
+    var headers: [String: String]? { ["Accept": "application/json"] }
+}
+
+struct SettingsEndpoint: ExampleAPIEndpoint {
+    let path = "/settings"
+    let method: HTTPMethod = .get
+}
+```
+
 ### 2. Create a Data Model
 
 ```swift
@@ -178,6 +197,32 @@ func fetchUser(client: any APIClient, baseURL: String, userId: String) async thr
 let post = try await client.request(CreatePostEndpoint(), body: draft, responseType: Post.self)
 ```
 
+### Per-Endpoint Options and Typed Endpoints
+
+`NetworkEndpoint` can set a stable `operationName` for instrumentation, override the client timeout, choose a
+`URLRequest` cache policy, and declare whether the request is idempotent. These defaults are per endpoint, so a
+slow request or forced network refresh does not change unrelated calls:
+
+```swift
+struct BalanceEndpoint: TypedEndpoint {
+    typealias Response = Balance
+
+    let baseURL = "https://api.example.com"
+    let path = "/balance"
+    let method: HTTPMethod = .get
+    var operationName: String? { "account.balance" }
+    let timeout: Duration? = .seconds(20)
+    let cachePolicy: URLRequest.CachePolicy? = .reloadIgnoringLocalCacheData
+}
+
+let balance = try await client.send(BalanceEndpoint())
+```
+
+`TypedEndpoint` binds the response type to the endpoint, removing repeated `responseType:` arguments. Its `send`
+convenience also supports encoded bodies. Set `isIdempotent` to `true` only when the server guarantees that
+replaying the request has no additional effect; this opts methods such as an idempotency-keyed `POST` into
+`NetworkRetryPolicy`.
+
 ### Response Headers and Raw Bytes
 
 `request(_:responseType:)` returns only the decoded value. When you also need the status code, headers, or raw
@@ -203,9 +248,28 @@ let avatar = try await client.request(AvatarEndpoint(userId: "42"), responseType
 `response(for:responseType:)` is the one requirement an `APIClient` conformance implements; the `request`
 methods are built on it.
 
+### Built-in Disk Cache
+
+`DiskCache` persists Codable values as individual files. It can bound total bytes and remove entries that have not
+been used within a configured interval. Use a caches directory for evictable data; files are not encrypted.
+
+```swift
+let disk = DiskCache<User>(
+    directory: URL.cachesDirectory.appending(path: "users", directoryHint: .isDirectory),
+    maxBytes: 50_000_000,
+    maxIdleTime: .seconds(7 * 86_400)
+)
+let cache = LayeredCache(memoryCache: InMemoryCache<User>(maxSize: 100), persistentCache: disk)
+let repository = GenericRepository(client: NetworkClient.shared, cache: cache)
+```
+
+For pending mutations that must survive relaunches, use `FileMutationStore` under
+`URL.applicationSupportDirectory`; unlike cache contents, pending work must not be stored in a reclaimable caches
+directory. Both file-backed types store data as given, so choose appropriate file protection for sensitive data.
+
 ### Layered Caching with a Custom Persistent Cache
 
-Implement `Cache` in your app to define on-disk behavior, then combine it with
+Implement `Cache` in your app when you need custom database or encryption behavior, then combine it with
 the built-in in-memory cache using `LayeredCache`. A cache stores and returns whole `CacheEntry` values
 (the value plus the time it was stored), so `LayeredCache` keeps the original timestamp when it promotes a
 disk hit into memory, and a repository reads a value and its age in one call.
@@ -293,6 +357,20 @@ func fetchUserWithExpiration(
 }
 ```
 
+`reloadElseReturnCache` is useful when the network should be tried first but saved data must remain available if
+the request fails. `returnCacheAndRevalidate(maxAge:)` returns cached data immediately and refreshes stale data in
+the background. Use `fetchResult` when the caller needs to know whether the value came from the network or cache,
+or how old it is:
+
+```swift
+let result = try await repository.fetchResult(
+    using: UserEndpoint(baseURL: baseURL, userId: userId),
+    cacheKey: cacheKey,
+    policy: .reloadElseReturnCache
+)
+show(result.value, isSaved: result.source == .cache, age: result.age())
+```
+
 ### OAuth Authentication
 
 ```swift
@@ -351,10 +429,10 @@ actor SessionAuthorizationProvider: AuthorizationProvider {
 }
 ```
 
-A provider can also veto a refresh by implementing `shouldRefreshAuthorization(after:)`. The client passes it
-the `401` response (status, headers, and body) before refreshing; return `false` for a `401` that a new token
-cannot fix and the client throws `NetworkError.unauthorized` without refreshing or retrying. The default
-returns `true`. `403` is never refreshed.
+A provider can also decide whether a refresh is useful by implementing `shouldRefreshAuthorization(after:)`. The
+client passes it a `401` response, or a `403` response to a request the provider authorized. Return `false` when a
+new token cannot fix the failure. The default refreshes `401` and does not refresh `403`; an API that uses legacy
+`403` codes for expired tokens can opt in by inspecting the response body or headers.
 
 Inside `refreshAuthorization(rejecting:)`, `guard await isCurrentAuthorization(rejected) else { return }` skips a
 refresh that another request already did.
@@ -405,7 +483,7 @@ do {
 It returns only for a `2xx`. It never retries transient failures and does not set a timeout. Instrumentation reports
 the attempt as completed when the headers arrive. Use it only for your own API: the provider's credentials go to
 any URL, so call `URLSession` directly for presigned or third-party URLs, and map its errors with
-`NetworkError.mapTransportError(_:)`. Background sessions are not supported.
+`NetworkError.mapTransportError(_:session:)`. Background sessions are not supported.
 
 ### Fire-and-Forget Mutations with MutationQueue
 
@@ -443,6 +521,13 @@ for await event in await queue.events() where event.key == "like:video:42" {
 }
 ```
 
+When the caller needs the result, `enqueueAndWait` returns the response (or throws a `MutationFailureReason`)
+while retaining queue retry and coalescing behavior:
+
+```swift
+let response = try await queue.enqueueAndWait(request, key: "like:video:42")
+```
+
 Mutations for different keys run independently and may finish in any order, so enqueue one that depends on
 another only after the first succeeds. The `.succeeded` event carries the server's response, for example the
 identifier of a created record:
@@ -465,6 +550,7 @@ A failed mutation's `MutationFailureReason.category` tells apart the outcomes a 
 | Category | Meaning | Typical handling |
 | --- | --- | --- |
 | `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
+| `.serverUnreachable` | The host did not resolve or accept a connection | Try again later |
 | `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
 | `.rateLimited` | `429` and retries ran out | Enqueue again later |
 | `.rejected` | The server refused it with a 4xx (other than 401/408/429); retrying won't help | Roll back; show `reason.response` details |
@@ -482,7 +568,7 @@ func handleLikeFailure(_ reason: MutationFailureReason) {
     switch reason.category {
     case .cancelled:
         return
-    case .offline, .timedOut:
+    case .offline, .serverUnreachable, .timedOut:
         showBanner("You're offline. Your like will need to be sent again.")
     case .rejected:
         rollBackLike()
@@ -496,14 +582,15 @@ func handleLikeFailure(_ reason: MutationFailureReason) {
 ```
 
 Persistence is pluggable via the `MutationStore` protocol. `InMemoryMutationStore` ships as the
-default (mutations are lost if the process is killed, which is fine for most forgivable
-mutations); implement `MutationStore` yourself for durable persistence that survives a relaunch.
+default; mutations are lost if the process is killed. `FileMutationStore` persists pending requests
+so they can be replayed after relaunch:
 Because `MutationRequest` is `Codable`, a durable store can serialize "which endpoint plus what
 body" directly and replay it on the next launch via `resumePendingMutations()`. The encoded form carries a
 schema `version`, and decoding rejects a version newer than the library understands.
 
 ```swift
-let queue = MutationQueue(client: authenticatedClient, store: MyDurableMutationStore()) {
+let directory = URL.applicationSupportDirectory.appending(path: "PendingMutations", directoryHint: .isDirectory)
+let queue = MutationQueue(client: authenticatedClient, store: FileMutationStore(directory: directory)) {
     await NetworkMonitor.shared.waitUntilReachable()
 }
 await queue.resumePendingMutations() // call once at startup
@@ -607,6 +694,12 @@ let user = try await users.value(forKey: "user:42") {
     try await client.request(UserEndpoint(baseURL: baseURL, userId: "42"), responseType: User.self)
 }
 
+// Set maxAge to replace entries older than the freshness window.
+let profiles = SingleFlightCache(InMemoryCache<Profile>(maxSize: 500))
+let freshProfile = try await profiles.value(forKey: "profile:42", maxAge: .seconds(300)) {
+    try await client.request(ProfileEndpoint(userId: "42"), responseType: Profile.self)
+}
+
 let images = RemoteDataCache(cache: InMemoryCache<Data>(maxSize: 200))
 let avatar = try await images.data(for: avatarURL)
 ```
@@ -645,12 +738,14 @@ struct RequestMetrics: NetworkInstrumentation {
 let client = NetworkClient(configuration: NetworkClientConfiguration(instrumentation: RequestMetrics()))
 ```
 
-Events include full URLs and errors. Redact them before exporting.
+Set `operationName` on an endpoint to attach a stable, low-cardinality operation name to every attempt,
+completion, and failure event. Events also include full URLs and errors; redact them before exporting and prefer
+the operation name over URL labels.
 
 ### Custom Cache Implementation
 
-For a complete disk-backed `Cache` that keeps the write timestamp separate from last-use recency, see the
-`CustomDiskCache` article in the DocC documentation (`Tests/SwiftyNetworkTests/Cache/DiskCacheRecipeTests.swift` compiles it).
+For a database-backed or otherwise custom cache, see the `CustomDiskCache` DocC article. For ordinary file-backed
+storage, use the built-in `DiskCache`.
 
 ```swift
 // Implement custom cache
@@ -668,11 +763,13 @@ let repository = GenericRepository(client: NetworkClient.shared, cache: MyCustom
 
 ## Cache Policies
 
-SwiftyNetwork supports three caching strategies:
+SwiftyNetwork supports five repository caching strategies:
 
 - **`.returnCacheElseLoad`**: Return cached data if available, otherwise fetch from network
 - **`.reloadIgnoringCache`**: Always fetch from network and update cache
 - **`.returnCacheIfNotExpired(maxAge:)`**: Use cached data if not older than specified age
+- **`.reloadElseReturnCache`**: Fetch first; return cached data if that request fails
+- **`.returnCacheAndRevalidate(maxAge:)`**: Return cached data immediately and refresh stale data in the background
 
 ## Error Handling
 
@@ -687,6 +784,7 @@ a failing server (5xx), and a device that is offline never look alike:
 | `unexpectedStatus` | A non-2xx status outside 4xx and 5xx, such as a `3xx` the redirect policy refused |
 | `timeout` | A `408`, or a transport timeout (no response) |
 | `noInternetConnection` | The device is offline or the connection dropped |
+| `serverUnreachable` | DNS could not resolve the host or the server refused the connection |
 
 ```swift
 do {
@@ -732,7 +830,7 @@ may contain user information, so don't log it. `HTTPResponse` prints only its st
 and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
 
 Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
-Timeouts, lost connectivity, `429`, and 5xx statuses count as transient. This is the same rule
+Timeouts, lost connectivity, unreachable hosts, `429`, and 5xx statuses count as transient. This is the same rule
 `NetworkRetryPolicy` and `MutationRetryPolicy.default` use.
 
 Cancelling the calling task always surfaces as `CancellationError`, whether it lands while the request is on
@@ -754,7 +852,7 @@ to tell it apart from a `401`.
 
 ```swift
 switch error.category {
-case .offline, .timedOut: showOfflineBanner()
+case .offline, .serverUnreachable, .timedOut: showOfflineBanner()
 case .unauthorized: promptSignIn()
 case .rateLimited: showTryAgainLater(after: error.retryAfter)
 case .insecureConnection: showInsecureConnectionError()
@@ -798,8 +896,9 @@ let configuration = NetworkClientConfiguration(
 let client = NetworkClient(configuration: configuration)
 ```
 
-- Only `GET`, `HEAD`, `PUT` and `DELETE` are retried. `POST` and `PATCH` are never replayed, even on `429`.
-- Retried failures: `429`, 5xx, timeouts, and lost connectivity. Other 4xx responses and decoding failures
+- `GET`, `HEAD`, `PUT`, `DELETE`, and `OPTIONS` are idempotent by default. `POST`, `PATCH`, and custom methods are not.
+  An endpoint may opt an operation such as a server-deduplicated sync `POST` into retries with `isIdempotent`.
+- Retried failures: `429`, 5xx, timeouts, lost connectivity, and unreachable hosts. Other 4xx responses and decoding failures
   are reported immediately.
 - Waits follow a `BackoffPolicy`: exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is
   honored (the wait is at least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.

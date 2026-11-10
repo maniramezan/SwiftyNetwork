@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("Successful response access")
+@Suite("Successful response access", .serialized)
 struct DecodedResponseTests {
     private let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
 

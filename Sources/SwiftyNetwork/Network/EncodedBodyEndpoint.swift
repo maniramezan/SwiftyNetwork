@@ -16,6 +16,10 @@ struct EncodedBodyEndpoint: NetworkEndpoint {
     var authorization: AuthorizationType { wrapped.authorization }
     var usesAuthorizationProvider: Bool { wrapped.usesAuthorizationProvider }
     var body: Data? { encodedBody }
+    var operationName: String? { wrapped.operationName }
+    var timeout: Duration? { wrapped.timeout }
+    var cachePolicy: URLRequest.CachePolicy? { wrapped.cachePolicy }
+    var isIdempotent: Bool { wrapped.isIdempotent }
     var headers: [String: String]? { HTTPHeaders.addingJSONContentTypeIfMissing(to: wrapped.headers) }
 }
 

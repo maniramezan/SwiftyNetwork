@@ -5,13 +5,14 @@ internal import SwiftCommons
 ///
 /// ``NetworkClient`` refreshes authorization once on 401 (up to
 /// ``NetworkClientConfiguration/maxAuthRefreshAttempts``) and retries the
-/// original request with the new credentials. It does not retry transient
-/// failures unless you opt in with ``NetworkClientConfiguration/retryPolicy``,
-/// which retries idempotent requests on `429`, 5xx, timeouts and lost
-/// connectivity (see ``NetworkRetryPolicy``).
+/// original request with the new credentials. A provider can extend that to a `403`
+/// with ``AuthorizationProvider/shouldRefreshAuthorization(after:)``. It does not retry
+/// transient failures unless you opt in with ``NetworkClientConfiguration/retryPolicy``,
+/// which retries idempotent requests on `429`, 5xx, timeouts, lost connectivity and an
+/// unreachable server (see ``NetworkRetryPolicy``).
 ///
 /// For transports it cannot model, such as streaming, use
-/// ``sendAuthorized(_:errorBody:transport:)`` to get the same authorization and refresh behavior.
+/// ``sendAuthorized(_:operationName:errorBody:transport:)`` to get the same authorization and refresh behavior.
 ///
 /// Example:
 /// ```swift
@@ -149,12 +150,13 @@ public actor NetworkClient: APIClient {
             requestID: requestID,
             url: url,
             method: endpoint.method,
-            attempt: attempt
+            attempt: attempt,
+            operationName: endpoint.operationName
         )
         await trace.start()
 
         var request = endpoint.makeUnauthenticatedURLRequest(url: url)
-        request.timeoutInterval = configuration.timeout.timeInterval
+        request.timeoutInterval = (endpoint.timeout ?? configuration.timeout).timeInterval
         let providerAuthorization: AuthorizationType?
         do {
             providerAuthorization = try await applyAuthorization(
@@ -196,7 +198,10 @@ public actor NetworkClient: APIClient {
             )
         }
 
-        if httpResponse.statusCode == 401 {
+        if Self.isAuthorizationRejection(
+            statusCode: httpResponse.statusCode,
+            providerAuthorization: providerAuthorization
+        ) {
             return try await handleUnauthorized(
                 endpoint: endpoint,
                 responseType: responseType,
@@ -247,7 +252,7 @@ public actor NetworkClient: APIClient {
     ) async throws -> DecodedResponse<T> {
         guard let policy = configuration.retryPolicy,
             retryAttempt < policy.maxRetries,
-            policy.shouldRetry(error, method: endpoint.method)
+            policy.shouldRetry(error, isIdempotent: endpoint.isIdempotent)
         else {
             await trace.failed(error)
             throw error
@@ -293,7 +298,7 @@ public actor NetworkClient: APIClient {
         do {
             (data, response) = try await session.data(for: request, delegate: delegate)
         } catch {
-            let mapped = NetworkError.transportError(error)
+            let mapped = NetworkError.transportError(error, session: session)
             if mapped is CancellationError {
                 Logger.info("Request cancelled")
             } else {
@@ -314,7 +319,7 @@ public actor NetworkClient: APIClient {
     ///
     /// - Returns: The provider-supplied authorization that was applied, or `nil`
     ///   when the endpoint's own authorization was used. Only provider
-    ///   authorization is eligible for refresh after a `401`.
+    ///   authorization is eligible for refresh after a `401` or an accepted `403`.
     /// - Throws: Whatever ``AuthorizationProvider/currentAuthorization()`` throws.
     private func applyAuthorization(
         to request: inout URLRequest,
@@ -417,15 +422,22 @@ public actor NetworkClient: APIClient {
         )
     }
 
-    /// Runs the `401` refresh-once flow shared by endpoint requests and
-    /// ``sendAuthorized(_:errorBody:transport:)``: decide, refresh, then wait
+    /// Whether a response should go through the refresh flow: every `401`, and a `403` to a
+    /// request the provider authorized, which the provider may still decline to refresh.
+    static func isAuthorizationRejection(statusCode: Int, providerAuthorization: AuthorizationType?) -> Bool {
+        statusCode == 401 || (statusCode == 403 && providerAuthorization != nil)
+    }
+
+    /// Runs the refresh-once flow shared by endpoint requests and
+    /// ``sendAuthorized(_:operationName:errorBody:transport:)``: decide, refresh, then wait
     /// ``NetworkClientConfiguration/authRefreshDelay``.
     ///
     /// Returns normally when the caller should replay the request with the newer authorization.
     ///
-    /// - Throws: ``NetworkError/unauthorized(_:)`` when no refresh is possible or the provider
-    ///   declined it, ``NetworkError/authorizationRefreshFailed(underlying:)`` when the provider
-    ///   threw, or `CancellationError` when the calling task was cancelled.
+    /// - Throws: The status error for `response`, ``NetworkError/unauthorized(_:)`` or
+    ///   ``NetworkError/forbidden(_:)``, when no refresh is possible or the provider declined it;
+    ///   ``NetworkError/authorizationRefreshFailed(underlying:)`` when the provider threw; or
+    ///   `CancellationError` when the calling task was cancelled.
     func refreshAfterUnauthorized(
         response: HTTPResponse,
         rejectedAuthorization: AuthorizationType?,
@@ -437,12 +449,15 @@ public actor NetworkClient: APIClient {
             refreshAttempt < configuration.maxAuthRefreshAttempts
         else {
             Logger.warning("Cannot refresh authorization — no provider or max refresh attempts reached")
-            throw NetworkError.unauthorized(response)
+            throw HTTPStatusValidator.error(for: response)
         }
 
         guard await provider.shouldRefreshAuthorization(after: response) else {
-            Logger.info("Authorization provider declined to refresh for this 401", category: .auth)
-            throw NetworkError.unauthorized(response)
+            Logger.info(
+                "Authorization provider declined to refresh for this \(response.statusCode)",
+                category: .auth
+            )
+            throw HTTPStatusValidator.error(for: response)
         }
 
         Logger.info("Attempting to refresh authorization", category: .auth)

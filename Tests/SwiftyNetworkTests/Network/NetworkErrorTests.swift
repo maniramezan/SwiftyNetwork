@@ -168,18 +168,19 @@ func testMapURLErrorClassifiesCodes() {
     #expect(NetworkError.mapURLError(URLError(.badURL)).classification == .underlying)
 }
 
-@Test("Underlying URL errors keep their localized description")
-func testUnderlyingErrorKeepsLocalizedDescription() {
+@Test("Unreachable hosts have a retryable server-unreachable classification")
+func testUnreachableHostClassification() throws {
     let urlError = URLError(.cannotFindHost)
     let error = NetworkError.mapURLError(urlError)
 
-    // Reading through `any Error` must preserve the original localized message.
-    #expect(error.errorDescription?.contains(urlError.localizedDescription) == true)
-    if case .underlying(let underlying) = error {
-        #expect(underlying.localizedDescription == urlError.localizedDescription)
-    } else {
-        Issue.record("Expected .underlying, got \(error)")
+    guard case .serverUnreachable(let underlying) = error else {
+        Issue.record("Expected .serverUnreachable, got \(error)")
+        return
     }
+    #expect(underlying.code == .cannotFindHost)
+    #expect(error.classification == .serverUnreachable)
+    #expect(error.category == .serverUnreachable)
+    #expect(error.isTransient)
 }
 
 @Test("mapURLError treats connectivity-loss codes as no connection")
@@ -192,14 +193,15 @@ func testMapURLErrorTreatsConnectivityLossAsNoConnection() {
     }
 }
 
-@Test("mapURLError preserves the original URLError for unmapped codes")
-func testMapURLErrorPreservesUnderlyingURLError() throws {
-    guard case .underlying(let underlying) = NetworkError.mapURLError(URLError(.cannotFindHost)) else {
-        Issue.record("Expected .underlying")
-        return
+@Test("mapURLError preserves unreachable-host error codes")
+func testMapURLErrorPreservesUnreachableHostErrorCode() {
+    for code: URLError.Code in [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed] {
+        guard case .serverUnreachable(let underlying) = NetworkError.mapURLError(URLError(code)) else {
+            Issue.record("Expected .serverUnreachable for \(code)")
+            continue
+        }
+        #expect(underlying.code == code)
     }
-    let urlError = try #require(underlying as? URLError)
-    #expect(urlError.code == .cannotFindHost)
 }
 
 @Test("transportError turns a cancelled URLError into CancellationError only when the task is cancelled")

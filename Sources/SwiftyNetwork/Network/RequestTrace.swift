@@ -12,6 +12,7 @@ struct RequestTrace: Sendable {
     let url: URL
     let method: HTTPMethod
     let attempt: Int
+    var operationName: String?
     /// Reset by ``start()``; exposed only so the memberwise initializer can default it.
     var startedAt: ContinuousClock.Instant = .now
 
@@ -19,7 +20,13 @@ struct RequestTrace: Sendable {
     /// itself is excluded from the measured duration.
     mutating func start() async {
         await instrumentation?.requestStarted(
-            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt)
+            NetworkRequestAttempt(
+                requestID: requestID,
+                url: url,
+                method: method,
+                attempt: attempt,
+                operationName: operationName
+            )
         )
         startedAt = .now
     }
@@ -32,7 +39,8 @@ struct RequestTrace: Sendable {
                 method: method,
                 attempt: attempt,
                 statusCode: statusCode,
-                duration: elapsed
+                duration: elapsed,
+                operationName: operationName
             )
         )
     }
@@ -45,7 +53,8 @@ struct RequestTrace: Sendable {
                 method: method,
                 attempt: attempt,
                 duration: elapsed,
-                error: error
+                error: error,
+                operationName: operationName
             )
         )
     }
@@ -53,7 +62,13 @@ struct RequestTrace: Sendable {
     /// Emits `requestRetried` for the attempt that follows this one.
     func retrying() async {
         await instrumentation?.requestRetried(
-            NetworkRequestAttempt(requestID: requestID, url: url, method: method, attempt: attempt + 1)
+            NetworkRequestAttempt(
+                requestID: requestID,
+                url: url,
+                method: method,
+                attempt: attempt + 1,
+                operationName: operationName
+            )
         )
     }
 

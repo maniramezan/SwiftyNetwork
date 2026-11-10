@@ -26,7 +26,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     public private(set) var refreshCallCount = 0
     /// Credentials rejected by the server, in order.
     public private(set) var rejectedAuthorizations: [AuthorizationType] = []
-    /// `401` responses offered to ``shouldRefreshAuthorization(after:)``, in order.
+    /// `401` and `403` responses offered to ``shouldRefreshAuthorization(after:)``, in order.
     public private(set) var inspectedResponses: [HTTPResponse] = []
     private let refreshDecision: (@Sendable (HTTPResponse) -> Bool)?
 
@@ -35,8 +35,8 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     ///   - current: The initial authorization.
     ///   - refreshResult: Whether refresh should succeed. A failed refresh throws ``RefreshFailed``.
     ///   - refreshedAuthorization: Optional replacement after successful refresh.
-    ///   - shouldRefresh: Optional decision for whether a `401` response warrants a refresh.
-    ///     When `nil`, every `401` is refreshed.
+    ///   - shouldRefresh: Optional decision for whether a `401` or `403` response warrants a refresh.
+    ///     When `nil`, `401` responses are refreshed and `403` responses are not.
     public init(
         current: AuthorizationType,
         refreshResult: Bool,
@@ -85,11 +85,11 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
         }
     }
 
-    /// Records the `401` response and applies the scripted decision.
-    /// - Parameter response: The `401` response the server returned.
-    /// - Returns: The scripted decision, or `true` when none was configured.
+    /// Records the `401` or `403` response and applies the scripted decision.
+    /// - Parameter response: The response the server returned.
+    /// - Returns: The scripted decision or, when none was configured, whether the status is `401`.
     public func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
         inspectedResponses.append(response)
-        return refreshDecision?(response) ?? true
+        return refreshDecision?(response) ?? (response.statusCode == 401)
     }
 }

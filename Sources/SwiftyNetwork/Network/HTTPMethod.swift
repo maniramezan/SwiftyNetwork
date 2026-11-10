@@ -47,6 +47,18 @@ public struct HTTPMethod: RawRepresentable, Hashable, Sendable, Codable, Express
     /// The method token.
     public var description: String { rawValue }
 
+    /// Whether the method is idempotent by definition (RFC 9110 §9.2.2): `GET`, `HEAD`,
+    /// `PUT`, `DELETE`, and `OPTIONS`.
+    ///
+    /// `POST`, `PATCH`, and methods SwiftyNetwork does not predefine are not. It is the default
+    /// for ``NetworkEndpoint/isIdempotent``, which decides whether ``NetworkRetryPolicy`` may
+    /// replay a request.
+    public var isIdempotent: Bool {
+        Self.idempotentMethods.contains(self)
+    }
+
+    private static let idempotentMethods: Set<HTTPMethod> = [.get, .head, .put, .delete, .options]
+
     /// Retrieves a resource without a request body.
     public static let get = HTTPMethod(rawValue: "GET")
 

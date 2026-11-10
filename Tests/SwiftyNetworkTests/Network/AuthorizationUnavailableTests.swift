@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("Authorization unavailable")
+@Suite("Authorization unavailable", .serialized)
 struct AuthorizationUnavailableTests {
     private struct SignedOut: Error, Equatable {}
 

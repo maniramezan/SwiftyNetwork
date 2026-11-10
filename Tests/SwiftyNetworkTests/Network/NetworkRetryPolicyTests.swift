@@ -5,12 +5,17 @@ import Testing
 
 @Suite("NetworkRetryPolicy Tests")
 struct NetworkRetryPolicyTests {
-    @Test("Only GET, HEAD, PUT and DELETE are retryable methods")
-    func retryableMethods() {
-        #expect(NetworkRetryPolicy.retryableMethods == [.get, .head, .put, .delete])
+    @Test("GET, HEAD, PUT, DELETE and OPTIONS are idempotent by default")
+    func defaultIdempotency() {
+        for method in [HTTPMethod.get, .head, .put, .delete, .options] {
+            #expect(method.isIdempotent)
+        }
+        for method in [HTTPMethod.post, .patch] {
+            #expect(!method.isIdempotent)
+        }
     }
 
-    @Test("Retries 429, 5xx, timeouts and lost connectivity on idempotent methods")
+    @Test("Retries 429, 5xx, timeouts, lost connectivity and unreachable hosts on idempotent methods")
     func retriesTransientErrorsOnIdempotentMethods() {
         let policy = NetworkRetryPolicy()
         let errors: [NetworkError] = [
@@ -20,10 +25,11 @@ struct NetworkRetryPolicyTests {
             .serverError(.status(503)),
             .timeout(nil),
             .noInternetConnection,
+            .serverUnreachable(URLError(.cannotFindHost)),
         ]
-        for method in [HTTPMethod.get, .head, .put, .delete] {
+        for method in [HTTPMethod.get, .head, .put, .delete, .options] {
             for error in errors {
-                #expect(policy.shouldRetry(error, method: method), "\(method) \(error)")
+                #expect(policy.shouldRetry(error, isIdempotent: method.isIdempotent), "\(method) \(error)")
             }
         }
     }
@@ -43,25 +49,34 @@ struct NetworkRetryPolicyTests {
             .notFound(.status(404)),
             .timeout(nil),
             .noInternetConnection,
+            .serverUnreachable(URLError(.cannotConnectToHost)),
             .decodingFailed(underlying: URLError(.badURL)),
             .encodingFailed(underlying: URLError(.badURL)),
             .authorizationRefreshFailed(underlying: URLError(.userAuthenticationRequired)),
             .underlying(URLError(.badURL)),
         ]
         for error in errors {
-            #expect(policy.shouldRetry(error, method: .get) == error.isTransient, "\(error)")
+            #expect(policy.shouldRetry(error, isIdempotent: true) == error.isTransient, "\(error)")
         }
     }
 
-    @Test("Never retries POST, PATCH or OPTIONS, even on 429")
-    func neverRetriesNonIdempotentMethods() {
+    @Test("Never retries a non-idempotent request, even on transient failures")
+    func neverRetriesNonIdempotentRequests() {
         let policy = NetworkRetryPolicy()
-        for method in [HTTPMethod.post, .patch, .options] {
-            #expect(!policy.shouldRetry(.tooManyRequests(.status(429, retryAfter: 1)), method: method))
-            #expect(!policy.shouldRetry(.serverError(.status(503)), method: method))
-            #expect(!policy.shouldRetry(.timeout(nil), method: method))
-            #expect(!policy.shouldRetry(.noInternetConnection, method: method))
+        for error in [
+            NetworkError.tooManyRequests(.status(429, retryAfter: 1)),
+            .serverError(.status(503)),
+            .timeout(nil),
+            .noInternetConnection,
+        ] {
+            #expect(!policy.shouldRetry(error, isIdempotent: false))
         }
+    }
+
+    @Test("An idempotent POST can be retried")
+    func retriesIdempotentPost() {
+        let policy = NetworkRetryPolicy()
+        #expect(policy.shouldRetry(.serverError(.status(503)), isIdempotent: true))
     }
 
     @Test("Does not retry client errors, decoding failures or unclassified errors")
@@ -81,7 +96,7 @@ struct NetworkRetryPolicyTests {
             .underlying(URLError(.cancelled)),
         ]
         for error in errors {
-            #expect(!policy.shouldRetry(error, method: .get), "\(error)")
+            #expect(!policy.shouldRetry(error, isIdempotent: true), "\(error)")
         }
     }
 

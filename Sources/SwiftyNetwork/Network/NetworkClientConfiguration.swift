@@ -56,10 +56,10 @@ public struct NetworkClientConfiguration: Sendable {
     ///
     /// When an endpoint's ``NetworkEndpoint/authorization`` is ``AuthorizationType/none``,
     /// the client asks this provider for authorization and can call it again to
-    /// refresh credentials after a `401` response.
+    /// refresh credentials after a `401` response or a `403` the provider accepts for refresh.
     public var authorizationProvider: (any AuthorizationProvider)?
 
-    /// Maximum number of authorization-refresh attempts after receiving a 401.
+    /// Maximum number of authorization-refresh attempts after a `401` or an accepted `403`.
     ///
     /// This is **not** a general retry policy; see ``retryPolicy`` for retrying
     /// transient failures.
@@ -67,7 +67,7 @@ public struct NetworkClientConfiguration: Sendable {
 
     /// Delay applied before replaying a request after a successful auth refresh.
     ///
-    /// This applies only to the `401` refresh path. It is unrelated to ``retryPolicy``,
+    /// This applies only to the authorization refresh path. It is unrelated to ``retryPolicy``,
     /// which controls backoff for transient failures.
     ///
     /// Set this to `.zero` in tests or when the API can be retried immediately.
@@ -76,10 +76,12 @@ public struct NetworkClientConfiguration: Sendable {
     /// Opt-in retry policy for transient failures of idempotent requests.
     ///
     /// `nil` by default, in which case ``NetworkClient`` never retries a
-    /// transient network, `429` or 5xx failure. When set, `GET`, `HEAD`, `PUT`
-    /// and `DELETE` requests are retried on `429` and 5xx (honoring `Retry-After` on `429` and `503`),
-    /// timeouts and lost connectivity, with jittered exponential backoff.
-    /// `POST` and `PATCH` are never retried. See ``NetworkRetryPolicy``.
+    /// transient network, `429` or 5xx failure. When set, idempotent requests
+    /// (``NetworkEndpoint/isIdempotent``, by default `GET`, `HEAD`, `PUT`, `DELETE` and `OPTIONS`)
+    /// are retried on `429` and 5xx (honoring `Retry-After` on `429` and `503`), timeouts, lost
+    /// connectivity and an unreachable server, with jittered exponential backoff.
+    /// `POST` and `PATCH` are not retried unless the endpoint declares itself idempotent.
+    /// See ``NetworkRetryPolicy``.
     public var retryPolicy: NetworkRetryPolicy?
 
     /// How the client treats HTTP redirects.
@@ -92,7 +94,8 @@ public struct NetworkClientConfiguration: Sendable {
 
     /// The timeout for each request.
     ///
-    /// This value is assigned to each `URLRequest.timeoutInterval` built by the client.
+    /// This value is assigned to each `URLRequest.timeoutInterval` built by the client, unless
+    /// the endpoint sets its own ``NetworkEndpoint/timeout``.
     public var timeout: Duration
 
     /// Observer for request timing, retries, and outcomes.
@@ -110,7 +113,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - decoder: The JSON decoder to use.
     ///   - encoder: The JSON encoder to use.
     ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
-    ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a 401. Defaults to 1.
+    ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a `401` or an accepted `403`. Defaults to 1.
     ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
     ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
     ///   - redirectPolicy: How redirects are followed. Defaults to

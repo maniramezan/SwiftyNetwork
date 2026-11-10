@@ -52,6 +52,15 @@ func response<T: Decodable & Sendable>(
 - ``HTTPMethod`` is a struct, not an enum. The seven predefined methods are unchanged, and
   you can write custom ones as string literals (`let method: HTTPMethod = "PROPFIND"`). A
   `switch` over a method needs a `default` case, and `HTTPMethod.allCases` is gone.
+- Keep each endpoint's ``NetworkEndpoint/baseURL`` explicit. For endpoints sharing a host and
+  common headers, define an app-specific protocol refinement and provide those defaults in its
+  extension; this retains compile-time enforcement while avoiding repeated properties.
+- ``TypedEndpoint`` is available for endpoints with a fixed response type. Use
+  ``APIClient/send(_:)`` or ``APIClient/send(_:body:)`` instead of repeating `responseType:`.
+- An endpoint may also set ``NetworkEndpoint/operationName`` for low-cardinality instrumentation,
+  ``NetworkEndpoint/timeout`` to override the client timeout,
+  ``NetworkEndpoint/cachePolicy`` to control `URLRequest`/`URLCache` behavior, and
+  ``NetworkEndpoint/isIdempotent`` to opt a server-deduplicated `POST` into request retries.
 - `NetworkDataSource` is gone; depend on ``APIClient``.
   `GenericRepository(networkDataSource:localDataSource:)` is `GenericRepository(client:cache:)`.
 
@@ -117,13 +126,17 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
 - ``NetworkErrorClassification`` also gained ``NetworkErrorClassification/clientError(statusCode:)``,
   ``NetworkErrorClassification/unexpectedStatus(statusCode:)``,
   ``NetworkErrorClassification/authorizationUnavailable``, and
+  ``NetworkErrorClassification/serverUnreachable`` and
   ``NetworkErrorClassification/secureConnectionFailed``. To read a status code, use
   ``NetworkError/statusCode`` or `error.response?.statusCode`, not the classification.
+- **Behavior change:** host lookup and connection-refused transport errors are now
+  ``NetworkError/serverUnreachable(_:)`` and transient. `NetworkRetryPolicy` and
+  `MutationRetryPolicy` can retry them; use ``NetworkError/category`` for user-facing decisions.
 - `NetworkError.unauthorized()` with no argument is gone, because the case now carries the
   response. Build one with `NetworkError.unauthorized(HTTPResponse(statusCode: 401))`. This also
   applies to code written against the unreleased `feature/retry-and-mutation-failures` branch.
 - To choose what to show the user, use the new ``NetworkError/category``
-  (``NetworkErrorCategory``: `offline`, `timedOut`, `unauthorized`, `rateLimited`, `rejected`,
+  (``NetworkErrorCategory``: `offline`, `serverUnreachable`, `timedOut`, `unauthorized`, `rateLimited`, `rejected`,
   `serverError`, `insecureConnection`, `other`) instead of keeping your own mapping.
   ``NetworkError/authorizationUnavailable(underlying:)`` is in `unauthorized`, with the `401` cases,
   because both mean the user must sign in again. Use ``NetworkError/classification`` to tell them apart.
@@ -133,14 +146,14 @@ Every ``NetworkError`` case that comes from an HTTP status carries a non-optiona
   ``NetworkErrorClassification/secureConnectionFailed`` instead of `underlying`, and its category is
   `insecureConnection`.
 - To map an error thrown outside the client, such as one from a stream returned by
-  ``NetworkClient/sendAuthorized(_:errorBody:transport:)``, use ``NetworkError/mapTransportError(_:)``.
+  ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)``, use ``NetworkError/mapTransportError(_:session:)``.
 - **Behavior change:** decoding ``EmptyResponse`` ignores the body. In 1.x, a `2xx` with a body that
   was not JSON, such as `OK`, failed with `decodingFailed`, so ``NetworkClient/request(_:)`` and
   ``MutationQueue`` reported a failure for a request the server had applied.
 
 ```swift
 switch error.category {
-case .offline, .timedOut: showOfflineBanner()
+case .offline, .serverUnreachable, .timedOut: showOfflineBanner()
 case .unauthorized: promptSignIn()
 case .rateLimited: showTryAgainLater(after: error.retryAfter)
 case .insecureConnection: showInsecureConnectionError()
@@ -162,14 +175,15 @@ case .rejected, .serverError, .other: showGenericError()
 - ``OAuthAuthorizationProvider``'s refresh handler is `() async throws -> String`. Throw
   instead of returning `nil`; the client surfaces the error as
   ``NetworkError/authorizationRefreshFailed(underlying:)``.
-- ``AuthorizationProvider/shouldRefreshAuthorization(after:)`` is new (default `true`), so
-  a provider can decline to refresh a `401` that a new token cannot fix.
+- ``AuthorizationProvider/shouldRefreshAuthorization(after:)`` lets a provider decide whether
+  to refresh after a `401`, or after a provider-authorized `403`. The default refreshes `401`
+  and declines `403`; override it when an API uses legacy `403` codes for expired tokens.
 - ``AuthorizationType`` is no longer `Codable`.
 - To skip a refresh that another request already did, call
   ``AuthorizationProvider/isCurrentAuthorization(_:)`` with `rejected` first.
 - To send a request that ``NetworkClient`` cannot model, such as a Server-Sent Events stream,
   with the same authorization and refresh-once behavior, use
-  ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` instead of calling the provider yourself.
+  ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)`` instead of calling the provider yourself.
   Use it only for your own API; the provider's credentials are applied to any URL.
 - An endpoint that must not carry the user's credentials, such as sign-in, token refresh, or a
   public endpoint, returns `false` from ``NetworkEndpoint/usesAuthorizationProvider``. In 1.x there
@@ -222,7 +236,7 @@ func refreshSucceeded(rejecting rejected: AuthorizationType) async throws -> Boo
 }
 ```
 
-Prefer ``NetworkClient/sendAuthorized(_:errorBody:transport:)`` to hand-written wrappers like this one.
+Prefer ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)`` to hand-written wrappers like this one.
 
 ### Retries
 
@@ -239,6 +253,11 @@ NetworkRetryPolicy(
     backoff: BackoffPolicy(baseDelay: .seconds(1), maxDelay: .seconds(30), maxRetryAfter: .seconds(60))
 )
 ```
+
+- `GET`, `HEAD`, `PUT`, `DELETE`, and `OPTIONS` are idempotent by default. Other methods may
+  opt in through ``NetworkEndpoint/isIdempotent`` only when the server guarantees replay safety.
+  DNS and connection-refused errors now map to ``NetworkError/serverUnreachable(_:)`` and are
+  considered transient alongside offline errors, timeouts, 429, and 5xx statuses.
 
 - Both retry policies take a ``BackoffPolicy``:
 
@@ -274,7 +293,7 @@ MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
 - ``MutationKey`` conforms to `RawRepresentable` and encodes as a raw JSON string instead
   of a keyed container.
 - ``MutationFailureReason`` has a ``MutationFailureReason/category`` (`offline`, `timedOut`,
-  `unauthorized`, `rateLimited`, `rejected`, `serverError`, `insecureConnection`, `cancelled`,
+  `serverUnreachable`, `unauthorized`, `rateLimited`, `rejected`, `serverError`, `insecureConnection`, `cancelled`,
   `other`) for choosing what to show.
 - ``MutationStatus`` gained ``MutationStatus/waitingForConnectivity``, so exhaustive switches over it
   need the case. Only a queue created with `waitForConnectivity`
@@ -285,6 +304,12 @@ MutationRetryPolicy(maxRetries: 5, shouldRetry: isRetryable)
   ``MutationQueue/MutationEvent/response``.
 - ``MutationRequest/addingIdempotencyKey(_:header:)`` stores an idempotency key with the request, so
   every replay of a `POST` or `PATCH` sends the same one.
+- ``MutationQueue/enqueueAndWait(_:key:)`` waits for the key's terminal outcome, returning its
+  successful response or throwing its ``MutationFailureReason``. It subscribes before enqueueing,
+  so callers no longer need to hand-roll an events subscription race.
+- ``FileMutationStore`` provides built-in durable file persistence. Use an Application Support
+  directory rather than the system caches directory, and choose file protection for sensitive
+  request bodies. ``DiskCache`` is available for file-backed cache values; it is not encrypted.
 - ``MutationRequest`` keeps an endpoint's ``NetworkEndpoint/usesAuthorizationProvider`` and encodes it.
   Payloads saved without it decode as `true`.
 
@@ -314,6 +339,15 @@ actor DiskCache<Value: Sendable>: Cache {
   repository: `GenericRepository(client: client, cache: InMemoryCache<User>())`.
 - ``LayeredCache`` has one initializer, `init(memoryCache:persistentCache:)`, whose persistent
   layer is optional.
+- ``DiskCache`` is a built-in Codable file cache with optional byte and idle-time limits; use a
+  custom ``Cache`` for database, encryption, or app-specific storage.
+- ``CachePolicy`` also supports ``CachePolicy/reloadElseReturnCache`` and
+  ``CachePolicy/returnCacheAndRevalidate(maxAge:)``. Exhaustive policy switches must handle them.
+  ``Repository/fetchResult(using:cacheKey:policy:)`` returns a ``RepositoryResult`` with source
+  and fetch timestamp; the existing ``Repository/fetch(using:cacheKey:policy:)`` still returns
+  only the entity.
+- ``SingleFlightCache`` accepts a `maxAge` when reading a cached value, so a long-lived entry
+  can be refetched after its freshness window.
 - `InMemoryCache.removeExpiredEntries(maxAge:)` is
   ``InMemoryCache/removeEntries(olderThan:)``.
 - `CacheKey.user(id, resource: r)` is gone. Use `CacheKey(components: ["user", id, r])`,

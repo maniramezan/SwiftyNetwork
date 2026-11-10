@@ -22,6 +22,16 @@ public struct RecordedRequest: NetworkEndpoint, Sendable, Equatable {
     public let authorization: AuthorizationType
     /// The pre-encoded request body, if any.
     public let body: Data?
+    /// Whether the endpoint lets the client's authorization provider authorize it.
+    public let usesAuthorizationProvider: Bool
+    /// The endpoint's operation name, if any.
+    public let operationName: String?
+    /// The endpoint's own timeout, if any.
+    public let timeout: Duration?
+    /// The endpoint's own cache policy, if any.
+    public let cachePolicy: URLRequest.CachePolicy?
+    /// Whether the endpoint is safe to send more than once.
+    public let isIdempotent: Bool
 
     /// Captures `endpoint`'s fields.
     ///
@@ -34,6 +44,11 @@ public struct RecordedRequest: NetworkEndpoint, Sendable, Equatable {
         self.headers = endpoint.headers
         self.authorization = endpoint.authorization
         self.body = endpoint.body
+        self.usesAuthorizationProvider = endpoint.usesAuthorizationProvider
+        self.operationName = endpoint.operationName
+        self.timeout = endpoint.timeout
+        self.cachePolicy = endpoint.cachePolicy
+        self.isIdempotent = endpoint.isIdempotent
     }
 
     /// Decodes ``body`` as JSON.

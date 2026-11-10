@@ -191,6 +191,36 @@ struct NetworkClientRetryTests {
         #expect(stub.requests.count == 5)
     }
 
+    @Test("An endpoint can opt an idempotent POST into retries")
+    func retriesIdempotentPost() async throws {
+        struct SyncEndpoint: NetworkEndpoint {
+            let baseURL = "https://api.test.com"
+            let path = "/sync"
+            let method: HTTPMethod = .post
+            let isIdempotent = true
+            var queryItems: [URLQueryItem]? {
+                [URLQueryItem(name: "test-id", value: "retry-idempotent-post")]
+            }
+        }
+
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        stub.setResponses(
+            [.status(503), .success(try JSONEncoder().encode(user))],
+            for: "retry-idempotent-post"
+        )
+        let policy = NetworkRetryPolicy(
+            maxRetries: 1,
+            backoff: BackoffPolicy(baseDelay: .zero, maxDelay: .zero, jitterRange: 0...0, maxRetryAfter: .zero)
+        )
+        let client = makeClient(stub, retryPolicy: policy)
+
+        let result = try await client.request(SyncEndpoint(), responseType: TestUser.self)
+
+        #expect(result == user)
+        #expect(stub.requests.count == 2)
+    }
+
     @Test("PUT and DELETE are retried")
     func retriesPutAndDelete() async throws {
         for method in [HTTPMethod.put, .delete] {
