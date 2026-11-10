@@ -70,6 +70,8 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 - ``AuthorizationType``
 - ``AuthorizationProvider``
 - ``OAuthAuthorizationProvider``
+- ``AuthorizationRefreshCoalescer``
+- ``ReentrantRefreshError``
 
 ### Security
 
