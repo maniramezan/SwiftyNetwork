@@ -41,6 +41,8 @@ public enum MutationStatus: Sendable, Equatable {
 /// credentials expired, or the app cancelled the mutation. The HTTP ``response``, when
 /// there is one, carries the status, headers, and body, for example an API error code.
 ///
+/// It is also the error ``MutationQueue/enqueueAndWait(_:key:)`` throws.
+///
 /// Example:
 /// ```swift
 /// for await event in await queue.events() {
@@ -48,8 +50,8 @@ public enum MutationStatus: Sendable, Equatable {
 ///     switch reason.category {
 ///     case .cancelled:
 ///         break
-///     case .offline, .timedOut:
-///         showBanner("You're offline. Your like wasn't saved.")
+///     case .offline, .serverUnreachable, .timedOut:
+///         showBanner("Can't reach the server. Your like wasn't saved.")
 ///     case .rejected:
 ///         rollBackOptimisticLike()
 ///         showError(try? reason.response?.decodeBody(APIError.self))
@@ -60,7 +62,7 @@ public enum MutationStatus: Sendable, Equatable {
 ///     }
 /// }
 /// ```
-public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertible {
+public struct MutationFailureReason: Error, Sendable, Equatable, CustomStringConvertible {
     /// What kind of failure ended a mutation.
     public enum Category: Sendable, Equatable {
         /// ``MutationQueue/cancel(_:)`` or ``MutationQueue/cancelAll()`` ended the mutation.
@@ -70,6 +72,10 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
         /// The device had no usable connection
         /// (``NetworkError/noInternetConnection``) on the last attempt.
         case offline
+
+        /// The device was online but the server could not be reached
+        /// (``NetworkError/serverUnreachable(_:)``) on the last attempt.
+        case serverUnreachable
 
         /// The request timed out (``NetworkError/timeout(_:)``), at the transport layer
         /// or with a `408`. The server may or may not have processed it.
@@ -155,6 +161,7 @@ public struct MutationFailureReason: Sendable, Equatable, CustomStringConvertibl
         }
         switch error.category {
         case .offline: return .offline
+        case .serverUnreachable: return .serverUnreachable
         case .timedOut: return .timedOut
         case .unauthorized: return .unauthorized
         case .rateLimited: return .rateLimited

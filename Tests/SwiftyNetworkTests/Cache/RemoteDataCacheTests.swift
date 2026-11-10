@@ -3,7 +3,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("RemoteDataCache Tests")
+@Suite("RemoteDataCache Tests", .serialized)
 struct RemoteDataCacheTests {
 
     private func makeURL(testId: String) -> URL {

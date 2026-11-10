@@ -1,4 +1,5 @@
 import Foundation
+import TestCommons
 import Testing
 
 @testable import SwiftyNetwork
@@ -123,6 +124,56 @@ func testRepositoryPropagatesNetworkError() async {
     } throws: { error in
         error is TestRepositoryError
     }
+}
+
+@Test("reloadElseReturnCache reports cached data and its original timestamp after a failure")
+func testRepositoryReportsCacheFallback() async throws {
+    let cache = InMemoryCache<TestUser>()
+    let key: CacheKey = "reload-else-cache"
+    let cached = TestUser(id: "cached", name: "Saved", email: "saved@example.com")
+    let written = Date(timeIntervalSince1970: 1_000)
+    await cache.setEntry(CacheEntry(cached, timestamp: written), forKey: key)
+    let network = StubUserClient(result: .failure(TestRepositoryError.networkFailure))
+    let repository = GenericRepository(client: network, cache: cache)
+
+    let result = try await repository.fetchResult(
+        using: TestEndpoint(),
+        cacheKey: key,
+        policy: .reloadElseReturnCache
+    )
+
+    #expect(result.value == cached)
+    #expect(result.source == .cache)
+    #expect(result.timestamp == written)
+    #expect(result.age(at: Date(timeIntervalSince1970: 1_060)) == .seconds(60))
+}
+
+@Test("returnCacheAndRevalidate returns stale data while refreshing it in the background")
+func testRepositoryStaleWhileRevalidate() async throws {
+    let cache = InMemoryCache<TestUser>()
+    let key: CacheKey = "stale-while-revalidate"
+    let stale = TestUser(id: "stale", name: "Old", email: "old@example.com")
+    let fresh = TestUser(id: "fresh", name: "New", email: "new@example.com")
+    let written = Date(timeIntervalSince1970: 1_000)
+    await cache.setEntry(CacheEntry(stale, timestamp: written), forKey: key)
+    let network = StubUserClient(result: .success(fresh))
+    let repository = GenericRepository(client: network, cache: cache)
+
+    let result = try await repository.fetchResult(
+        using: TestEndpoint(),
+        cacheKey: key,
+        policy: .returnCacheAndRevalidate(maxAge: .seconds(60))
+    )
+    _ = try await waitUntil(
+        timeout: .seconds(5),
+        operation: { await cache.value(forKey: key) },
+        matching: { $0 == fresh }
+    )
+
+    #expect(result.value == stale)
+    #expect(result.source == .cache)
+    #expect(result.timestamp == written)
+    #expect(await network.requestCount == 1)
 }
 
 private enum TestRepositoryError: Error {

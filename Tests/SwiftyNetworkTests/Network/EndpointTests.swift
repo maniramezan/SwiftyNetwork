@@ -109,6 +109,26 @@ func testEndpointInvalidBaseURL() throws {
     }
 }
 
+@Test("Endpoint request options override cache policy and timeout defaults")
+func testEndpointRequestOptions() throws {
+    struct E: NetworkEndpoint {
+        let baseURL = "https://api.test.com"
+        let path = "/balance"
+        let method: HTTPMethod = .post
+        let operationName: String? = "balance.refresh"
+        let timeout: Duration? = .seconds(12)
+        let cachePolicy: URLRequest.CachePolicy? = .reloadIgnoringLocalCacheData
+        let isIdempotent = true
+    }
+
+    let request = try E().makeURLRequest()
+
+    #expect(request.timeoutInterval == 12)
+    #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+    #expect(E().operationName == "balance.refresh")
+    #expect(E().isIdempotent)
+}
+
 @Test("Endpoint normalizes repeated leading slashes without changing the host")
 func testEndpointRepeatedLeadingSlashes() throws {
     let url = try EndpointURLBuilder.url(

@@ -1,4 +1,5 @@
 import Foundation
+internal import SwiftCommons
 
 /// A `Codable`, replayable description of a single network mutation.
 ///
@@ -36,8 +37,10 @@ import Foundation
 public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     /// The schema version this library writes and the newest it can read.
     ///
-    /// Version 2 added ``usesAuthorizationProvider``. Version 1 payloads decode with it `true`.
-    public static let version = 2
+    /// Version 2 added ``usesAuthorizationProvider``; version 1 payloads decode with it `true`.
+    /// Version 3 added ``operationName``, ``timeout`` and ``isIdempotent``; older payloads decode
+    /// with no name, no timeout, and the method's idempotency.
+    public static let version = 3
 
     /// The base URL for the API.
     public var baseURL: String
@@ -58,6 +61,18 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     /// that opted out.
     public var usesAuthorizationProvider: Bool
 
+    /// A stable name for instrumentation events, as ``NetworkEndpoint/operationName``.
+    public var operationName: String?
+
+    /// The request's own timeout, as ``NetworkEndpoint/timeout``.
+    public var timeout: Duration?
+
+    /// Whether the request is safe to send more than once, as ``NetworkEndpoint/isIdempotent``.
+    ///
+    /// ``MutationQueue`` retries a mutation either way; this only matters to a
+    /// ``NetworkRetryPolicy`` on the queue's client.
+    public var isIdempotent: Bool
+
     /// Always ``AuthorizationType/none``: the queue's client authorizes mutations
     /// through its ``AuthorizationProvider``.
     public var authorization: AuthorizationType { .none }
@@ -73,6 +88,10 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
     ///   - body: The request body, pre-encoded. Defaults to `nil`.
     ///   - usesAuthorizationProvider: Whether the client's ``AuthorizationProvider`` authorizes
     ///     the request. Defaults to `true`.
+    ///   - operationName: A stable name for instrumentation events. Defaults to `nil`.
+    ///   - timeout: The request's own timeout. Defaults to `nil`, which uses the client's.
+    ///   - isIdempotent: Whether the request is safe to send more than once. Defaults to `nil`,
+    ///     which uses ``HTTPMethod/isIdempotent`` of `method`.
     public init(
         baseURL: String,
         path: String,
@@ -80,7 +99,10 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         queryItems: [URLQueryItem]? = nil,
         headers: [String: String]? = nil,
         body: Data? = nil,
-        usesAuthorizationProvider: Bool = true
+        usesAuthorizationProvider: Bool = true,
+        operationName: String? = nil,
+        timeout: Duration? = nil,
+        isIdempotent: Bool? = nil
     ) {
         self.baseURL = baseURL
         self.path = path
@@ -89,12 +111,16 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
         self.headers = headers
         self.body = body
         self.usesAuthorizationProvider = usesAuthorizationProvider
+        self.operationName = operationName
+        self.timeout = timeout
+        self.isIdempotent = isIdempotent ?? method.isIdempotent
     }
 
     /// Captures an existing endpoint's fields into a replayable, `Codable` value.
     ///
     /// The endpoint's ``NetworkEndpoint/authorization`` is not captured; see the
-    /// type-level documentation.
+    /// type-level documentation. Its ``NetworkEndpoint/cachePolicy`` is not captured
+    /// either, because it does not apply to a mutation.
     ///
     /// - Parameter endpoint: The endpoint to capture.
     public init(endpoint: any NetworkEndpoint) {
@@ -106,7 +132,10 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
             queryItems: endpoint.queryItems,
             headers: endpoint.headers,
             body: endpoint.body,
-            usesAuthorizationProvider: endpoint.usesAuthorizationProvider
+            usesAuthorizationProvider: endpoint.usesAuthorizationProvider,
+            operationName: endpoint.operationName,
+            timeout: endpoint.timeout,
+            isIdempotent: endpoint.isIdempotent
         )
     }
 
@@ -137,7 +166,10 @@ public struct MutationRequest: NetworkEndpoint, Codable, Equatable, Sendable {
             queryItems: endpoint.queryItems,
             headers: headers,
             body: encodedBody,
-            usesAuthorizationProvider: endpoint.usesAuthorizationProvider
+            usesAuthorizationProvider: endpoint.usesAuthorizationProvider,
+            operationName: endpoint.operationName,
+            timeout: endpoint.timeout,
+            isIdempotent: endpoint.isIdempotent
         )
     }
 
@@ -198,6 +230,7 @@ extension MutationRequest {
 extension MutationRequest {
     private enum CodingKeys: String, CodingKey {
         case version, baseURL, path, method, queryItems, headers, body, usesAuthorizationProvider
+        case operationName, timeoutSeconds, isIdempotent
     }
 
     /// `URLQueryItem` does not conform to `Codable` on all supported
@@ -240,6 +273,9 @@ extension MutationRequest {
         self.body = try container.decodeIfPresent(Data.self, forKey: .body)
         self.usesAuthorizationProvider =
             try container.decodeIfPresent(Bool.self, forKey: .usesAuthorizationProvider) ?? true
+        self.operationName = try container.decodeIfPresent(String.self, forKey: .operationName)
+        self.timeout = try container.decodeIfPresent(Double.self, forKey: .timeoutSeconds).map { .seconds($0) }
+        self.isIdempotent = try container.decodeIfPresent(Bool.self, forKey: .isIdempotent) ?? method.isIdempotent
     }
 
     /// Encodes the request with the current schema ``version``.
@@ -255,5 +291,8 @@ extension MutationRequest {
         try container.encodeIfPresent(headers, forKey: .headers)
         try container.encodeIfPresent(body, forKey: .body)
         try container.encode(usesAuthorizationProvider, forKey: .usesAuthorizationProvider)
+        try container.encodeIfPresent(operationName, forKey: .operationName)
+        try container.encodeIfPresent(timeout?.timeInterval, forKey: .timeoutSeconds)
+        try container.encode(isIdempotent, forKey: .isIdempotent)
     }
 }

@@ -24,6 +24,7 @@ Sources/SwiftyNetwork/
 ├── Logger.swift              # Internal logging (SwiftCommons LibraryLogger, privacy-aware)
 ├── Network/
 │   ├── NetworkEndpoint.swift        # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
+│   ├── TypedEndpoint.swift           # Endpoint with its associated response type
 │   ├── APIClient.swift              # APIClient protocol (response(for:) requirement) + request conveniences
 │   ├── DecodedResponse.swift        # Decoded value + HTTPResponse returned by response(for:responseType:)
 │   ├── HTTPResponse.swift           # Status, headers, body (+ Retry-After) for successes and NetworkError
@@ -49,15 +50,18 @@ Sources/SwiftyNetwork/
 ├── Cache/
 │   ├── Cache.swift                  # Cache<Value> protocol, CacheEntry, value/setValue conveniences
 │   ├── CacheKey.swift               # Hashable, string-literal key with factories
-│   ├── CachePolicy.swift            # Strategy enum (cacheFirst, reload, expiration)
+│   ├── CachePolicy.swift            # Cache-first, reload, expiry, fallback, revalidation policies
 │   ├── LRUStorage.swift             # Internal: O(1) LRU dictionary (value type)
 │   ├── InMemoryCache.swift          # Actor over LRUStorage with timestamps
+│   ├── DiskCache.swift              # Codable file cache with byte and idle-time limits
 │   ├── LayeredCache.swift           # Memory + persistent with promotion
 │   ├── CacheOperationGate.swift     # Internal: FIFO gate serializing compound cache ops
 │   ├── SingleFlightCache.swift      # Coalesces concurrent same-key fetches
 │   └── RemoteDataCache.swift        # URL-keyed byte cache on top of SingleFlightCache
 ├── Repository/
-│   └── Repository.swift             # Repository<Entity> protocol, GenericRepository (client + any Cache)
+│   ├── Repository.swift             # Repository<Entity> protocol, GenericRepository (client + any Cache)
+│   ├── RepositoryResult.swift       # Value + source + fetch timestamp
+│   └── FetchCoalescer.swift         # Same-key repository network request coalescing
 └── Mutation/
     ├── MutationQueue.swift          # Actor: enqueue, background retry, coalescing, status via AsyncStream
     ├── MutationRequest.swift        # Codable NetworkEndpoint value type (endpoint + body), replayable
@@ -65,7 +69,8 @@ Sources/SwiftyNetwork/
     ├── MutationStatus.swift         # pending/retrying/succeeded/failed + MutationFailureReason (category: offline/rejected/...)
     ├── MutationRetryPolicy.swift    # Exponential backoff + jitter (capped), transient classification
     ├── MutationStore.swift          # Pluggable persistence protocol
-    └── InMemoryMutationStore.swift  # Default in-memory MutationStore
+    ├── InMemoryMutationStore.swift  # Default in-memory MutationStore
+    └── FileMutationStore.swift      # Durable file-backed MutationStore
 
 Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
 ├── MockAPIClient.swift              # Scriptable APIClient that records requests
@@ -244,6 +249,9 @@ GenericRepository.fetch(endpoint, cacheKey, policy) →
   [.returnCacheElseLoad]        → cache hit? return : fetch + cache
   [.reloadIgnoringCache]        → always fetch + cache
   [.returnCacheIfNotExpired]    → cache fresh? return : fetch + cache
+  [.reloadElseReturnCache]      → fetch + cache, or return cache on failure
+  [.returnCacheAndRevalidate]   → return cache; refresh stale data in background
+  fetchResult                   → value + source + fetch timestamp; same-key network loads coalesce
 ```
 
 ### Mutation Flow
@@ -256,6 +264,7 @@ MutationQueue.enqueue(request, key) → store.save (coalescing point) → return
                               → failure? → retryable && attempts left? → .retrying → backoff → retry
                                         ↳ else → removeIfCurrent(request) → .failed
                                               ↳ store changed? → process replacement next instead
+MutationQueue.enqueueAndWait(request, key) → subscribe before enqueue → response or failure reason
 ```
 
 ### Cache Hierarchy
@@ -271,18 +280,24 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 
 ### Key Design Points
 
-- `NetworkEndpoint` is the only endpoint protocol (has defaults, used by NetworkClient)
+- `NetworkEndpoint` is the request protocol; `TypedEndpoint` binds the response type for `APIClient.send(_:)`
+- Keep `NetworkEndpoint.baseURL` required. For shared host/headers, refine the protocol and provide defaults in the
+  refinement extension (see its DocC example); endpoints for CDNs and third parties can override them
+- Endpoints may set `operationName` for low-cardinality instrumentation, `timeout`, `cachePolicy`, and
+  `isIdempotent`; only opt a non-idempotent HTTP method in when the server guarantees safe replay
 - `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
 - Use `any Cache<T>` for type erasure; there is no `AnyCache`. Never add a separate timestamp read:
   `entry(forKey:)` keeps the value and timestamp consistent
 - `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: .zero` in tests
-- `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on 429/5xx/timeout/offline
-  (`NetworkClient.retryOrFail`). Never retry POST/PATCH. Use `NetworkRetryPolicy.immediate()` in tests
+- `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on
+  429/5xx/timeout/offline/server-unreachable (`NetworkClient.retryOrFail`). `GET`/`HEAD`/`PUT`/`DELETE`/`OPTIONS`
+  are idempotent by default; endpoints can explicitly opt in or out. Use `NetworkRetryPolicy.immediate()` in tests
 - 429 is `NetworkError.tooManyRequests(_:)`; other 4xx are `.clientError`, 5xx are `.serverError`, anything else is
   `.unexpectedStatus`. New status mappings go through `HTTPStatusValidator.error(for:)`
-- On 401 the client calls `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
+- On 401, or a provider-authorized 403 the provider opts in to, the client calls
+  `AuthorizationProvider.refreshAuthorization(rejecting:)` with the exact
   provider authorization it sent, so providers can skip refreshing a token that was already replaced;
-  it first asks `shouldRefreshAuthorization(after:)` (default `true`) so a provider can decline
+  it first asks `shouldRefreshAuthorization(after:)` (default `true` for 401, `false` for 403) so a provider can decline
 - Every HTTP-derived `NetworkError` case carries a non-optional `HTTPResponse` (status, headers, body,
   `retryAfter`); only a transport `.timeout(nil)` has none. In tests build errors with `.status(_:retryAfter:body:)`
   from `Tests/SwiftyNetworkTests/Helpers`. Its `description` is redacted, but still never log the body.
@@ -293,7 +308,8 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
   (public as `NetworkError.mapTransportError(_:)`): a `NetworkError` passes through; task cancellation becomes
   `CancellationError` (a `URLError.cancelled` while the task is not cancelled, such as a rejected TLS pin,
   stays in `.underlying` and classifies as `.secureConnectionFailed`); connectivity-loss codes map to
-  `.noInternetConnection` (transient); other `URLError`s are kept intact in `.underlying`
+  `.noInternetConnection`, host resolution/connection failures map to `.serverUnreachable` (both transient);
+  other `URLError`s are kept intact in `.underlying`
 - `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites.
   The public knob is `LogLevel.current`; never set the level from a client or configuration
 - `request(_:body:responseType:)` encodes `Encodable` bodies with config's encoder
@@ -304,7 +320,7 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
   contract: bump `MutationRequest.version` for any change and keep decoding older versions
 - `MutationRequest.authorization` is always `.none`; the queue's client authorizes through its provider.
   `AuthorizationType` is not `Codable` -- don't reintroduce persisted credentials. It persists
-  `usesAuthorizationProvider` (schema version 2) so an opted-out endpoint never gains credentials on replay
+  `usesAuthorizationProvider` so an opted-out endpoint never gains credentials on replay
 - `NetworkEndpoint.usesAuthorizationProvider` (default `true`) is the only way to keep the provider's
   credentials off an endpoint; `.none` alone means "use the provider". Wrapper endpoints such as
   `EncodedBodyEndpoint` must forward it
@@ -315,6 +331,9 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - Decoding `EmptyResponse` never reads the body (`NetworkClient` and `MockAPIClient`), so a plain-text 2xx succeeds
 - `MutationQueue(waitForConnectivity:)`: an offline failure waits instead of consuming a retry and reports
   `.waitingForConnectivity`; the closure must return on cancellation. Success events carry the `HTTPResponse`
+- `MutationQueue.enqueueAndWait` subscribes before enqueueing, returns the settled key's response, and throws
+  `MutationFailureReason` for terminal failures. Finished statuses are bounded; keep terminal cleanup and replacement
+  enqueue ordering under the per-key operations gate
 - Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
   non-suspending check-and-remove -- composing `load` then `remove` from outside reintroduces
   the race it exists to close

@@ -9,16 +9,16 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 
 | Area | Implementation | Responsibility |
 | --- | --- | --- |
-| HTTP | `NetworkEndpoint.swift`, `APIClient.swift`, `NetworkClient.swift` | Describe, assemble, execute, validate, and decode requests |
+| HTTP | `NetworkEndpoint.swift`, `TypedEndpoint.swift`, `APIClient.swift`, `NetworkClient.swift` | Describe, assemble, execute, validate, and decode requests |
 | Configuration | `NetworkClientConfiguration.swift` | Session, JSON coders, auth provider, retry and redirect policies, timeouts, instrumentation |
 | Authentication | `AuthProvider.swift`, `AuthorizationType.swift` | Inject credentials and coalesce overlapping OAuth refreshes |
 | TLS | `SSLPinningConfiguration.swift` | Optional certificate/SPKI pins with platform trust validation by default |
 | Redirects | `RedirectPolicy.swift`, `RedirectGuard.swift` | Strip credentials on cross-origin redirects and refuse HTTPS downgrades, through a per-task delegate |
 | Observation | `NetworkInstrumentation.swift`, `NetworkMonitor.swift`, `Logger.swift` | Request events, reachability, unified logging |
-| Cache | `Cache.swift`, `InMemoryCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory, persistence composition |
+| Cache | `Cache.swift`, `InMemoryCache.swift`, `DiskCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory/disk, persistence composition |
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
-| Repository | `Repository.swift` | Coordinate a cache and the network using `CachePolicy` |
-| Mutations | `Mutation/` | Retry, coalesce, persist, and observe background mutations |
+| Repository | `Repository.swift`, `RepositoryResult.swift`, `FetchCoalescer.swift` | Coordinate a cache and the network using `CachePolicy`, report freshness, share same-key requests |
+| Mutations | `Mutation/`, `FileMutationStore.swift` | Retry, coalesce, persist, and observe background mutations |
 | Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()`, `NetworkRetryPolicy.immediate()` |
 
 Internal building blocks are kept in their own files so they can be reused and
@@ -51,22 +51,25 @@ a protocol-extension convenience over it. Decoding `Data` returns the raw body, 
 The encoded-body overload uses the configured encoder and preserves an explicitly
 supplied Content-Type header.
 
-`sendAuthorized(_:errorBody:transport:)` runs this same 401 flow (`refreshAfterUnauthorized`) around a
+`sendAuthorized(_:operationName:errorBody:transport:)` runs this same authorization flow around a
 caller-supplied transport for requests `NetworkClient` cannot decode, such as streams. It reuses the redirect guard and
 instrumentation, maps statuses with `HTTPStatusValidator`, and does not apply `retryPolicy`. Its work ends at the
 response headers; callers map later stream errors with `NetworkError.mapTransportError(_:)`. It applies provider
-credentials to any URL, so it is for the app's own API only.
+credentials to any URL, so it is for the app's own API only. Endpoints can set a stable `operationName`, override
+the configured timeout or URL request cache policy, and declare request idempotency independently of the method.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
 with `authRefreshDelay` before replay. The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider`
 skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
-`shouldRefreshAuthorization(after:)` (default `true`) with the `401` response, so a provider can decline for a
-`401` that a new token cannot fix. Every non-2xx error (`401`, `403`, `404`, `408`, `429`, 5xx, ...) carries an `HTTPResponse`
-(status, headers, body), exposed as `NetworkError.response`; `403` never triggers a refresh. Neither is general transient-error retry;
-that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by default), which `performRequest`
-consults through `retryOrFail` after any failed attempt. It retries `GET`/`HEAD`/`PUT`/`DELETE` only, on 429, 5xx,
-timeout and lost connectivity, with capped jittered backoff and a clamped `Retry-After`. Refresh and policy retries
+`shouldRefreshAuthorization(after:)` with a `401` response or a provider-authorized `403`; the default refreshes
+only `401`. Every non-2xx error (`401`, `403`, `404`, `408`, `429`, 5xx, ...) carries an `HTTPResponse`
+(status, headers, body), exposed as `NetworkError.response`. Neither auth replay nor request retry is general
+transient-error retry; that is the opt-in `NetworkRetryPolicy` (`NetworkClientConfiguration.retryPolicy`, off by
+default), which `performRequest` consults through `retryOrFail` after a failed attempt. It retries idempotent
+requests on 429, 5xx, timeout, lost connectivity, or an unreachable server, with capped jittered backoff and a
+clamped `Retry-After`. `GET`/`HEAD`/`PUT`/`DELETE`/`OPTIONS` are idempotent by default; an endpoint can opt another
+method in only when the server guarantees replay safety. Refresh and policy retries
 have independent budgets (`refreshAttempt`, `retryAttempt`). `HTTPStatusValidator` maps 429 to
 `NetworkError.tooManyRequests`, other 4xx to `.clientError`, and 5xx to `.serverError`; `HTTPResponse` parses
 `Retry-After` (delta-seconds and HTTP-date) for 429 and 503.
@@ -87,12 +90,13 @@ protocols also support Sendable value implementations.
 each `updates` continuation synchronously on the actor.
 
 Actor isolation prevents data races, but an `await` allows another operation to
-interleave. `SingleFlightCache` and `LayeredCache` serialize their storage operations across
-awaits using an internal gate. Single-flight fetches run outside it and commit only
-while their flight identity remains current. Access underlying storage exclusively
-through the wrapper, and never call back into that wrapper from a storage method.
-Individual operations are ordered, and `entry(forKey:)` returns a value and its
-timestamp as one snapshot. See [the review backlog](REVIEW.md) for remaining contracts.
+interleave. `SingleFlightCache` and `LayeredCache` serialize compound storage operations
+across awaits using an internal exclusive gate. Single-flight network fetches run outside
+it and commit only while their flight identity remains current. Access underlying storage
+exclusively through the wrapper, and never call back into that wrapper from a storage method.
+The gate serializes storage operations across keys, so slow storage can cause head-of-line
+blocking; defer changing this until the image-grid workload is measured. `entry(forKey:)`
+returns a value and its timestamp as one snapshot.
 
 Shared OAuth refreshes and single-flight fetches use owned unstructured tasks
 because multiple independent callers share their lifetime. Mutation workers must
@@ -106,24 +110,30 @@ exceptions, not a pattern for new async APIs.
 
 `Cache` reads and writes whole `CacheEntry` values (value plus timestamp);
 `value(forKey:)` and `setValue(_:forKey:)` are protocol-extension conveniences.
-Apps implement persistence as an ordinary `Cache`.
+Apps can use the built-in `DiskCache` or implement persistence as an ordinary `Cache`.
 `InMemoryCache` keeps entries in `LRUStorage`, so reads, writes, and eviction are
 O(1) and eviction order is deterministic; age-based expiration scans storage (O(n)). `LayeredCache` reads memory first and promotes
 persistent entries with their original timestamp.
 
-Repositories implement cache-first, reload, and maximum-age policies. Their read
-and timestamp calls are separate operations. Cache keys must identify the user,
-resource, and all request inputs that affect the result. Clear sensitive caches
-on logout. `SingleFlightCache` adds fetch sharing, not an atomic transaction API.
+Repositories implement cache-first, reload, bounded-age, network-first-with-cache-fallback,
+and stale-while-revalidate policies. `RepositoryResult` carries the source and fetch timestamp;
+`fetch` remains a value-only convenience. `GenericRepository` coalesces concurrent network
+fetches for the same key; cached reads remain independent. Cache keys must identify the user,
+resource, and all request inputs that affect the result. Clear sensitive caches on logout.
+`SingleFlightCache` adds fetch sharing, not an atomic transaction API, and can bound a hit's
+age with `maxAge`.
 
 ## Mutation lifecycle
 
 `MutationQueue.enqueue` saves a Codable, versioned `MutationRequest` (no credentials;
 the queue's client authorizes each attempt through its provider), then starts background
-work per `MutationKey`. Replacing the same key coalesces pending work. Workers
+work per `MutationKey`. Replacing the same key coalesces pending work. `enqueueAndWait`
+subscribes before enqueueing and returns the settled key's response or failure. Workers
 retry transient failures according to `MutationRetryPolicy`, publish status, and
 conditionally remove completed requests using `MutationStore.removeIfCurrent`.
-That comparison and removal must be one atomic operation in custom stores.
+That comparison and removal must be one atomic operation in custom stores. Terminal
+removal, event publication, and worker cleanup coordinate with enqueue on a per-key gate;
+finished statuses are retained in a bounded LRU.
 
 Persistence does not provide exactly-once delivery. Servers must enforce
 idempotency for operations that may be replayed; `MutationRequest.addingIdempotencyKey(_:header:)`
@@ -131,6 +141,8 @@ stores a key in the persisted headers so every replay sends the same one. With `
 an offline failure waits for the closure instead of consuming a retry, so durable mutations survive
 long offline periods. Mutations for different keys are independent and unordered. Durable stores must encrypt
 captured credentials and sensitive bodies. The default store is memory-only.
+`FileMutationStore` is the built-in durable file-backed store. Neither it nor `DiskCache`
+encrypts its contents; place sensitive data in directories with suitable file protection.
 
 ## Security boundaries
 

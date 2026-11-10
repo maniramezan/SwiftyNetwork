@@ -4,18 +4,19 @@ import Foundation
 
 /// A cache decorator that coalesces concurrent cache-miss fetches for the same key.
 ///
-/// Wraps any ``Cache``-conforming type and adds ``value(forKey:orFetch:)``: on a
+/// Wraps any ``Cache``-conforming type and adds ``value(forKey:maxAge:orFetch:)``: on a
 /// miss, the first caller for a key runs `fetch` while every other concurrent
 /// caller for that same key awaits the same in-flight `Task` instead of
 /// triggering a duplicate fetch (e.g. a duplicate network request).
 ///
-/// Storage operations are serialized, including the final fetch commit. Explicit
+/// Storage operations are serialized across keys, including the final fetch commit. Explicit
 /// writes and removals invalidate the affected flight, even if its fetch ignores
 /// cancellation. Use this wrapper exclusively to mutate the underlying cache.
-/// Wrapped cache methods must not call back into this wrapper. Storage is queued
-/// across all keys, so a slow custom store can delay otherwise unrelated reads.
+/// Wrapped cache methods must not call back into this wrapper. Different keys fetch concurrently,
+/// but slow storage can delay otherwise unrelated cache operations; ``removeAll()`` waits for
+/// running operations and holds back later ones.
 /// A canceled caller does not cancel work shared with other callers; it observes
-/// cancellation after the shared work finishes. Different keys fetch concurrently.
+/// cancellation after the shared work finishes.
 ///
 /// `SingleFlightCache` adds only deduplication -- size limits, eviction, and
 /// persistence are entirely up to whatever ``Cache`` you wrap (e.g.
@@ -34,7 +35,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
     public typealias Value = Wrapped.Value
 
     private let wrapped: Wrapped
-    let operations = CacheOperationGate()
+    let operations = CacheOperationGate<CacheKey>()
     private struct Flight: Sendable {
         let id: UUID
         let task: Task<Value, any Error>
@@ -56,12 +57,12 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     /// Reads the stored entry after preceding storage operations finish.
     public func entry(forKey key: CacheKey) async -> CacheEntry<Value>? {
-        await operations.run { await self.wrapped.entry(forKey: key) }
+        await operations.runExclusive { await self.wrapped.entry(forKey: key) }
     }
 
     /// Invalidates a pending fetch and stores an explicit entry.
     public func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async {
-        await operations.run {
+        await operations.runExclusive {
             await self.invalidate(key)
             await self.wrapped.setEntry(entry, forKey: key)
         }
@@ -69,7 +70,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     /// Cancels the current fetch and removes the stored value before returning.
     public func removeValue(forKey key: CacheKey) async {
-        await operations.run {
+        await operations.runExclusive {
             await self.invalidate(key)
             await self.wrapped.removeValue(forKey: key)
         }
@@ -77,7 +78,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     /// Cancels all current fetches and clears storage before returning.
     public func removeAll() async {
-        await operations.run {
+        await operations.runExclusive {
             await self.invalidateAll()
             await self.wrapped.removeAll()
         }
@@ -94,7 +95,8 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     // MARK: - Single-Flight Fetch
 
-    /// Returns the cached value for `key`, or runs `fetch` on a miss.
+    /// Returns the cached value for `key`, or runs `fetch` on a miss or when the cached value is
+    /// older than `maxAge`.
     ///
     /// Concurrent calls for the same `key` that arrive while a fetch is
     /// already in flight await that same fetch rather than starting their
@@ -102,18 +104,30 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
     /// stored in the wrapped cache before being returned; a failed
     /// fetch is not cached, so the next call retries it.
     ///
+    /// Example:
+    /// ```swift
+    /// let profile = try await cache.value(forKey: "profile", maxAge: .seconds(300)) {
+    ///     try await client.request(ProfileEndpoint(), responseType: Profile.self)
+    /// }
+    /// ```
+    ///
     /// - Parameters:
     ///   - key: The cache key to look up or populate.
+    ///   - maxAge: The oldest cached value to return, measured from ``CacheEntry/timestamp``.
+    ///     An older value is replaced by a fresh fetch. Defaults to `nil`, which returns a
+    ///     cached value of any age.
     ///   - fetch: Produces the value on a cache miss. Runs at most once per
     ///     concurrent burst of calls for `key`.
     /// - Returns: The cached or freshly fetched value.
     /// - Throws: The fetch error, or `CancellationError` if the caller is canceled
     ///   or a write/removal supersedes the fetch before it commits.
-    public func value(forKey key: CacheKey, orFetch fetch: @escaping @Sendable () async throws -> Value) async throws
-        -> Value
-    {
+    public func value(
+        forKey key: CacheKey,
+        maxAge: Duration? = nil,
+        orFetch fetch: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
         try Task.checkCancellation()
-        let lookup = await operations.run { await self.lookup(key, fetch: fetch) }
+        let lookup = await operations.runExclusive { await self.lookup(key, maxAge: maxAge, fetch: fetch) }
         let value: Value
         switch lookup {
         case .cached(let cached): value = cached
@@ -123,18 +137,24 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
         return value
     }
 
-    // Called only while holding operations, including across wrapped-cache awaits.
-    private func lookup(_ key: CacheKey, fetch: @escaping @Sendable () async throws -> Value) async -> Lookup {
-        if let cached = await wrapped.entry(forKey: key) { return .cached(cached.value) }
+    // Called only while holding the key's gate, including across wrapped-cache awaits.
+    private func lookup(
+        _ key: CacheKey,
+        maxAge: Duration?,
+        fetch: @escaping @Sendable () async throws -> Value
+    ) async -> Lookup {
+        if let cached = await wrapped.entry(forKey: key), maxAge.map({ cached.age() <= $0 }) ?? true {
+            return .cached(cached.value)
+        }
         if let flight = inFlightFetches[key] { return .flight(flight) }
         let id = UUID()
         let task = Task<Value, any Error> {
             do {
                 let value = try await fetch()
                 try Task.checkCancellation()
-                return try await self.operations.run { try await self.commit(value, key: key, id: id) }
+                return try await self.operations.runExclusive { try await self.commit(value, key: key, id: id) }
             } catch {
-                await self.operations.run { await self.clearFlight(key, id: id) }
+                await self.operations.runExclusive { await self.clearFlight(key, id: id) }
                 throw error
             }
         }

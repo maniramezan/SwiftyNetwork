@@ -37,6 +37,18 @@
 These changes were authored without a local Swift toolchain (the sandbox could
 not download one), so their only validation is the PR's GitHub Actions run.
 
+## Implemented for the 2.0 consumer migration
+
+- Map DNS lookup and connection-refused failures to transient
+  `NetworkError.serverUnreachable`.
+- Keep `NetworkEndpoint.baseURL` required and document shared defaults via protocol refinements.
+- Add `operationName`, per-endpoint timeout/cache policy, and endpoint idempotency; let providers
+  opt into refresh for provider-authorized legacy `403` responses.
+- Add typed endpoints, max-age single-flight reads, network-first cache fallback, stale-while-revalidate,
+  repository result source/timestamp metadata, and same-key network fetch coalescing.
+- Add built-in `DiskCache` and `FileMutationStore`, `MutationQueue.enqueueAndWait`, successful
+  response events, bounded finished statuses, and deterministic coverage for the terminal-removal race.
+
 ## Completed follow-ups
 
 | Finding | Pull request |
@@ -57,7 +69,8 @@ security audit or measured performance gains.
 | Priority | Finding | Proposed change and acceptance criteria |
 | --- | --- | --- |
 | Medium | The 2.0 audits were source-level; the gaps found by migrating a real app (raw/streaming transports, error categories, migration-guide holes, fixture overlap) were only visible from a consumer. A consumer-side review then found more: no per-endpoint opt-out of the provider (and a refresh-handler deadlock), offline mutations dropped from durable stores, mutation responses discarded, plain-text 2xx bodies failing `EmptyResponse`, no idempotency-key support, 429 and TLS failures miscategorized, and a case-colliding disk-cache recipe. All are fixed on `feature/pre-2.0-consumer-gaps`. | Before each major tag, migrate one real consumer app onto the release candidate, ideally one that uses `MutationQueue` with a durable store, and fold its friction into the API and `MigratingTo*.md`; keep adding external-consumer fixtures. |
-| Medium | Concurrent requests are not coalesced at the repository boundary. (Value and timestamp now come from one `CacheEntry` read.) | Explore explicit repository fetch sharing without conflating cache policies or users. |
+| Medium | `LayeredCache` and `SingleFlightCache` serialize storage operations across keys. The Novalingo image-grid workload has not been measured. | Keep the current ordering guarantees; benchmark the consumer workload before adding per-key storage concurrency. |
+| Low | A non-task `URLError.cancelled` is treated as a TLS/authentication-challenge failure when the supplied session has a delegate. A session invalidation with a delegate may be misclassified the same way. | Model the session/task cancellation source before changing this classification; keep it separate from task cancellation and pin rejection. |
 | Low | Some public instrumentation/cache members lack full DocC parameter documentation; examples are not systematically compiled. | Add documentation compilation checks and external-consumer API fixtures to CI; avoid packaging-only tests that duplicate implementation. |
 
 ## Evolution constraints
@@ -95,10 +108,10 @@ A canceled caller does not cancel the shared fetch and observes cancellation whe
 that work finishes. Cancellation does not bypass a queued storage mutation.
 Use wrapped caches exclusively through their wrapper; direct mutations bypass
 these guarantees. Custom storage must not recursively call the same wrapper.
-Serialization covers all keys, so slow storage creates head-of-line blocking;
-per-key storage queues with a global removeAll barrier are a possible measured
-optimization, not required for correctness. `entry(forKey:)` returns a value and
-its timestamp as one snapshot for repository consumers.
+Serialization covers all keys, so slow storage creates head-of-line blocking.
+Per-key storage queues with a global removeAll barrier are a possible optimization,
+but should wait for a benchmark of the image-grid workload. `entry(forKey:)` returns
+a value and its timestamp as one snapshot for repository consumers.
 
 Cache-fix validation: the full suite ran 180 tests with 177 passing and the same
 three previously reproduced TLS failures. After adding the independent-key fetch

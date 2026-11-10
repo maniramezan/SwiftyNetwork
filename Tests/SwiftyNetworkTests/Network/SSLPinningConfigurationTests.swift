@@ -11,7 +11,7 @@ private final class StubChallengeSender: NSObject, URLAuthenticationChallengeSen
     func cancel(_ challenge: URLAuthenticationChallenge) {}
 }
 
-@Suite("SSL Pinning Configuration Tests")
+@Suite("SSL Pinning Configuration Tests", .serialized)
 struct SSLPinningConfigurationTests {
     /// A self-signed EC P-256 certificate for "pinning.test", generated with:
     /// ```

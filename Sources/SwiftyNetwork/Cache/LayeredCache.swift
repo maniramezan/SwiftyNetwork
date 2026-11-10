@@ -7,8 +7,9 @@ import Foundation
 /// Reads consult the in-memory layer first, then fall back to the persistent layer.
 /// Entries loaded from the persistent layer are promoted into memory with their
 /// original timestamp.
-/// All operations through this wrapper are serialized across suspension points,
-/// so promotion cannot overwrite a later write or removal. Access the underlying
+/// Operations through this wrapper are serialized across suspension points,
+/// so promotion cannot overwrite a later write or removal. ``removeAll()`` runs alone.
+/// Access the underlying
 /// tiers exclusively through this wrapper to preserve this guarantee. Custom
 /// tiers must not call back into the same layered cache during an operation.
 ///
@@ -18,7 +19,7 @@ import Foundation
 /// await cache.setValue(user, forKey: "user:123:profile")
 /// ```
 public actor LayeredCache<T: Sendable>: Cache {
-    let operations = CacheOperationGate()
+    let operations = CacheOperationGate<CacheKey>()
     private let memoryCache: any Cache<T>
     private let persistentCache: (any Cache<T>)?
 
@@ -48,7 +49,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     /// - Parameter key: The cache key to look up.
     /// - Returns: The cached entry if it exists in either layer; otherwise `nil`.
     public func entry(forKey key: CacheKey) async -> CacheEntry<T>? {
-        await operations.run { await self.storageEntry(forKey: key) }
+        await operations.runExclusive { await self.storageEntry(forKey: key) }
     }
 
     private func storageEntry(forKey key: CacheKey) async -> CacheEntry<T>? {
@@ -78,7 +79,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     ///   - entry: The value and timestamp to store.
     ///   - key: The cache key to associate with the entry.
     public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
-        await operations.run { await self.storageSetEntry(entry, forKey: key) }
+        await operations.runExclusive { await self.storageSetEntry(entry, forKey: key) }
     }
 
     private func storageSetEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
@@ -90,7 +91,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     ///
     /// - Parameter key: The cache key to remove.
     public func removeValue(forKey key: CacheKey) async {
-        await operations.run { await self.storageRemoveValue(forKey: key) }
+        await operations.runExclusive { await self.storageRemoveValue(forKey: key) }
     }
 
     private func storageRemoveValue(forKey key: CacheKey) async {
@@ -100,7 +101,7 @@ public actor LayeredCache<T: Sendable>: Cache {
 
     /// Removes all values from every configured cache layer.
     public func removeAll() async {
-        await operations.run { await self.storageRemoveAll() }
+        await operations.runExclusive { await self.storageRemoveAll() }
     }
 
     private func storageRemoveAll() async {

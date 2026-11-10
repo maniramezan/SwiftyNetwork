@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("MutationRequest Tests")
+@Suite("MutationRequest Tests", .serialized)
 struct MutationRequestTests {
 
     @Test("Captures fields from an existing endpoint, but never its authorization")
@@ -65,7 +65,11 @@ struct MutationRequestTests {
             method: .post,
             queryItems: [URLQueryItem(name: "source", value: "detail")],
             headers: ["X-Trace": "abc"],
-            body: Data("{\"liked\":true}".utf8)
+            body: Data("{\"liked\":true}".utf8),
+            usesAuthorizationProvider: false,
+            operationName: "videos.like",
+            timeout: .seconds(12),
+            isIdempotent: true
         )
 
         let data = try JSONEncoder().encode(original)
@@ -101,9 +105,24 @@ struct MutationRequestTests {
         #expect(decoded.authorization == .none)
     }
 
+    @Test("Version 2 payloads retain auth opt-out and default new fields")
+    func decodesVersionTwoPayload() throws {
+        let versionTwoJSON =
+            #"{"version":2,"baseURL":"https://api.test.com","path":"/x","method":"POST","#
+            + #""usesAuthorizationProvider":false}"#
+        let versionTwo = Data(versionTwoJSON.utf8)
+
+        let decoded = try JSONDecoder().decode(MutationRequest.self, from: versionTwo)
+
+        #expect(!decoded.usesAuthorizationProvider)
+        #expect(decoded.operationName == nil)
+        #expect(decoded.timeout == nil)
+        #expect(!decoded.isIdempotent)
+    }
+
     @Test("Rejects a payload from a newer schema version")
     func rejectsNewerVersion() {
-        let future = Data(#"{"version":3,"baseURL":"https://api.test.com","path":"/x","method":"POST"}"#.utf8)
+        let future = Data(#"{"version":4,"baseURL":"https://api.test.com","path":"/x","method":"POST"}"#.utf8)
 
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(MutationRequest.self, from: future)

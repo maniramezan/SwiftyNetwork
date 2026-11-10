@@ -35,7 +35,8 @@ public protocol AuthorizationProvider: Sendable {
     /// - Throws: Any error explaining why no authorization is available.
     func currentAuthorization() async throws -> AuthorizationType
 
-    /// Refreshes credentials after `rejected` was answered with `401`.
+    /// Refreshes credentials after `rejected` was answered with `401`, or with a `403` that
+    /// ``shouldRefreshAuthorization(after:)`` accepted.
     ///
     /// ``NetworkClient`` passes the exact authorization it sent. Use it to skip
     /// redundant refreshes: when several requests fail with the same expired token,
@@ -53,16 +54,28 @@ public protocol AuthorizationProvider: Sendable {
     /// - Throws: Any error explaining why authorization could not be refreshed.
     func refreshAuthorization(rejecting rejected: AuthorizationType) async throws
 
-    /// Decides whether a `401` warrants a credential refresh.
+    /// Decides whether a `401` or `403` warrants a credential refresh.
     ///
-    /// ``NetworkClient`` calls this before ``refreshAuthorization(rejecting:)``. Return
-    /// `false` when the response body or `WWW-Authenticate` header shows that a new
-    /// token cannot help, for example an unrelated `401` from a backend. The client then
-    /// throws ``NetworkError/unauthorized(_:)`` without refreshing or retrying.
+    /// ``NetworkClient`` calls this before ``refreshAuthorization(rejecting:)``, for every `401`
+    /// and for a `403` to a request this provider authorized. Return `false` when the response
+    /// body or `WWW-Authenticate` header shows that a new token cannot help, for example an
+    /// unrelated `401` from a backend. The client then throws ``NetworkError/unauthorized(_:)``,
+    /// or ``NetworkError/forbidden(_:)`` for a `403`, without refreshing or retrying.
     ///
-    /// The default implementation returns `true`, which keeps the refresh-once behavior.
+    /// The default implementation returns `true` for a `401` and `false` for a `403`: a `403`
+    /// normally means the credentials are valid but not allowed, which a refresh cannot fix.
+    /// Return `true` for a `403` only when your API uses it for a stale token, for example
+    /// one issued before the user's account was upgraded:
     ///
-    /// - Parameter response: The `401` response, including its headers and body.
+    /// ```swift
+    /// func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
+    ///     if response.statusCode == 401 { return true }
+    ///     let problem = try? response.decodeBody(APIProblem.self)
+    ///     return problem?.code == "authentication_failed"
+    /// }
+    /// ```
+    ///
+    /// - Parameter response: The `401` or `403` response, including its headers and body.
     /// - Returns: `true` to refresh and retry once; `false` to fail immediately.
     func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool
 }
@@ -92,12 +105,12 @@ extension AuthorizationProvider {
         return current == authorization
     }
 
-    /// Returns `true`, so every `401` is refreshed once.
+    /// Returns `true` for a `401`, so every `401` is refreshed once, and `false` for a `403`.
     ///
-    /// - Parameter response: The `401` response.
-    /// - Returns: `true`.
+    /// - Parameter response: The `401` or `403` response.
+    /// - Returns: Whether the status is `401`.
     public func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
-        true
+        response.statusCode == 401
     }
 }
 
@@ -110,7 +123,7 @@ extension AuthorizationProvider {
 /// refreshed tokens through the supplied refresh handler.
 ///
 /// Concurrent refreshes are coalesced so the refresh handler runs at most once
-/// per refresh cycle even if many requests receive a 401 simultaneously. A `401`
+/// per refresh cycle even if many requests receive a `401` or an accepted `403` simultaneously. A `401`
 /// that arrives *after* a refresh already replaced the rejected token reuses the
 /// new token instead of refreshing again (see ``refreshAuthorization(rejecting:)``).
 ///
