@@ -60,7 +60,7 @@ struct MutationQueueConsumerGapTests {
         let stream = await queue.events()
 
         await queue.enqueue(makeRequest(), key: key)
-        _ = try await waitUntil(timeout: .seconds(5), operation: { gate.waiterCount }, matching: { $0 == 1 })
+        _ = try await waitUntil(timeout: testTimeout, operation: { gate.waiterCount }, matching: { $0 == 1 })
 
         #expect(await queue.status(for: key) == .waitingForConnectivity)
         #expect(await store.load(for: key) == makeRequest())
@@ -82,9 +82,9 @@ struct MutationQueueConsumerGapTests {
         )
 
         await queue.enqueue(makeRequest(), key: key)
-        _ = try await waitUntil(timeout: .seconds(5), operation: { gate.waiterCount }, matching: { $0 == 1 })
+        _ = try await waitUntil(timeout: testTimeout, operation: { gate.waiterCount }, matching: { $0 == 1 })
         await queue.cancel(key)
-        _ = try await waitUntil(timeout: .seconds(5), operation: { gate.waiterCount }, matching: { $0 == 0 })
+        _ = try await waitUntil(timeout: testTimeout, operation: { gate.waiterCount }, matching: { $0 == 0 })
 
         guard case .failed(let reason) = await queue.status(for: key) else {
             Issue.record("Expected a cancellation")
@@ -192,14 +192,14 @@ struct MutationQueueConsumerGapTests {
 
         let enqueue = Task { await queue.enqueue(replacement, key: key) }
         _ = try await waitUntil(
-            timeout: .seconds(5),
+            timeout: testTimeout,
             operation: { await queue.operations.queuedOperationCount },
             matching: { $0 == 1 }
         )
         store.allowRemoveToReturn.open()
         await enqueue.value
         _ = try await waitUntil(
-            timeout: .seconds(5),
+            timeout: testTimeout,
             operation: { await fake.callCount },
             matching: { $0 == 2 }
         )

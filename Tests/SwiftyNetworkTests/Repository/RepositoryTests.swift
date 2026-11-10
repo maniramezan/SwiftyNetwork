@@ -165,7 +165,7 @@ func testRepositoryStaleWhileRevalidate() async throws {
         policy: .returnCacheAndRevalidate(maxAge: .seconds(60))
     )
     _ = try await waitUntil(
-        timeout: .seconds(5),
+        timeout: testTimeout,
         operation: { await cache.value(forKey: key) },
         matching: { $0 == fresh }
     )
