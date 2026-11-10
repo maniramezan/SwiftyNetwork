@@ -21,7 +21,8 @@ SwiftyNetwork provides:
 For tests and previews, the separate `SwiftyNetworkTesting` library product provides
 `MockAPIClient`, a scriptable ``APIClient`` that records every request, and
 `TestAuthorizationProvider`, a scriptable ``AuthorizationProvider`` that counts refreshes. Link it
-from test targets only, never from production targets.
+from test targets only, never from production targets. It already depends on `SwiftyNetwork`; add
+the core product only to the app or library target so Swift Package Manager resolves one copy.
 
 For streaming or other transports ``NetworkClient`` cannot model, use
 ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)`` to keep its authorization, `401` refresh-once,

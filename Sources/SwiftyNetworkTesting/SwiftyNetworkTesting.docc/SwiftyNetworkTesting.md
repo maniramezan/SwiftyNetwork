@@ -4,10 +4,18 @@ Test doubles for apps and libraries built on SwiftyNetwork.
 
 ## Overview
 
-Link `SwiftyNetworkTesting` from your **test targets** and SwiftUI previews,
-never from production targets:
+Link `SwiftyNetwork` from your app or library target and `SwiftyNetworkTesting` only from its
+**test target**. `SwiftyNetworkTesting` already depends on `SwiftyNetwork`, so do not add the core
+product to the test target again; this keeps Swift Package Manager's dependency graph to one copy
+of `SwiftyNetwork`. Never link `SwiftyNetworkTesting` from production targets:
 
 ```swift
+.target(
+    name: "MyApp",
+    dependencies: [
+        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
+    ]
+),
 .testTarget(
     name: "MyAppTests",
     dependencies: [

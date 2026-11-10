@@ -3,7 +3,8 @@ import SwiftyNetwork
 /// Scriptable authorization state that records refresh attempts and rejected credentials.
 ///
 /// For tests and SwiftUI previews only; link `SwiftyNetworkTesting` from test targets, never from
-/// production targets. It covers what apps usually hand-roll: a fixed bearer token
+/// production targets. It already depends on `SwiftyNetwork`, so add the core product only to the
+/// app or library target. It covers what apps usually hand-roll: a fixed bearer token
 /// (`current: .bearer(token: "t")`), a refresh call counter (``refreshCallCount``), and a refresh
 /// outcome you can change after creation (``setRefreshResult(_:)``).
 ///

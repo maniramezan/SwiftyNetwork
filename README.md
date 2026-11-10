@@ -986,10 +986,18 @@ All operations in SwiftyNetwork are thread-safe:
 
 ## Testing
 
-Add the `SwiftyNetworkTesting` product to your **test target** to get `MockAPIClient`, a scriptable
-`APIClient` that records every request:
+Link `SwiftyNetwork` from your app or library target and `SwiftyNetworkTesting` only from its
+**test target**. `SwiftyNetworkTesting` already depends on `SwiftyNetwork`, so do not add the core
+product to the test target again; this keeps Swift Package Manager's dependency graph to one copy
+of `SwiftyNetwork`.
 
 ```swift
+.target(
+    name: "MyApp",
+    dependencies: [
+        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
+    ]
+),
 .testTarget(
     name: "MyAppTests",
     dependencies: [
@@ -998,6 +1006,8 @@ Add the `SwiftyNetworkTesting` product to your **test target** to get `MockAPICl
     ]
 )
 ```
+
+This makes `MockAPIClient` and `TestAuthorizationProvider` available to the test target.
 
 ```swift
 import SwiftyNetwork
