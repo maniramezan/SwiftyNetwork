@@ -136,6 +136,22 @@ func testEndpointRepeatedLeadingSlashes() throws {
     #expect(url.absoluteString == "https://api.example.com/base/items")
 }
 
+@Test("A complete URL in baseURL keeps its percent-encoded query exactly")
+func testEndpointPreservesPresignedQuery() throws {
+    let presigned =
+        "https://bucket.s3.amazonaws.com/v.mp4?X-Amz-Credential=AKIA%2F20250101%2Fus-east-1&X-Amz-Signature=ab%2Bcd"
+    let unchanged = try EndpointURLBuilder.url(baseURL: presigned, path: "", queryItems: nil)
+    #expect(unchanged.absoluteString == presigned)
+
+    let appended = try EndpointURLBuilder.url(
+        baseURL: presigned, path: "", queryItems: [URLQueryItem(name: "range", value: "0-100")])
+    #expect(appended.absoluteString == presigned + "&range=0-100")
+
+    let emptyExisting = try EndpointURLBuilder.url(
+        baseURL: "https://api.example.com/items?", path: "", queryItems: [URLQueryItem(name: "page", value: "2")])
+    #expect(emptyExisting.absoluteString == "https://api.example.com/items?page=2")
+}
+
 @Test("Endpoint normalization preserves empty paths and collapses slash-only paths")
 func testEndpointEmptyAndSlashOnlyPaths() throws {
     let empty = try EndpointURLBuilder.url(

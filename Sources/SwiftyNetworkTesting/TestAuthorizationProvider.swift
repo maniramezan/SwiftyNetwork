@@ -87,7 +87,7 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
 
     /// Records the `401` or `403` response and applies the scripted decision.
     /// - Parameter response: The response the server returned.
-    /// - Returns: The scripted decision, or `true` when none was configured.
+    /// - Returns: The scripted decision or, when none was configured, whether the status is `401`.
     public func shouldRefreshAuthorization(after response: HTTPResponse) async -> Bool {
         inspectedResponses.append(response)
         return refreshDecision?(response) ?? (response.statusCode == 401)

@@ -238,11 +238,15 @@ enum EndpointURLBuilder {
             path.isEmpty ? "" : String(path.trimmingPrefix(while: { $0 == "/" })).ensuringStarts(with: "/")
         components.path = basePath + endpointPath
 
-        let existingQueryItems = components.queryItems ?? []
+        // Keep the base URL's query byte for byte: decoding and re-encoding it would turn a
+        // presigned URL's `%2B` into `+` and `%2F` into `/`, which invalidates its signature.
         if let queryItems, !queryItems.isEmpty {
-            components.queryItems = existingQueryItems + queryItems
-        } else if !existingQueryItems.isEmpty {
-            components.queryItems = existingQueryItems
+            var added = URLComponents()
+            added.queryItems = queryItems
+            let existingQuery = components.percentEncodedQuery.flatMap { $0.isEmpty ? nil : $0 }
+            components.percentEncodedQuery = [existingQuery, added.percentEncodedQuery]
+                .compactMap { $0 }
+                .joined(separator: "&")
         }
 
         guard let url = components.url else {

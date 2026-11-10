@@ -7,9 +7,8 @@ import Foundation
 /// Reads consult the in-memory layer first, then fall back to the persistent layer.
 /// Entries loaded from the persistent layer are promoted into memory with their
 /// original timestamp.
-/// Operations through this wrapper are serialized across suspension points,
-/// so promotion cannot overwrite a later write or removal. ``removeAll()`` runs alone.
-/// Access the underlying
+/// Operations through this wrapper run one at a time, across all keys and suspension points,
+/// so promotion cannot overwrite a later write or removal. Access the underlying
 /// tiers exclusively through this wrapper to preserve this guarantee. Custom
 /// tiers must not call back into the same layered cache during an operation.
 ///

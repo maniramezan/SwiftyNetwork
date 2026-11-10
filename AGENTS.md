@@ -305,9 +305,10 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - Every exit from the request pipeline reports through `RequestTrace` (started/completed/failed/retried);
   add new exit paths through it rather than calling `NetworkInstrumentation` directly
 - `NetworkError.transportError` is the single transport-error mapping for anything `URLSession` throws
-  (public as `NetworkError.mapTransportError(_:)`): a `NetworkError` passes through; task cancellation becomes
-  `CancellationError` (a `URLError.cancelled` while the task is not cancelled, such as a rejected TLS pin,
-  stays in `.underlying` and classifies as `.secureConnectionFailed`); connectivity-loss codes map to
+  (public as `NetworkError.mapTransportError(_:session:)`): a `NetworkError` passes through; task cancellation,
+  or a `URLError.cancelled` from a session with no delegate, becomes `CancellationError` (a `.cancelled` from a
+  session with a delegate while the task is not cancelled, such as a rejected TLS pin, stays in `.underlying` and
+  classifies as `.secureConnectionFailed`); connectivity-loss codes map to
   `.noInternetConnection`, host resolution/connection failures map to `.serverUnreachable` (both transient);
   other `URLError`s are kept intact in `.underlying`
 - `Logger` messages are `@autoclosure`; don't pre-build strings or guard on `Logger.level` at call sites.

@@ -54,7 +54,7 @@ supplied Content-Type header.
 `sendAuthorized(_:operationName:errorBody:transport:)` runs this same authorization flow around a
 caller-supplied transport for requests `NetworkClient` cannot decode, such as streams. It reuses the redirect guard and
 instrumentation, maps statuses with `HTTPStatusValidator`, and does not apply `retryPolicy`. Its work ends at the
-response headers; callers map later stream errors with `NetworkError.mapTransportError(_:)`. It applies provider
+response headers; callers map later stream errors with `NetworkError.mapTransportError(_:session:)`. It applies provider
 credentials to any URL, so it is for the app's own API only. Endpoints can set a stable `operationName`, override
 the configured timeout or URL request cache policy, and declare request idempotency independently of the method.
 

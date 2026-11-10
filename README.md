@@ -483,7 +483,7 @@ do {
 It returns only for a `2xx`. It never retries transient failures and does not set a timeout. Instrumentation reports
 the attempt as completed when the headers arrive. Use it only for your own API: the provider's credentials go to
 any URL, so call `URLSession` directly for presigned or third-party URLs, and map its errors with
-`NetworkError.mapTransportError(_:)`. Background sessions are not supported.
+`NetworkError.mapTransportError(_:session:)`. Background sessions are not supported.
 
 ### Fire-and-Forget Mutations with MutationQueue
 
