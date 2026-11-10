@@ -1,10 +1,51 @@
 import Foundation
 import SwiftyNetwork
 import SwiftyNetworkTesting
+import TestCommons
 import Testing
 
 @Suite("Public network test helpers integration", .serialized)
 struct PublicNetworkTestHelpersTests {
+    @Test("Concurrent 401s share one TestAuthorizationProvider refresh")
+    func concurrentUnauthorizedResponsesShareRefresh() async throws {
+        let stub = try TestHTTPStub()
+        defer { stub.invalidate() }
+        let ids = (0..<5).map { _ in UUID().uuidString }
+        for id in ids { stub.setResponses([.status(401), .status(204)], for: id) }
+        let refreshStarted = AsyncGate()
+        let finishRefresh = AsyncGate()
+        let provider = SwiftyNetworkTesting.TestAuthorizationProvider(
+            current: .bearer(token: "original"),
+            refreshResult: true,
+            refreshedAuthorization: .bearer(token: "refreshed"),
+            refreshOperation: {
+                refreshStarted.open()
+                try await finishRefresh.wait()
+            }
+        )
+        let client = NetworkClient(
+            configuration: NetworkClientConfiguration(
+                session: stub.session,
+                authorizationProvider: provider,
+                authRefreshDelay: .zero
+            )
+        )
+        let requests = ids.map { id in
+            Task { try await client.request(makeEndpointWithTestId(id)) }
+        }
+
+        try await refreshStarted.wait()
+        while await provider.rejectedAuthorizations.count < ids.count { await Task.yield() }
+        finishRefresh.open()
+
+        for request in requests { try await request.value }
+        #expect(await provider.refreshCallCount == 1)
+        #expect(await provider.rejectedAuthorizations == Array(repeating: .bearer(token: "original"), count: ids.count))
+        for id in ids {
+            #expect(stub.getLastRequestHeaders(for: id)?["Authorization"] == "Bearer refreshed")
+        }
+    }
+
     @Test("Repeated 401 responses exhaust the refresh budget and close the retried attempt")
     func repeatedUnauthorizedResponses() async throws {
         let stub = try TestHTTPStub()

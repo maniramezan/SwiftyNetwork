@@ -30,6 +30,20 @@ swift build
 swift test
 ```
 
+The Xcode framework-linkage regression test requires an available iOS simulator:
+
+```bash
+bash Tests/XcodeIntegration/verify.sh <simulator-udid>
+```
+
+It exercises error type identity across two dynamic frameworks and checks the test binary for
+duplicate core symbols. The test currently fails on the known `SwiftyNetworkTesting` packaging
+blocker. The checked-in project is generated from `Tests/XcodeIntegration/project.yml`; after
+editing that specification, regenerate it with `xcodegen generate --spec Tests/XcodeIntegration/project.yml`.
+Making both existing products dynamic still embeds the core in the testing framework. A local
+subpackage for the core can avoid that duplication in Xcode, but SwiftPM rejects that graph when
+the parent package is consumed from a Git revision, so it is not a distributable fix.
+
 ### Code Formatting
 
 This project uses [swift-format](https://github.com/swiftlang/swift-format) for consistent code style.

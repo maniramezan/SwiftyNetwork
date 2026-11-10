@@ -177,6 +177,9 @@ jobs:
             -parallel-testing-worker-count 3 \
             -derivedDataPath .build/ios-derived-data
 
+      - name: Verify Xcode framework type identity
+        run: bash Tests/XcodeIntegration/verify.sh "${{ steps.simulator.outputs.udid }}"
+
   api-breakage:
     # A PR whose Conventional Commits title marks a breaking change (`feat!:`) is meant to break the API.
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.title, '!:')

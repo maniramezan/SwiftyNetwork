@@ -2,11 +2,16 @@ import SwiftyNetwork
 
 /// Scriptable authorization state that records refresh attempts and rejected credentials.
 ///
-/// For tests and SwiftUI previews only; link `SwiftyNetworkTesting` from test targets, never from
-/// production targets. It already depends on `SwiftyNetwork`, so add the core product only to the
-/// app or library target. It covers what apps usually hand-roll: a fixed bearer token
+/// For tests and SwiftUI previews only; never link `SwiftyNetworkTesting` from production targets.
+/// A single-binary SwiftPM app can link the core product from the app and the testing product from
+/// its test target. In Xcode apps that load the core through dynamic frameworks, avoid this product
+/// in the same test process until its packaging is fixed: it can embed a second core copy, breaking
+/// `NetworkError` casts and retroactive conformances. Use app-local test doubles instead.
+///
+/// It covers what apps usually hand-roll: a fixed bearer token
 /// (`current: .bearer(token: "t")`), a refresh call counter (``refreshCallCount``), and a refresh
-/// outcome you can change after creation (``setRefreshResult(_:)``).
+/// outcome you can change after creation (``setRefreshResult(_:)``). Concurrent refresh calls
+/// share one scripted refresh through `AuthorizationRefreshCoalescer`.
 ///
 /// ```swift
 /// let provider = TestAuthorizationProvider(current: .bearer(token: "old"), refreshResult: true,
@@ -23,6 +28,8 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     private var currentAuth: AuthorizationType
     private var refreshResult: Bool
     private var refreshedAuth: AuthorizationType?
+    private let refreshOperation: (@Sendable () async throws -> Void)?
+    private let refreshes = AuthorizationRefreshCoalescer()
     /// Number of attempted refreshes.
     public private(set) var refreshCallCount = 0
     /// Credentials rejected by the server, in order.
@@ -38,16 +45,21 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     ///   - refreshedAuthorization: Optional replacement after successful refresh.
     ///   - shouldRefresh: Optional decision for whether a `401` or `403` response warrants a refresh.
     ///     When `nil`, `401` responses are refreshed and `403` responses are not.
+    ///   - refreshOperation: Optional operation run once for each successful, coalesced refresh before
+    ///     `refreshedAuthorization` replaces the current authorization. It can suspend to coordinate
+    ///     concurrent-refresh tests or throw to make the refresh fail.
     public init(
         current: AuthorizationType,
         refreshResult: Bool,
         refreshedAuthorization: AuthorizationType? = nil,
-        shouldRefresh: (@Sendable (HTTPResponse) -> Bool)? = nil
+        shouldRefresh: (@Sendable (HTTPResponse) -> Bool)? = nil,
+        refreshOperation: (@Sendable () async throws -> Void)? = nil
     ) {
         self.refreshDecision = shouldRefresh
         self.currentAuth = current
         self.refreshResult = refreshResult
         self.refreshedAuth = refreshedAuthorization
+        self.refreshOperation = refreshOperation
     }
 
     /// Changes whether later refreshes succeed. A failed refresh throws ``RefreshFailed``.
@@ -79,8 +91,18 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     /// - Throws: ``RefreshFailed`` when the provider was created with `refreshResult: false`.
     public func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
         rejectedAuthorizations.append(rejected)
+        try await refreshes.refresh(rejecting: rejected, of: self) { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.performRefresh()
+        }
+    }
+
+    private func performRefresh() async throws {
         refreshCallCount += 1
         guard refreshResult else { throw RefreshFailed() }
+        if let refreshOperation {
+            try await refreshOperation()
+        }
         if let refreshedAuth {
             currentAuth = refreshedAuth
         }

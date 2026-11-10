@@ -86,8 +86,8 @@ extension AuthorizationProvider {
     ///
     /// Use it at the top of ``refreshAuthorization(rejecting:)`` to skip a refresh that another
     /// request already did. It does not stop requests that fail together from each refreshing;
-    /// ``AuthorizationRefreshCoalescer`` does both. When it returns `false`, a newer credential exists and the caller
-    /// retries with it, so return without refreshing:
+    /// ``AuthorizationRefreshCoalescer`` does both. A different value makes this return `false`;
+    /// this is safe to skip only if that value represents a usable replacement:
     ///
     /// ```swift
     /// func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
@@ -96,12 +96,17 @@ extension AuthorizationProvider {
     /// }
     /// ```
     ///
-    /// If ``currentAuthorization()`` throws, there is no newer credential, so this returns `true`
-    /// and the refresh proceeds.
+    /// If ``currentAuthorization()`` throws, there is no newer credential, so this returns `true`.
+    /// If the provider instead uses a value such as ``AuthorizationType/none`` to represent no
+    /// usable credential, that value compares unequal to a rejected bearer token and this returns
+    /// `false` even though refresh may still be needed. Use a custom check, or pass a probe
+    /// provider that throws for that sentinel to
+    /// ``AuthorizationRefreshCoalescer/refresh(rejecting:of:_:)``. The probe is only used for
+    /// the check and need not change how the real provider authorizes requests.
     ///
     /// - Parameter authorization: Typically the `rejected` value passed to
     ///   ``refreshAuthorization(rejecting:)``.
-    /// - Returns: `true` when the provider would still send `authorization`.
+    /// - Returns: `true` when the provider returns `authorization` or throws.
     public func isCurrentAuthorization(_ authorization: AuthorizationType) async -> Bool {
         guard let current = try? await currentAuthorization() else { return true }
         return current == authorization

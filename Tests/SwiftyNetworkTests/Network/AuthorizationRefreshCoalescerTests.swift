@@ -48,12 +48,18 @@ struct AuthorizationRefreshCoalescerTests {
         private let refreshes = AuthorizationRefreshCoalescer()
         private var token = "old"
         let refreshCount = Counter()
+        private(set) var rejectionCount = 0
+        nonisolated let refreshStarted = AsyncGate()
+        nonisolated let finishRefresh = AsyncGate()
 
         func currentAuthorization() async -> AuthorizationType { .bearer(token: token) }
 
         func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
+            rejectionCount += 1
             try await refreshes.refresh(rejecting: rejected, of: self) {
                 await self.refreshCount.increment()
+                self.refreshStarted.open()
+                try await self.finishRefresh.wait()
                 await self.store("new")
             }
         }
@@ -304,6 +310,37 @@ struct AuthorizationRefreshCoalescerTests {
         #expect(await counter.count == 1)
     }
 
+    @Test("A custom staleness check refreshes when a different value is not usable")
+    func customStalenessCheckRefreshesWithoutUsableAuthorization() async throws {
+        actor NoTokenProvider: AuthorizationProvider {
+            private var authorization: AuthorizationType = .none
+            func currentAuthorization() async -> AuthorizationType { authorization }
+            func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {}
+            func store(_ value: AuthorizationType) { authorization = value }
+        }
+        let coalescer = AuthorizationRefreshCoalescer()
+        let provider = NoTokenProvider()
+        let counter = Counter()
+        let rejected = AuthorizationType.bearer(token: "expired")
+
+        try await coalescer.refresh(rejecting: rejected, of: provider) {
+            await counter.increment()
+        }
+        #expect(await counter.count == 0)
+
+        let check: @Sendable () async -> Bool = {
+            let current = await provider.currentAuthorization()
+            return current == .none || current == rejected
+        }
+        let refresh: @Sendable () async -> Void = {
+            await counter.increment()
+            await provider.store(.bearer(token: "new"))
+        }
+        try await coalescer.refresh(rejecting: rejected, isCurrentAuthorization: check, refresh)
+        try await coalescer.refresh(rejecting: rejected, isCurrentAuthorization: check, refresh)
+        #expect(await counter.count == 1)
+    }
+
     // MARK: - Through NetworkClient
 
     @Test("Concurrent 401s for a custom provider refresh once and replay with the new token")
@@ -321,12 +358,14 @@ struct AuthorizationRefreshCoalescerTests {
             )
         )
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for id in ids {
-                group.addTask { try await client.request(makeEndpointWithTestId(id)) }
-            }
-            try await group.waitForAll()
+        defer { provider.finishRefresh.open() }
+        let requests = ids.map { id in
+            Task { try await client.request(makeEndpointWithTestId(id)) }
         }
+        try await provider.refreshStarted.wait()
+        while await provider.rejectionCount < ids.count { await Task.yield() }
+        provider.finishRefresh.open()
+        for request in requests { try await request.value }
 
         #expect(await provider.refreshCount.count == 1)
         for id in ids {

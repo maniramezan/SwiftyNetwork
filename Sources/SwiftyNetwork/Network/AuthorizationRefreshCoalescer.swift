@@ -90,32 +90,34 @@ public actor AuthorizationRefreshCoalescer {
     /// Creates a coalescer with no refresh in flight.
     public init() {}
 
-    /// Refreshes after `rejected` was refused, unless it is stale or a refresh is already running.
+    /// Refreshes after `rejected` was refused, unless a newer usable authorization exists or a refresh is running.
     ///
-    /// - If `provider` no longer returns `rejected`, a newer credential exists, so this returns
-    ///   without running `refresh` and the client retries with the newer credential.
+    /// - If `isCurrentAuthorization` returns `false`, a newer usable authorization exists, so this
+    ///   returns without running `refresh` and the client retries with that authorization.
     /// - If a refresh is in flight, this waits for it and returns its result.
     /// - Otherwise, this runs `refresh` and shares it with every caller that arrives meanwhile.
     ///
-    /// The staleness check uses ``AuthorizationProvider/isCurrentAuthorization(_:)``, so a
-    /// `provider` whose ``AuthorizationProvider/currentAuthorization()`` throws is refreshed.
+    /// Use this overload when equality is not enough to decide whether authorization was replaced.
+    /// For example, if a provider represents no usable token as ``AuthorizationType/none``, a
+    /// rejection of a bearer token must still return `true` until a usable replacement exists.
     ///
     /// - Parameters:
     ///   - rejected: The authorization the server rejected, as passed to
     ///     ``AuthorizationProvider/refreshAuthorization(rejecting:)``.
-    ///   - provider: The provider whose current authorization is compared against `rejected`.
+    ///   - isCurrentAuthorization: Returns `true` when `rejected` still needs a refresh, or
+    ///     `false` when a usable replacement is available.
     ///   - refresh: Obtains and stores a new credential, or throws when it cannot.
     /// - Throws: The shared refresh's error, `CancellationError` when the shared refresh was
     ///   canceled, or ``ReentrantRefreshError`` when called from inside the running refresh.
     public func refresh(
         rejecting rejected: AuthorizationType,
-        of provider: some AuthorizationProvider,
+        isCurrentAuthorization: @escaping @Sendable () async -> Bool,
         _ refresh: @escaping @Sendable () async throws -> Void
     ) async throws {
         try checkReentrancy()
         while true {
             let observedFlights = completedFlights
-            guard await provider.isCurrentAuthorization(rejected) else {
+            guard await isCurrentAuthorization() else {
                 Logger.debug("Rejected authorization was already replaced; skipping refresh", category: .auth)
                 return
             }
@@ -127,6 +129,56 @@ public actor AuthorizationRefreshCoalescer {
             if completedFlights == observedFlights { break }
         }
         try await start(refresh)
+    }
+
+    /// Refreshes after `rejected` was refused, unless the provider has already replaced it.
+    ///
+    /// This convenience overload compares `rejected` with
+    /// ``AuthorizationProvider/isCurrentAuthorization(_:)``: a thrown error means refresh is
+    /// needed, while any different value is treated as a usable replacement. Use
+    /// ``refresh(rejecting:isCurrentAuthorization:_:)`` instead when a different authorization
+    /// value can still mean that no usable replacement exists, such as a provider that reports no
+    /// token as ``AuthorizationType/none``. Alternatively, pass a probe provider whose
+    /// `currentAuthorization()` throws for the no-credential value; it need not change the
+    /// authorization provider used for requests.
+    ///
+    /// ```swift
+    /// struct RefreshProbe: AuthorizationProvider {
+    ///     struct NoCredential: Error {}
+    ///     let provider: any AuthorizationProvider
+    ///
+    ///     func currentAuthorization() async throws -> AuthorizationType {
+    ///         let current = try await provider.currentAuthorization()
+    ///         guard current != .none else { throw NoCredential() }
+    ///         return current
+    ///     }
+    ///
+    ///     func refreshAuthorization(rejecting: AuthorizationType) async throws {}
+    /// }
+    ///
+    /// // In the real provider's refreshAuthorization(rejecting:):
+    /// try await refreshes.refresh(rejecting: rejected, of: RefreshProbe(provider: self)) {
+    ///     try await self.obtainAndStoreCredential()
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - rejected: The authorization the server rejected, as passed to
+    ///     ``AuthorizationProvider/refreshAuthorization(rejecting:)``.
+    ///   - provider: The provider whose current authorization is compared against `rejected`.
+    ///   - refresh: Obtains and stores a new credential, or throws when it cannot.
+    /// - Throws: The shared refresh's error, `CancellationError` when the shared refresh is
+    ///   canceled, or ``ReentrantRefreshError`` when called from inside the running refresh.
+    public func refresh(
+        rejecting rejected: AuthorizationType,
+        of provider: some AuthorizationProvider,
+        _ refresh: @escaping @Sendable () async throws -> Void
+    ) async throws {
+        try await self.refresh(
+            rejecting: rejected,
+            isCurrentAuthorization: { await provider.isCurrentAuthorization(rejected) },
+            refresh
+        )
     }
 
     /// Refreshes unconditionally, with a refresh that starts after this call.

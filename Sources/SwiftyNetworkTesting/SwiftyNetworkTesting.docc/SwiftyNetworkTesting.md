@@ -4,10 +4,9 @@ Test doubles for apps and libraries built on SwiftyNetwork.
 
 ## Overview
 
-Link `SwiftyNetwork` from your app or library target and `SwiftyNetworkTesting` only from its
-**test target**. `SwiftyNetworkTesting` already depends on `SwiftyNetwork`, so do not add the core
-product to the test target again; this keeps Swift Package Manager's dependency graph to one copy
-of `SwiftyNetwork`. Never link `SwiftyNetworkTesting` from production targets:
+For a single-binary SwiftPM app, link `SwiftyNetwork` from the app or library target and
+`SwiftyNetworkTesting` from the test target. Never link `SwiftyNetworkTesting` from production
+targets or expose its types in production APIs:
 
 ```swift
 .target(
@@ -24,6 +23,12 @@ of `SwiftyNetwork`. Never link `SwiftyNetworkTesting` from production targets:
     ]
 )
 ```
+
+In an Xcode app with dynamic frameworks that load `SwiftyNetwork`, do not link
+`SwiftyNetworkTesting` into the same test process until its packaging is fixed. It can embed a
+second copy of the core even when the test target does not directly link `SwiftyNetwork`; casts
+to `NetworkError` and retroactive conformances may then fail. Use app-local test doubles instead.
+Other layouts that statically link the core into multiple binaries can have the same problem.
 
 ``MockAPIClient`` conforms to SwiftyNetwork's `APIClient`,
 so it plugs into anything that accepts `any APIClient`, `GenericRepository`,

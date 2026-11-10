@@ -1015,10 +1015,9 @@ All operations in SwiftyNetwork are thread-safe:
 
 ## Testing
 
-Link `SwiftyNetwork` from your app or library target and `SwiftyNetworkTesting` only from its
-**test target**. `SwiftyNetworkTesting` already depends on `SwiftyNetwork`, so do not add the core
-product to the test target again; this keeps Swift Package Manager's dependency graph to one copy
-of `SwiftyNetwork`.
+`SwiftyNetworkTesting` is an optional test-support product. Link it from test targets only, not
+production targets or APIs. For a single-binary SwiftPM app, link `SwiftyNetwork` from the app
+target and `SwiftyNetworkTesting` from the test target:
 
 ```swift
 .target(
@@ -1037,6 +1036,14 @@ of `SwiftyNetwork`.
 ```
 
 This makes `MockAPIClient` and `TestAuthorizationProvider` available to the test target.
+
+**Xcode dynamic-framework limitation:** Do not use `SwiftyNetworkTesting` in a test process that
+also loads `SwiftyNetwork` through a dynamic framework. The testing product can embed a second
+copy of the core module even when only the test bundle links it. `NetworkError` casts and
+retroactive conformances can then fail across the two images. Use app-local test doubles until
+the packaging issue is fixed. Merely removing the core product from the test target does not fix it.
+If other build layouts statically link the core into multiple binaries, check their loaded images
+and symbols too; avoid mixing copies in the same process.
 
 ```swift
 import SwiftyNetwork
@@ -1065,7 +1072,8 @@ import Testing
 ```
 
 `TestAuthorizationProvider` is a scriptable `AuthorizationProvider` for the same targets: a fixed bearer token, a
-`refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)` to change the refresh outcome mid-test.
+`refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)`,
+`setRefreshedAuthorization(_:)`, and `setCurrentAuthorization(_:)` to change the script mid-test.
 Like the rest of `SwiftyNetworkTesting`, it is for test targets and previews only.
 
 Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))` to script response headers

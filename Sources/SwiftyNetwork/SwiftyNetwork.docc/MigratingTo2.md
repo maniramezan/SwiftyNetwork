@@ -78,6 +78,17 @@ func response<T: Decodable & Sendable>(
   (``NetworkRequestAttempt/attempt`` numbers each attempt of a request), or with
   `NetworkInstrumentationRecorder` from `SwiftyNetworkTesting` in tests.
 
+### Test support
+
+`SwiftyNetworkTesting` is an optional test-support product; never link it from production targets
+or expose its types in production APIs. For a single-binary SwiftPM app, link the core product
+from the app and the testing product from the test target. In Xcode apps that load the core
+through dynamic frameworks, do not link the testing product into the same test process until its
+packaging is fixed. It can embed a second core copy even without a direct core link from the test
+target, breaking `NetworkError` casts and retroactive conformances. Use app-local test doubles.
+Where the testing product is suitable, `TestAuthorizationProvider` offers `setRefreshResult(_:)`,
+`setRefreshedAuthorization(_:)`, and `setCurrentAuthorization(_:)` to change its script.
+
 ### Redirects
 
 - **Behavior change:** ``NetworkClient`` now checks every redirect against
@@ -195,7 +206,10 @@ case .rejected, .serverError, .other: showGenericError()
   call ``AuthorizationRefreshCoalescer/refresh(rejecting:of:_:)`` from
   ``AuthorizationProvider/refreshAuthorization(rejecting:)``. It shares one refresh across requests that
   fail together, skips a stale rejection, and detects a nested refresh the same way
-  ``OAuthAuthorizationProvider`` does.
+  ``OAuthAuthorizationProvider`` does. Use
+  ``AuthorizationRefreshCoalescer/refresh(rejecting:isCurrentAuthorization:_:)`` when a changed
+  authorization value does not necessarily mean a usable replacement exists, such as a provider
+  that represents no token as ``AuthorizationType/none``.
 
 #### Converting a `Bool` refresh
 
