@@ -19,14 +19,9 @@ SwiftyNetwork provides:
 - **Pluggable instrumentation** via ``NetworkInstrumentation`` for OpenTelemetry-style request tracing, with
   ``NetworkError/classification`` for retry policies and ``NetworkError/category`` for user-facing outcomes.
 
-For tests and previews, the separate `SwiftyNetworkTesting` library product provides
-`MockAPIClient`, a scriptable ``APIClient`` that records every request, and
-`TestAuthorizationProvider`, a scriptable ``AuthorizationProvider`` that counts refreshes. Use it
-only in test targets, never production targets. For a single-binary SwiftPM app, link the core
-product from the app target and testing product from the test target. In Xcode apps that load the
-core through dynamic frameworks, do not link the testing product into the same test process until
-its packaging is fixed: it can embed a second core copy, breaking `NetworkError` casts and
-retroactive conformances. Use app-local test doubles instead.
+For tests and previews, `@_spi(Testing) import SwiftyNetwork` provides `MockAPIClient`, a
+scriptable ``APIClient`` that records every request, and `TestAuthorizationProvider`, a
+scriptable ``AuthorizationProvider`` that counts refreshes. See <doc:TestingWithSwiftyNetwork>.
 
 For streaming or other transports ``NetworkClient`` cannot model, use
 ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)`` to keep its authorization, `401` refresh-once,
@@ -115,6 +110,7 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 ### Guides
 
 - <doc:CustomDiskCache>
+- <doc:TestingWithSwiftyNetwork>
 
 ### Reachability
 

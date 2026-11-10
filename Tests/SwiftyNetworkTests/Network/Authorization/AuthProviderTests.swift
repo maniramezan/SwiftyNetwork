@@ -1,9 +1,8 @@
 import Foundation
-import SwiftyNetworkTesting
 import TestCommons
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Suite("OAuthAuthorizationProvider Tests")
 struct OAuthAuthorizationProviderTests {

@@ -1,8 +1,7 @@
 import Foundation
-import SwiftyNetworkTesting
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Suite("MutationRequest Tests", .serialized)
 struct MutationRequestTests {

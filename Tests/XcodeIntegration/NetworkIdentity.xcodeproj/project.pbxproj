@@ -17,7 +17,7 @@
 		7ADAB4E6B53CCA4A73C4E5E4 /* OtherFramework.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32991C1E0254117C6DB0EE24 /* OtherFramework.framework */; };
 		97B134C62B67801D3F31EE47 /* OtherFramework.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 32991C1E0254117C6DB0EE24 /* OtherFramework.framework */; };
 		9C1FDDA6617F3223ADB89BE1 /* OtherFramework.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F5F88F1BF44C0DBA252F90E /* OtherFramework.swift */; };
-		ABDC88835491B7B61B9C5930 /* SwiftyNetworkTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 5403B42BFDF19773CEAC62AF /* SwiftyNetworkTesting */; };
+		ABDC88835491B7B61B9C5930 /* SwiftyNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = CF7155BB267F185967F89FB1 /* SwiftyNetwork */; };
 		D3E808A81CEFD9055FAC0FC5 /* AppFramework.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0E34A85BBB463EDD9DCAD9F5 /* AppFramework.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D566A4640C1ED04A4F099D52 /* SwiftyNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = 703CEDCE4CD5488E1807FE6F /* SwiftyNetwork */; };
 		DCD8997066C0A82F2C3CAABD /* AppFramework.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0E34A85BBB463EDD9DCAD9F5 /* AppFramework.framework */; };
@@ -103,7 +103,7 @@
 			files = (
 				DCD8997066C0A82F2C3CAABD /* AppFramework.framework in Frameworks */,
 				F0CA2255F1C7C82FBAEF5B7A /* OtherFramework.framework in Frameworks */,
-				ABDC88835491B7B61B9C5930 /* SwiftyNetworkTesting in Frameworks */,
+				ABDC88835491B7B61B9C5930 /* SwiftyNetwork in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,7 +239,7 @@
 			);
 			name = NetworkIdentityTests;
 			packageProductDependencies = (
-				5403B42BFDF19773CEAC62AF /* SwiftyNetworkTesting */,
+				CF7155BB267F185967F89FB1 /* SwiftyNetwork */,
 			);
 			productName = NetworkIdentityTests;
 			productReference = 7C4F5EC5E42811A324824D6E /* NetworkIdentityTests.xctest */;
@@ -722,10 +722,6 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		5403B42BFDF19773CEAC62AF /* SwiftyNetworkTesting */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = SwiftyNetworkTesting;
-		};
 		703CEDCE4CD5488E1807FE6F /* SwiftyNetwork */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftyNetwork;
@@ -735,6 +731,10 @@
 			productName = SwiftyNetwork;
 		};
 		CDB0D89FB230D80C43E3A950 /* SwiftyNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SwiftyNetwork;
+		};
+		CF7155BB267F185967F89FB1 /* SwiftyNetwork */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftyNetwork;
 		};

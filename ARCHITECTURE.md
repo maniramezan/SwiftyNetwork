@@ -19,7 +19,7 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
 | Repository | `Repository.swift`, `RepositoryResult.swift`, `FetchCoalescer.swift` | Coordinate a cache and the network using `CachePolicy`, report freshness, share same-key requests |
 | Mutations | `Mutation/`, `Mutation/Store/` | Retry, coalesce, persist, and observe background mutations |
-| Test doubles | `Sources/SwiftyNetworkTesting/` (separate product) | `MockAPIClient`, `RecordedRequest`, `MutationRetryPolicy.immediate()`, `NetworkRetryPolicy.immediate()` |
+| Test doubles | `Testing/` (`@_spi(Testing)`, no separate product) | `MockAPIClient`, `RecordedRequest`, `TestAuthorizationProvider`, `NetworkInstrumentationRecorder`, `.immediate()` retry policies |
 
 Internal building blocks are kept in their own files so they can be reused and
 tested directly: `HTTPStatusValidator` (status → `NetworkError`), `RequestTrace`

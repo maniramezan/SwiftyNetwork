@@ -363,7 +363,11 @@ struct AuthorizationRefreshCoalescerTests {
             Task { try await client.request(makeEndpointWithTestId(id)) }
         }
         try await provider.refreshStarted.wait()
-        while await provider.rejectionCount < ids.count { await Task.yield() }
+        _ = try await waitUntil(
+            timeout: .seconds(5),
+            operation: { await provider.rejectionCount },
+            matching: { $0 == ids.count }
+        )
         provider.finishRefresh.open()
         for request in requests { try await request.value }
 

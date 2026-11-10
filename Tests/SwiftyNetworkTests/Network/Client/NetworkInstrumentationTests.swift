@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Suite("NetworkClient Instrumentation Tests", .serialized)
 struct NetworkInstrumentationTests {

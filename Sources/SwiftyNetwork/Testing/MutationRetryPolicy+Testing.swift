@@ -1,5 +1,3 @@
-import SwiftyNetwork
-
 extension MutationRetryPolicy {
     /// A policy that retries without waiting, for fast, deterministic tests.
     ///
@@ -8,7 +6,7 @@ extension MutationRetryPolicy {
     ///
     /// - Parameter maxRetries: Retries after the first attempt. Defaults to 3.
     /// - Returns: A policy with ``BackoffPolicy/immediate`` backoff.
-    public static func immediate(maxRetries: Int = 3) -> MutationRetryPolicy {
+    @_spi(Testing) public static func immediate(maxRetries: Int = 3) -> MutationRetryPolicy {
         MutationRetryPolicy(maxRetries: maxRetries, backoff: .immediate)
     }
 }

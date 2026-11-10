@@ -1,7 +1,5 @@
-import SwiftyNetwork
-
 /// Records every `NetworkInstrumentation` event for later assertions.
-public actor NetworkInstrumentationRecorder: NetworkInstrumentation {
+@_spi(Testing) public actor NetworkInstrumentationRecorder: NetworkInstrumentation {
     /// Creates an empty recorder.
     public init() {}
     /// Recorded started events in delivery order.

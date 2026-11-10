@@ -81,13 +81,14 @@ Sources/SwiftyNetwork/
         ├── MutationStore.swift             # Pluggable persistence protocol
         ├── InMemoryMutationStore.swift     # Default in-memory MutationStore
         └── FileMutationStore.swift         # Durable file-backed MutationStore
-
-Sources/SwiftyNetworkTesting/        # Public test doubles for consumers (separate library product)
-├── MockAPIClient.swift              # Scriptable APIClient that records requests
-├── RecordedRequest.swift            # Snapshot of a received endpoint
-├── BackoffPolicy+Testing.swift        # BackoffPolicy.immediate (zero wait, ignores Retry-After)
-├── MutationRetryPolicy+Testing.swift  # .immediate() zero-backoff policy
-└── NetworkRetryPolicy+Testing.swift   # .immediate() zero-backoff request retry policy
+└── Testing/                            # Public test doubles, all `@_spi(Testing) public`
+    ├── MockAPIClient.swift                 # Scriptable APIClient that records requests
+    ├── RecordedRequest.swift               # Snapshot of a received endpoint
+    ├── TestAuthorizationProvider.swift     # Scriptable AuthorizationProvider spy
+    ├── NetworkInstrumentationRecorder.swift # Records NetworkInstrumentation events
+    ├── BackoffPolicy+Testing.swift         # BackoffPolicy.immediate (zero wait, ignores Retry-After)
+    ├── MutationRetryPolicy+Testing.swift   # .immediate() zero-backoff policy
+    └── NetworkRetryPolicy+Testing.swift    # .immediate() zero-backoff request retry policy
 
 Tests/SwiftyNetworkTests/
 ├── Helpers/                         # TestHTTPStub, RedirectingURLProtocol, FakeAPIClient, TestAuthorizationProvider, ...
@@ -95,7 +96,7 @@ Tests/SwiftyNetworkTests/
 ├── Cache/                           # Storage/ (types, LRUStorage, disk) and Coordination/ (ordering, single-flight, RemoteDataCache)
 ├── Repository/RepositoryTests.swift # All cache policies against a real NetworkClient
 ├── Mutation/                        # Queue retry/coalescing/status, request/policy tests; Store/ for stores
-└── Testing/                         # MockAPIClient tests (the public SwiftyNetworkTesting module)
+└── Testing/                         # Tests for the `Testing` SPI doubles (MockAPIClient, TestAuthorizationProvider)
 ```
 
 ## Quick Commands
@@ -121,7 +122,7 @@ xcodebuild test -scheme SwiftyNetwork-Package \
   -parallel-testing-enabled YES -parallel-testing-worker-count 3
 
 # API breaking changes against the latest release (CI job `api-breakage`; see CONTRIBUTING.md)
-swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork SwiftyNetworkTesting
+swift package diagnose-api-breaking-changes <latest-tag> --products SwiftyNetwork
 
 # Documentation (DocC)
 swift package generate-documentation \
@@ -197,7 +198,8 @@ stub.session                              // Inject into the client/cache
 TestAuthorizationProvider(current:refreshResult:refreshedAuthorization:shouldRefresh:)
 
 // Scripted APIClient (no URLSession) -- prefer for MutationQueue / repository / service tests
-let client = MockAPIClient()                              // from SwiftyNetworkTesting
+// MockAPIClient and the other doubles need `@_spi(Testing) @testable import SwiftyNetwork`
+let client = MockAPIClient()
 await client.stub(.post, "/likes", with: .failure(NetworkError.timeout(nil)), .empty)
 let queue = MutationQueue(client: client, retryPolicy: .immediate())
 

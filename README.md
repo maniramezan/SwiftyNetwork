@@ -22,7 +22,7 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Fire-and-Forget Mutations**: Background retry, key-based coalescing, and pluggable persistence via `MutationQueue`
 - **Fetch Deduplication**: `SingleFlightCache` and `RemoteDataCache` share one fetch across concurrent callers
 - **Reachability & Instrumentation**: `NetworkMonitor` streams reachability; `NetworkInstrumentation` exposes request timing and outcomes
-- **Test Doubles**: The `SwiftyNetworkTesting` product ships `MockAPIClient` for unit tests and previews
+- **Test Doubles**: `@_spi(Testing) import SwiftyNetwork` gives tests and previews `MockAPIClient` and `TestAuthorizationProvider`
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
 ## Requirements
@@ -465,6 +465,24 @@ actor SessionAuthorizationProvider: AuthorizationProvider {
 
 The refresh closure must store the new credential before it returns. `isCurrentAuthorization(_:)` alone skips a
 refresh that another request already finished, but it does not stop requests that fail together from each refreshing.
+
+`refresh(rejecting:of:_:)` treats a thrown `currentAuthorization()` as "refresh" and any different value as "already
+replaced, skip". A provider that reports "no usable credential" as a value (for example `.none`, because throwing would
+turn a transient failure into a sign-in prompt) would skip a refresh that is still needed. Pass the staleness check
+yourself instead; return `true` while the rejected credential still needs replacing:
+
+```swift
+try await refreshes.refresh(
+    rejecting: rejected,
+    isCurrentAuthorization: {
+        let current = await self.currentAuthorization()
+        return current == .none || current == rejected
+    }
+) {
+    let newToken = try await sessionService.reauthenticate()
+    await self.store(newToken)
+}
+```
 
 #### Endpoints without the user's credentials
 
@@ -1015,39 +1033,27 @@ All operations in SwiftyNetwork are thread-safe:
 
 ## Testing
 
-`SwiftyNetworkTesting` is an optional test-support product. Link it from test targets only, not
-production targets or APIs. For a single-binary SwiftPM app, link `SwiftyNetwork` from the app
-target and `SwiftyNetworkTesting` from the test target:
+SwiftyNetwork's test doubles live in the `SwiftyNetwork` module behind the `Testing` SPI, so a test
+target needs only the `SwiftyNetwork` product your app already links. Import the SPI in tests and
+previews, never in production code:
 
 ```swift
-.target(
-    name: "MyApp",
-    dependencies: [
-        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
-    ]
-),
 .testTarget(
     name: "MyAppTests",
     dependencies: [
         "MyApp",
-        .product(name: "SwiftyNetworkTesting", package: "SwiftyNetwork"),
+        .product(name: "SwiftyNetwork", package: "SwiftyNetwork"),
     ]
 )
 ```
 
-This makes `MockAPIClient` and `TestAuthorizationProvider` available to the test target.
-
-**Xcode dynamic-framework limitation:** Do not use `SwiftyNetworkTesting` in a test process that
-also loads `SwiftyNetwork` through a dynamic framework. The testing product can embed a second
-copy of the core module even when only the test bundle links it. `NetworkError` casts and
-retroactive conformances can then fail across the two images. Use app-local test doubles until
-the packaging issue is fixed. Merely removing the core product from the test target does not fix it.
-If other build layouts statically link the core into multiple binaries, check their loaded images
-and symbols too; avoid mixing copies in the same process.
+`@testable import` alone doesn't expose SPI; write `@_spi(Testing) @testable import SwiftyNetwork`
+when you need both. Keeping the doubles in the core module means a test target always uses the same
+copy of SwiftyNetwork as the app, including Xcode apps that load it through dynamic frameworks, so
+`NetworkError` casts and retroactive conformances work in tests.
 
 ```swift
-import SwiftyNetwork
-import SwiftyNetworkTesting
+@_spi(Testing) import SwiftyNetwork
 import Testing
 
 @Test func likeRetriesTransientFailures() async throws {
@@ -1074,7 +1080,7 @@ import Testing
 `TestAuthorizationProvider` is a scriptable `AuthorizationProvider` for the same targets: a fixed bearer token, a
 `refreshCallCount`, the `rejectedAuthorizations`, and `setRefreshResult(_:)`,
 `setRefreshedAuthorization(_:)`, and `setCurrentAuthorization(_:)` to change the script mid-test.
-Like the rest of `SwiftyNetworkTesting`, it is for test targets and previews only.
+Like the other `Testing` SPI doubles, it is for test targets and previews only.
 
 Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))` to script response headers
 for code that reads `response(for:responseType:)`. Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw

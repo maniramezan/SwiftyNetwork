@@ -1,5 +1,4 @@
 import Foundation
-import SwiftyNetwork
 
 /// A snapshot of an endpoint received by ``MockAPIClient``.
 ///
@@ -7,7 +6,7 @@ import SwiftyNetwork
 /// sent without depending on the endpoint's concrete type. Conforms to
 /// `NetworkEndpoint` so recorded requests can be replayed or passed into
 /// any API that accepts an endpoint.
-public struct RecordedRequest: NetworkEndpoint, Sendable, Equatable {
+@_spi(Testing) public struct RecordedRequest: NetworkEndpoint, Sendable, Equatable {
     /// The endpoint's base URL.
     public let baseURL: String
     /// The endpoint path.

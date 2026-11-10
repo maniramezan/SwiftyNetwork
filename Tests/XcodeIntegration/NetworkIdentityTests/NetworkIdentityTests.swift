@@ -1,7 +1,6 @@
 import AppFramework
 import OtherFramework
-import SwiftyNetwork
-import SwiftyNetworkTesting
+@_spi(Testing) import SwiftyNetwork
 import Testing
 
 @Test("Errors thrown across frameworks have one SwiftyNetwork type identity")

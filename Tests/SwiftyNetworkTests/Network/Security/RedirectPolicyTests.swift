@@ -2,7 +2,7 @@ import Foundation
 import Synchronization
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Suite("Redirect Policy Tests")
 struct RedirectPolicyTests {

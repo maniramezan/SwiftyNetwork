@@ -76,18 +76,23 @@ func response<T: Decodable & Sendable>(
 - `NetworkClient.updateConfiguration(_:)` is gone. Create a new ``NetworkClient`` instead.
 - `NetworkClient.attemptCount()` is gone. Count attempts with a ``NetworkInstrumentation``
   (``NetworkRequestAttempt/attempt`` numbers each attempt of a request), or with
-  `NetworkInstrumentationRecorder` from `SwiftyNetworkTesting` in tests.
+  `NetworkInstrumentationRecorder` from the `Testing` SPI in tests.
 
 ### Test support
 
-`SwiftyNetworkTesting` is an optional test-support product; never link it from production targets
-or expose its types in production APIs. For a single-binary SwiftPM app, link the core product
-from the app and the testing product from the test target. In Xcode apps that load the core
-through dynamic frameworks, do not link the testing product into the same test process until its
-packaging is fixed. It can embed a second core copy even without a direct core link from the test
-target, breaking `NetworkError` casts and retroactive conformances. Use app-local test doubles.
-Where the testing product is suitable, `TestAuthorizationProvider` offers `setRefreshResult(_:)`,
-`setRefreshedAuthorization(_:)`, and `setCurrentAuthorization(_:)` to change its script.
+- **Breaking:** The `SwiftyNetworkTesting` library product is gone. Its test doubles now live in
+  the `SwiftyNetwork` module behind the `Testing` SPI. Remove the
+  `.product(name: "SwiftyNetworkTesting", package: "SwiftyNetwork")` dependency from test targets,
+  link `SwiftyNetwork` instead if the target doesn't already, and replace
+  `import SwiftyNetworkTesting` with `@_spi(Testing) import SwiftyNetwork`. `@testable import`
+  alone doesn't expose SPI, so write `@_spi(Testing) @testable import SwiftyNetwork` where you need
+  both. The type names are unchanged.
+- In Xcode apps that load SwiftyNetwork through dynamic frameworks, the separate product could
+  link a second copy of SwiftyNetwork into the test bundle, so casts to ``NetworkError`` and
+  retroactive conformances failed. With the doubles in the core module, a test bundle uses the
+  app's copy. See <doc:TestingWithSwiftyNetwork>.
+- `TestAuthorizationProvider` adds `setRefreshResult(_:)`, `setRefreshedAuthorization(_:)`, and
+  `setCurrentAuthorization(_:)` to change its script.
 
 ### Redirects
 

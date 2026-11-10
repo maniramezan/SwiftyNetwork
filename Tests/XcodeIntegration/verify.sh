@@ -18,27 +18,11 @@ xcodebuild test \
     -derivedDataPath "$derived" \
     -parallel-testing-enabled NO
 
-check_symbols() {
-    local binary="$1"
-    local symbols
-    symbols="$(nm -gU "$binary")"
-    symbols="$(printf '%s\n' "$symbols" | grep '\$s13SwiftyNetwork' || true)"
-    if [ -n "$symbols" ]; then
-        echo "Unexpected SwiftyNetwork definitions in $binary:" >&2
-        echo "$symbols" >&2
-        exit 1
-    fi
-}
-
-check_symbols "$bundle"
-testing_framework="$products/PackageFrameworks/SwiftyNetworkTesting.framework/SwiftyNetworkTesting"
-if [ -f "$testing_framework" ]; then
-    symbols="$(nm -gU "$testing_framework")"
-    symbols="$(printf '%s\n' "$symbols" | grep '\$s13SwiftyNetwork' | swift demangle \
-        | grep -v '(extension in SwiftyNetworkTesting):' || true)"
-    if [ -n "$symbols" ]; then
-        echo "Unexpected SwiftyNetwork definitions in $testing_framework:" >&2
-        echo "$symbols" >&2
-        exit 1
-    fi
+# Fails when the test bundle defines SwiftyNetwork symbols, which means it embeds a second copy of
+# the core instead of loading the one the app's frameworks share.
+symbols="$(nm -gU "$bundle" | grep '\$s13SwiftyNetwork' | swift demangle || true)"
+if [ -n "$symbols" ]; then
+    echo "Unexpected SwiftyNetwork definitions in $bundle:" >&2
+    echo "$symbols" >&2
+    exit 1
 fi

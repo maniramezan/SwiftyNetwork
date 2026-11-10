@@ -11,8 +11,9 @@ commitment for every app that depends on it. Follow these steps in order.
 ## 1. Decide whether it belongs here
 
 - It must be reusable across apps and have no app-specific assumptions.
-- No new package dependencies (`Package.swift` stays dependency-free). Test doubles
-  go in the `SwiftyNetworkTesting` target, never in `SwiftyNetwork`.
+- No new package dependencies (`Package.swift` stays dependency-free). Public test doubles
+  go in `Sources/SwiftyNetwork/Testing/` and are marked `@_spi(Testing) public`. Never add a
+  separate testing product: it would link a second copy of the core into Xcode test bundles.
 - Check REVIEW.md "Evolution constraints" and PLAN.md's checklist first.
 - Prefer composing existing primitives (`Cache`, `SingleFlightCache`,
   `CacheOperationGate`, `LRUStorage`, `RequestTrace`, `HTTPStatusValidator`,
@@ -33,7 +34,7 @@ commitment for every app that depends on it. Follow these steps in order.
 | Cache coordination (gate, single-flight) | `Sources/SwiftyNetwork/Cache/Coordination/` |
 | Repository coordination | `Sources/SwiftyNetwork/Repository/` |
 | Mutation queue pieces | `Sources/SwiftyNetwork/Mutation/` (stores in `Mutation/Store/`) |
-| Public fakes/mocks for consumers | `Sources/SwiftyNetworkTesting/` |
+| Public fakes/mocks for consumers | `Sources/SwiftyNetwork/Testing/` (`@_spi(Testing) public`) |
 
 One primary type per file; file name = type name. Split internal helpers into
 their own files (see `HTTPStatusValidator.swift`, `RequestTrace.swift`, `LRUStorage.swift`).

@@ -2,7 +2,7 @@ import Foundation
 import Security
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 /// A minimal, unused challenge sender required to construct a `URLAuthenticationChallenge` in tests.
 private final class StubChallengeSender: NSObject, URLAuthenticationChallengeSender {

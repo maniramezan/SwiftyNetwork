@@ -1,5 +1,4 @@
 import Foundation
-import SwiftyNetwork
 
 /// A scriptable client for SwiftyNetwork requests in unit tests and SwiftUI previews.
 ///
@@ -24,7 +23,7 @@ import SwiftyNetwork
 /// let sent = await client.requests(to: "/users/1")
 /// #expect(sent.count == 1)
 /// ```
-public actor MockAPIClient: APIClient {
+@_spi(Testing) public actor MockAPIClient: APIClient {
     /// A scripted outcome for a stubbed route.
     public enum Response: Sendable {
         /// JSON bytes decoded into the requested type with the mock's decoder,

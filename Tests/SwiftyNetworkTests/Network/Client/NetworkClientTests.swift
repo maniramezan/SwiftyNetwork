@@ -2,7 +2,7 @@ import Foundation
 import TestCommons
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Test("NetworkClient conforms to APIClient")
 func testNetworkClientConformsToAPIClient() {

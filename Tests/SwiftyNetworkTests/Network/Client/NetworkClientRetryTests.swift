@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 // Serialized to bound how many stubbed URLSessions this suite holds from the finite shared pool.
 @Suite("NetworkClient Retry Policy Tests", .serialized)

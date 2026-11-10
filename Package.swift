@@ -10,10 +10,6 @@ let package = Package(
         .library(
             name: "SwiftyNetwork",
             targets: ["SwiftyNetwork"]),
-        // Test doubles for apps that depend on SwiftyNetwork. Link it only from test targets and previews.
-        .library(
-            name: "SwiftyNetworkTesting",
-            targets: ["SwiftyNetworkTesting"]),
     ],
     dependencies: [
         // No traits: SwiftyNetwork only uses the string, duration, concurrency, logging, and error
@@ -30,16 +26,10 @@ let package = Package(
             ],
             resources: [.process("SwiftyNetwork.docc")]
         ),
-        .target(
-            name: "SwiftyNetworkTesting",
-            dependencies: ["SwiftyNetwork"],
-            resources: [.process("SwiftyNetworkTesting.docc")]
-        ),
         .testTarget(
             name: "SwiftyNetworkTests",
             dependencies: [
                 "SwiftyNetwork",
-                "SwiftyNetworkTesting",
                 .product(name: "TestCommons", package: "SwiftTestCommons"),
             ]
         ),

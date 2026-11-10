@@ -1,9 +1,8 @@
 import Foundation
-import SwiftyNetworkTesting
 import TestCommons
 import Testing
 
-@testable import SwiftyNetwork
+@_spi(Testing) @testable import SwiftyNetwork
 
 @Suite("MutationQueue connectivity, responses, and idempotency")
 struct MutationQueueConsumerGapTests {

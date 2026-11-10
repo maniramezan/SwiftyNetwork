@@ -1,24 +1,19 @@
-import SwiftyNetwork
-
 /// Scriptable authorization state that records refresh attempts and rejected credentials.
 ///
-/// For tests and SwiftUI previews only; never link `SwiftyNetworkTesting` from production targets.
-/// A single-binary SwiftPM app can link the core product from the app and the testing product from
-/// its test target. In Xcode apps that load the core through dynamic frameworks, avoid this product
-/// in the same test process until its packaging is fixed: it can embed a second core copy, breaking
-/// `NetworkError` casts and retroactive conformances. Use app-local test doubles instead.
+/// For tests and SwiftUI previews only. It is part of the `Testing` SPI, so import it with
+/// `@_spi(Testing) import SwiftyNetwork` and don't expose it from production APIs.
 ///
 /// It covers what apps usually hand-roll: a fixed bearer token
 /// (`current: .bearer(token: "t")`), a refresh call counter (``refreshCallCount``), and a refresh
 /// outcome you can change after creation (``setRefreshResult(_:)``). Concurrent refresh calls
-/// share one scripted refresh through `AuthorizationRefreshCoalescer`.
+/// share one scripted refresh through `AuthorizationRefreshCoalescer`, which never skips a refresh as stale.
 ///
 /// ```swift
 /// let provider = TestAuthorizationProvider(current: .bearer(token: "old"), refreshResult: true,
 ///     refreshedAuthorization: .bearer(token: "new"))
 /// await provider.setRefreshResult(false)
 /// ```
-public actor TestAuthorizationProvider: AuthorizationProvider {
+@_spi(Testing) public actor TestAuthorizationProvider: AuthorizationProvider {
     /// The error thrown by a refresh scripted to fail.
     public struct RefreshFailed: Error, Sendable, Equatable {
         /// Creates the error.
@@ -91,10 +86,14 @@ public actor TestAuthorizationProvider: AuthorizationProvider {
     /// - Throws: ``RefreshFailed`` when the provider was created with `refreshResult: false`.
     public func refreshAuthorization(rejecting rejected: AuthorizationType) async throws {
         rejectedAuthorizations.append(rejected)
-        try await refreshes.refresh(rejecting: rejected, of: self) { [weak self] in
+        // Only coalescing is wanted here: the double must refresh for every rejection, even one that
+        // differs from the scripted current authorization, so its staleness check always says "refresh".
+        let alwaysRefresh: @Sendable () async -> Bool = { true }
+        let refresh: @Sendable () async throws -> Void = { [weak self] in
             guard let self else { throw CancellationError() }
             try await self.performRefresh()
         }
+        try await refreshes.refresh(rejecting: rejected, isCurrentAuthorization: alwaysRefresh, refresh)
     }
 
     private func performRefresh() async throws {

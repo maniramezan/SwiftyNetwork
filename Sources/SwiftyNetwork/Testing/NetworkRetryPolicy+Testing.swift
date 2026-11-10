@@ -1,5 +1,3 @@
-import SwiftyNetwork
-
 extension NetworkRetryPolicy {
     /// A policy that retries without waiting, for fast, deterministic tests.
     ///
@@ -8,7 +6,7 @@ extension NetworkRetryPolicy {
     ///
     /// - Parameter maxRetries: Retries after the first attempt. Defaults to 2.
     /// - Returns: A policy with ``BackoffPolicy/immediate`` backoff.
-    public static func immediate(maxRetries: Int = 2) -> NetworkRetryPolicy {
+    @_spi(Testing) public static func immediate(maxRetries: Int = 2) -> NetworkRetryPolicy {
         NetworkRetryPolicy(maxRetries: maxRetries, backoff: .immediate)
     }
 }

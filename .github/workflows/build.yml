@@ -213,5 +213,5 @@ jobs:
           fi
           echo "Comparing against $baseline"
           swift package diagnose-api-breaking-changes "$baseline" \
-            --products SwiftyNetwork SwiftyNetworkTesting \
+            --products SwiftyNetwork \
             ${allowlist[@]+"${allowlist[@]}"}
