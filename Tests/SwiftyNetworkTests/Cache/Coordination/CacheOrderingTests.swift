@@ -154,6 +154,70 @@ struct CacheOrderingTests {
         #expect(await memory.value(forKey: key) == nil)
         #expect(await persistent.value(forKey: key) == nil)
     }
+
+    @Test("A suspended single-flight storage write does not hold back another key")
+    func singleFlightKeysAreIndependent() async throws {
+        let storage = SuspendedWriteCache()
+        let cache = SingleFlightCache(storage)
+        let write = Task { await cache.setValue("slow", forKey: "slow") }
+        try await storage.writeStarted.wait()
+
+        let finished = TestValueBox(false)
+        let read = Task {
+            let value = await cache.value(forKey: "other")
+            finished.set(true)
+            return value
+        }
+        // The read either finishes or queues behind the suspended write; only the first is correct.
+        while !finished.get(), await cache.operations.queuedOperationCount == 0 { await Task.yield() }
+        let queued = await cache.operations.queuedOperationCount
+        storage.finishWrite.open()
+
+        #expect(queued == 0)
+        #expect(await read.value == nil)
+        await write.value
+        #expect(await cache.value(forKey: "slow") == "slow")
+    }
+
+    @Test("A suspended layered write does not hold back another key")
+    func layeredKeysAreIndependent() async throws {
+        let persistent = SuspendedWriteCache()
+        let cache = LayeredCache(memoryCache: InMemoryCache<String>(), persistentCache: persistent)
+        let write = Task { await cache.setValue("slow", forKey: "slow") }
+        try await persistent.writeStarted.wait()
+
+        let finished = TestValueBox(false)
+        let read = Task {
+            let value = await cache.value(forKey: "other")
+            finished.set(true)
+            return value
+        }
+        while !finished.get(), await cache.operations.queuedOperationCount == 0 { await Task.yield() }
+        let queued = await cache.operations.queuedOperationCount
+        persistent.finishWrite.open()
+
+        #expect(queued == 0)
+        #expect(await read.value == nil)
+        await write.value
+        #expect(await cache.value(forKey: "slow") == "slow")
+    }
+
+    @Test("Clearing a layered cache waits for a suspended write to another key")
+    func layeredRemoveAllWaitsForRunningWrites() async throws {
+        let memory = InMemoryCache<String>()
+        let persistent = SuspendedWriteCache()
+        let cache = LayeredCache(memoryCache: memory, persistentCache: persistent)
+        let write = Task { await cache.setValue("slow", forKey: "slow") }
+        try await persistent.writeStarted.wait()
+        let clear = Task { await cache.removeAll() }
+        while await cache.operations.queuedOperationCount == 0 { await Task.yield() }
+        persistent.finishWrite.open()
+        await write.value
+        await clear.value
+
+        #expect(await memory.value(forKey: "slow") == nil)
+        #expect(await persistent.value(forKey: "slow") == nil)
+    }
 }
 
 /// Suspends the first write before storing, without relying on timing or sleeps.

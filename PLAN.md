@@ -57,13 +57,14 @@ When planning a new feature or significant change, consider:
 1. Extend `NetworkEndpoint` protocol or add to `NetworkClient`
 2. Update `NetworkError` if new error cases needed
 3. Add logging via `Logger` helper
-4. Test with `TestURLProtocol` mock
+4. Test with a per-test `TestHTTPStub` (see the `write-tests` skill)
 5. Document authorization requirements
 
 ### Repository Pattern Changes
 
 1. Consider impact on `GenericRepository`
-2. Test all cache policies (returnCacheElseLoad, reloadIgnoringCache, returnCacheIfNotExpired)
+2. Test all cache policies (returnCacheElseLoad, reloadIgnoringCache, returnCacheIfNotExpired,
+   reloadElseReturnCache, returnCacheAndRevalidate)
 3. Ensure network/local data sources are properly coordinated
 4. Add integration tests with real `NetworkClient` + `InMemoryCache`
 

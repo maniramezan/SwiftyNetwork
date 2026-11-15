@@ -70,7 +70,8 @@ public struct NetworkClientConfiguration: Sendable {
     /// This applies only to the authorization refresh path. It is unrelated to ``retryPolicy``,
     /// which controls backoff for transient failures.
     ///
-    /// Set this to `.zero` in tests or when the API can be retried immediately.
+    /// Defaults to `.zero`, so the replay follows the refresh at once. Set a delay only for an
+    /// API that needs time before it accepts a newly issued credential.
     public var authRefreshDelay: Duration
 
     /// Opt-in retry policy for transient failures of idempotent requests.
@@ -114,7 +115,7 @@ public struct NetworkClientConfiguration: Sendable {
     ///   - encoder: The JSON encoder to use.
     ///   - authorizationProvider: The authorization provider. Defaults to `nil`.
     ///   - maxAuthRefreshAttempts: Maximum auth-refresh attempts after a `401` or an accepted `403`. Defaults to 1.
-    ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to 1 second.
+    ///   - authRefreshDelay: Delay before retrying after auth refresh. Defaults to `.zero`.
     ///   - retryPolicy: Opt-in retry policy for idempotent requests. Defaults to `nil` (no retries).
     ///   - redirectPolicy: How redirects are followed. Defaults to
     ///     ``RedirectPolicy/stripCredentialsAcrossOrigins``.
@@ -126,7 +127,7 @@ public struct NetworkClientConfiguration: Sendable {
         encoder: JSONEncoder = JSONEncoder(),
         authorizationProvider: (any AuthorizationProvider)? = nil,
         maxAuthRefreshAttempts: Int = 1,
-        authRefreshDelay: Duration = .seconds(1),
+        authRefreshDelay: Duration = .zero,
         retryPolicy: NetworkRetryPolicy? = nil,
         redirectPolicy: RedirectPolicy = .stripCredentialsAcrossOrigins,
         timeout: Duration = .seconds(30),

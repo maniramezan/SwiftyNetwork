@@ -7,8 +7,9 @@ import Foundation
 /// Reads consult the in-memory layer first, then fall back to the persistent layer.
 /// Entries loaded from the persistent layer are promoted into memory with their
 /// original timestamp.
-/// Operations through this wrapper run one at a time, across all keys and suspension points,
-/// so promotion cannot overwrite a later write or removal. Access the underlying
+/// Operations for one key run one at a time, across suspension points, so promotion cannot
+/// overwrite a later write or removal. Operations for different keys run concurrently, and
+/// ``removeAll()`` runs alone. Access the underlying
 /// tiers exclusively through this wrapper to preserve this guarantee. Custom
 /// tiers must not call back into the same layered cache during an operation.
 ///
@@ -48,7 +49,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     /// - Parameter key: The cache key to look up.
     /// - Returns: The cached entry if it exists in either layer; otherwise `nil`.
     public func entry(forKey key: CacheKey) async -> CacheEntry<T>? {
-        await operations.runExclusive { await self.storageEntry(forKey: key) }
+        await operations.run(for: key) { await self.storageEntry(forKey: key) }
     }
 
     private func storageEntry(forKey key: CacheKey) async -> CacheEntry<T>? {
@@ -78,7 +79,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     ///   - entry: The value and timestamp to store.
     ///   - key: The cache key to associate with the entry.
     public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
-        await operations.runExclusive { await self.storageSetEntry(entry, forKey: key) }
+        await operations.run(for: key) { await self.storageSetEntry(entry, forKey: key) }
     }
 
     private func storageSetEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async {
@@ -90,7 +91,7 @@ public actor LayeredCache<T: Sendable>: Cache {
     ///
     /// - Parameter key: The cache key to remove.
     public func removeValue(forKey key: CacheKey) async {
-        await operations.runExclusive { await self.storageRemoveValue(forKey: key) }
+        await operations.run(for: key) { await self.storageRemoveValue(forKey: key) }
     }
 
     private func storageRemoveValue(forKey key: CacheKey) async {
