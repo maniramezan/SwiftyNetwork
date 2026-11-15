@@ -285,7 +285,7 @@ MutationQueue.enqueueAndWait(request, key) → subscribe before enqueue → resp
 Cache<Value> (protocol: entry/setEntry/removeValue/removeAll)
   → InMemoryCache<T> (actor, O(1) LRU via LRUStorage)
   → LayeredCache<T> (actor, memory + optional persistent, ops ordered per key by CacheOperationGate)
-  → DiskCache<T> (actor, one file per key; file work runs off the actor, ordered per key)
+  → DiskCache<T> (actor, one file per key; file work runs off the actor, ordered per key, capped by maxConcurrentOperations)
   → SingleFlightCache<Wrapped> (actor, dedupes concurrent misses per key)
   → your disk cache (implement the four requirements)
 RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCache)
