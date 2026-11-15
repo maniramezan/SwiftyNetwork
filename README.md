@@ -31,8 +31,9 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - [Quick Start](#quick-start)
 - [Advanced Usage](#advanced-usage): repositories and caching, authentication, streaming, mutations, SSL pinning,
   redirects, reachability, instrumentation
+- [Full guides and API reference](https://maniramezan.github.io/SwiftyNetwork)
 - [Cache Policies](#cache-policies)
-- [Error Handling](#error-handling): categories, rate limiting, retries
+- [Error Handling](#error-handling)
 - [Configuration](#configuration): client options, logging, JSON decoding
 - [Versioning](#versioning)
 - [Testing](#testing)
@@ -501,135 +502,23 @@ If the refresh handler calls the same client, its endpoint must opt out. Otherwi
 
 ### Streaming and Other Transports
 
-`NetworkClient` decodes whole responses, so it cannot carry a Server-Sent Events stream. `sendAuthorized` runs a raw
-`URLRequest` through a transport you supply, with the client's authorization, `401` refresh-once, redirect policy, and
-instrumentation, and throws the same `NetworkError` cases:
+`NetworkClient` decodes whole responses. For Server-Sent Events and other transports it cannot model, `sendAuthorized`
+runs a raw `URLRequest` through a transport you supply, with the client's authorization, `401` refresh-once, redirect
+policy, and instrumentation:
 
 ```swift
 let (bytes, _) = try await client.sendAuthorized(request) { request, session, delegate in
     try await session.bytes(for: request, delegate: delegate)
-} errorBody: { bytes in
-    var body = Data()
-    do { for try await byte in bytes { body.append(byte) } } catch {}
-    return body
-}
-do {
-    for try await line in bytes.lines {
-        handle(line)
-    }
-} catch {
-    // The client's work ends at the response headers; map stream errors the same way it does.
-    throw NetworkError.mapTransportError(error)
 }
 ```
 
-It returns only for a `2xx`. It never retries transient failures and does not set a timeout. Instrumentation reports
-the attempt as completed when the headers arrive. Use it only for your own API: the provider's credentials go to
-any URL, so call `URLSession` directly for presigned or third-party URLs, and map its errors with
-`NetworkError.mapTransportError(_:session:)`. Background sessions are not supported.
+See [Streaming responses](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/streamingresponses) for error bodies, stream error mapping, and its limits.
 
 ### Fire-and-Forget Mutations with MutationQueue
 
-Use `MutationQueue` for "forgivable" mutations -- liking a post, updating a setting -- that
-shouldn't block the UI on the network round trip and shouldn't be silently lost to a transient
-failure. `NetworkClient` doesn't retry transient/5xx errors unless you opt in (see
-[Retrying Idempotent Requests](#retrying-idempotent-requests)); `MutationQueue`
-is the dedicated retry loop for this class of call, which also replays non-idempotent requests, with exponential backoff, coalescing by key,
-and status reporting.
-
-```swift
-// The queue needs a client; give it the one with your AuthorizationProvider.
-let queue = MutationQueue(client: authenticatedClient)
-
-// Enqueue returns immediately; the network call and any retries run in the background.
-let request = MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42"))
-await queue.enqueue(request, key: "like:video:42")
-
-// Rapid toggling coalesces to the latest desired state instead of replaying
-// every intermediate call.
-let undo = MutationRequest(endpoint: UnlikeVideoEndpoint(videoID: "42"))
-await queue.enqueue(undo, key: "like:video:42")
-
-// Observe outcomes to reflect status in the UI; MutationQueue reports what
-// happened, it doesn't manage optimistic UI state itself.
-for await event in await queue.events() where event.key == "like:video:42" {
-    switch event.status {
-    case .succeeded:
-        break
-    case .failed(let reason):
-        handleLikeFailure(reason)
-    case .pending, .retrying, .waitingForConnectivity:
-        break
-    }
-}
-```
-
-When the caller needs the result, `enqueueAndWait` returns the response (or throws a `MutationFailureReason`)
-while retaining queue retry and coalescing behavior:
-
-```swift
-let response = try await queue.enqueueAndWait(request, key: "like:video:42")
-```
-
-Mutations for different keys run independently and may finish in any order, so enqueue one that depends on
-another only after the first succeeds. The `.succeeded` event carries the server's response, for example the
-identifier of a created record:
-
-```swift
-if event.status == .succeeded, let post = try? event.response?.decodeBody(Post.self) {
-    store.replaceDraft(id: event.key, with: post)
-}
-```
-
-The queue replays `POST` and `PATCH` after a timeout or a 5xx, when the server may already have applied them. If your
-API supports idempotency keys, send one; it is stored with the request, so every replay sends the same key:
-
-```swift
-let request = try MutationRequest(endpoint: CreatePostEndpoint(), encodableBody: draft).addingIdempotencyKey()
-```
-
-A failed mutation's `MutationFailureReason.category` tells apart the outcomes a UI handles differently:
-
-| Category | Meaning | Typical handling |
-| --- | --- | --- |
-| `.offline` | No connection on the last attempt (retried first) | "You're offline" banner; enqueue again later |
-| `.serverUnreachable` | The host did not resolve or accept a connection | Try again later |
-| `.timedOut` | The request timed out; the server may have processed it | Refresh before retrying |
-| `.rateLimited` | `429` and retries ran out | Enqueue again later |
-| `.rejected` | The server refused it with a 4xx (other than 401/408/429); retrying won't help | Roll back; show `reason.response` details |
-| `.unauthorized` | `401` and the token could not be refreshed, or the provider had no authorization | Prompt sign-in |
-| `.serverError` | The server failed with a 5xx (retried first) | Generic error |
-| `.insecureConnection` | The TLS connection was untrusted, for example a rejected certificate pin | "Can't connect securely" |
-| `.cancelled` | `cancel(_:)` or `cancelAll()` ended it | Nothing |
-| `.other` | Encoding, decoding, invalid URL, or a non-`NetworkError` | Generic error |
-
-`reason.statusCode` and `reason.response` carry the HTTP details for `.rejected`, `.unauthorized`, and
-`.serverError`, and `reason.isTransient` says whether the queue gave up only because retries ran out:
-
-```swift
-func handleLikeFailure(_ reason: MutationFailureReason) {
-    switch reason.category {
-    case .cancelled:
-        return
-    case .offline, .serverUnreachable, .timedOut:
-        showBanner("You're offline. Your like will need to be sent again.")
-    case .rejected:
-        rollBackLike()
-        showError(try? reason.response?.decodeBody(APIError.self))
-    case .unauthorized:
-        promptSignIn()
-    case .rateLimited, .serverError, .insecureConnection, .other:
-        showBanner("Couldn't save your like.")
-    }
-}
-```
-
-Persistence is pluggable via the `MutationStore` protocol. `InMemoryMutationStore` ships as the
-default; mutations are lost if the process is killed. `FileMutationStore` persists pending requests
-so they can be replayed after relaunch:
-Because `MutationRequest` is `Codable`, a durable store can serialize "which endpoint plus what
-body" directly and replay it on the next launch via `resumePendingMutations()`. The encoded form carries a
-schema `version`, and decoding rejects a version newer than the library understands.
+Use `MutationQueue` for mutations that shouldn't block the UI or be lost to a transient failure, such as liking a
+post. It retries with backoff (including non-idempotent requests), coalesces by key, reports status, and can persist
+pending work across launches:
 
 ```swift
 let directory = URL.applicationSupportDirectory.appending(path: "PendingMutations", directoryHint: .isDirectory)
@@ -637,93 +526,32 @@ let queue = MutationQueue(client: authenticatedClient, store: FileMutationStore(
     await NetworkMonitor.shared.waitUntilReachable()
 }
 await queue.resumePendingMutations() // call once at startup
+
+// Returns immediately; a later enqueue for the same key replaces this one.
+await queue.enqueue(MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42")), key: "like:video:42")
+
+// Or wait for the outcome while keeping the queue's retries and coalescing.
+let response = try await queue.enqueueAndWait(request, key: "like:video:42")
 ```
 
-By default an offline failure uses up a retry like any other, so a mutation is dropped within a minute of
-going offline. With a durable store, pass `waitForConnectivity` as above: an offline attempt then reports
-`.waitingForConnectivity`, stays in the store, and is retried once the closure returns, without using up a retry.
+A `MutationRequest` never captures credentials; the queue's client authorizes every attempt. Headers and bodies are
+persisted as given, so keep secrets out of them. See [Queueing mutations offline](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/offlinemutations) for
+status events, failure categories, idempotency keys, and persistence.
 
-A `MutationRequest` never captures credentials: its `authorization` is always `.none`, so every attempt,
-including a replay after relaunch, is authorized by the client's `AuthorizationProvider`, and a `401`
-refreshes the token instead of replaying a stale one. An endpoint's own `authorization` is dropped (with a
-logged warning) when you build a `MutationRequest` from it.
+### SSL Pinning and Redirects
 
-> **Note:** Headers and bodies are persisted as given. Keep secrets out of them, and store durable
-> mutations securely anyway, since bodies can contain user data.
-
-### SSL Pinning
-
-Use SSL pinning when your app and API are operated together and you can safely rotate pins before server
-certificates or keys change. Pinning is enforced only for configured hosts; all other hosts use normal
-`URLSession` trust handling.
+Pin certificates or public keys for hosts you operate by passing a pinned session to the client. Hosts you don't list
+use normal `URLSession` trust handling:
 
 ```swift
-enum PinConfigurationError: Error {
-    case invalidPin
-}
-
-func makePinnedClient() throws -> NetworkClient {
-    guard let apiPublicKeyPin = SSLPinningConfiguration.Pin.publicKeySHA256(
-        base64Encoded: "BASE64_ENCODED_SHA256_PUBLIC_KEY_HASH"
-    ) else {
-        throw PinConfigurationError.invalidPin
-    }
-
-    let pinning = SSLPinningConfiguration(
-        pinnedHosts: [
-            "api.example.com": [apiPublicKeyPin]
-        ],
-        includesSubdomains: false,
-        requiresDefaultTrustValidation: true
-    )
-
-    let configuration = NetworkClientConfiguration(
-        session: pinning.makeSession(),
-        timeout: .seconds(30)
-    )
-    return NetworkClient(configuration: configuration)
-}
+let pinning = SSLPinningConfiguration(pinnedHosts: ["api.example.com": [apiPublicKeyPin]])
+let client = NetworkClient(configuration: NetworkClientConfiguration(session: pinning.makeSession()))
 ```
 
-Public-key pins use the industry-standard SPKI SHA-256 format (the same format as HPKP and TrustKit).
-Generate one for a live server with:
-
-```bash
-openssl s_client -connect api.example.com:443 < /dev/null 2>/dev/null \
-  | openssl x509 -pubkey -noout \
-  | openssl pkey -pubin -outform der \
-  | openssl dgst -sha256 -binary \
-  | base64
-```
-
-For certificate pins, use `.certificate(_:)` with DER certificate data or `.certificateSHA256(base64Encoded:)`.
-For safer rotations, configure more than one accepted pin during certificate or key rollovers.
-
-### Redirects
-
-`NetworkClient` checks every redirect against `NetworkClientConfiguration.redirectPolicy` before
-`URLSession` follows it. The default, `.stripCredentialsAcrossOrigins`, does what `curl` and browser `fetch` do:
-
-- A redirect within the same origin (scheme, host, and port) is followed unchanged.
-- A redirect to another origin is followed without the `Authorization`, `Proxy-Authorization`, and `Cookie`
-  headers, or the header an `.apiKey` or `.custom` authorization set.
-- A redirect from `https` to plain `http` is refused.
-
-A refused redirect throws `NetworkError.unexpectedStatus` with the `3xx` response, so you can read its
-`Location` header. Use `.never` for an API that should not redirect at all, or `.followAll` to let `URLSession`
-follow every redirect with its headers, as 1.x did:
-
-```swift
-let configuration = NetworkClientConfiguration(redirectPolicy: .never)
-```
-
-Your own redirect handling always wins. If the session you inject has a delegate that implements
-`urlSession(_:task:willPerformHTTPRedirection:newRequest:completionHandler:)`, `NetworkClient` hands every redirect
-to it and uses its answer unchanged, under any policy, so that delegate must remove credentials itself. A
-session delegate that doesn't handle redirects, such as the TLS pinning one, leaves them to the policy.
-
-Credentials sent under another header name through an endpoint's `headers` are not recognized; send them
-through an `AuthorizationType` so they are stripped.
+Redirects follow `NetworkClientConfiguration.redirectPolicy`. The default, `.stripCredentialsAcrossOrigins`, removes
+credentials from a redirect to another origin and refuses an `https` to `http` downgrade; `.never` and `.followAll`
+are the alternatives. See [Securing connections](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/securingconnections) for generating pins, rotation, and how
+session delegates interact with the policy.
 
 ### Deduplicating Fetches with SingleFlightCache and RemoteDataCache
 
@@ -797,144 +625,32 @@ SwiftyNetwork supports five repository caching strategies:
 
 ## Error Handling
 
-Every failure is a `NetworkError`. HTTP statuses each get their own case, so a rejected request (4xx),
-a failing server (5xx), and a device that is offline never look alike:
-
-| Case | When |
-| --- | --- |
-| `unauthorized`, `forbidden`, `notFound`, `tooManyRequests` | `401`, `403`, `404`, `429` |
-| `clientError` | Any other `4xx`, such as `400`, `409`, or `422` |
-| `serverError` | Any `5xx` |
-| `unexpectedStatus` | A non-2xx status outside 4xx and 5xx, such as a `3xx` the redirect policy refused |
-| `timeout` | A `408`, or a transport timeout (no response) |
-| `noInternetConnection` | The device is offline or the connection dropped |
-| `serverUnreachable` | DNS could not resolve the host or the server refused the connection |
+Every failure is a `NetworkError`, and each HTTP case carries the rejected `HTTPResponse` (status, headers, body).
+Cancelling the calling task always surfaces as `CancellationError`.
 
 ```swift
 do {
     let user = try await client.request(endpoint, responseType: User.self)
 } catch NetworkError.unauthorized {
-    // Handle authentication error
+    // Authentication failed and could not be refreshed
 } catch NetworkError.clientError(let response) {
-    // The server rejected the request, for example a validation error
-} catch NetworkError.serverError(let response) {
-    // Handle server error with response.statusCode
-} catch NetworkError.noInternetConnection {
-    // Offline
-} catch NetworkError.decodingFailed(let underlying) {
-    // Handle JSON decoding error
-} catch {
-    // Handle other errors
+    // The server rejected the request; read response.statusCode or decode response.body
+} catch let error as NetworkError where error.isTransient {
+    // Timeout, lost connectivity, unreachable host, 429, or 5xx
 }
 ```
 
-Every HTTP case carries the rejected `HTTPResponse` (only a transport `timeout` has none). Read its
-status, headers, and body to tell apart failures that share a status code, such as an API error `code` in
-the body, the `WWW-Authenticate` challenge, or `X-RateLimit-*` headers. `error.response` and
-`error.statusCode` give the same values without a `switch`:
+`error.category` groups the cases into what a UI treats differently (`.offline`, `.unauthorized`, `.rateLimited`,
+...), and `error.retryAfter` carries a parsed `Retry-After`.
+
+`NetworkClient` never retries transient failures unless you opt in with a `NetworkRetryPolicy`, which retries
+idempotent requests on `429`, 5xx, timeouts, lost connectivity, and unreachable hosts with capped, jittered backoff:
 
 ```swift
-struct APIErrorBody: Decodable { let code: String }
-
-do {
-    let user = try await client.request(endpoint, responseType: User.self)
-} catch NetworkError.forbidden(let response) {
-    let apiError = try? response.decodeBody(APIErrorBody.self)
-    if apiError?.code == "registration_required" {
-        showRegistration()
-    }
-} catch NetworkError.unauthorized(let response) {
-    let challenge = response.wwwAuthenticate
-}
+let configuration = NetworkClientConfiguration(retryPolicy: NetworkRetryPolicy(maxRetries: 2))
 ```
 
-`catch NetworkError.unauthorized` without a binding still matches. Construct these errors in test doubles
-as `NetworkError.notFound(HTTPResponse(statusCode: 404))`. The body is raw server data and
-may contain user information, so don't log it. `HTTPResponse` prints only its status code, header names,
-and body size, so interpolating it, or an error that carries it, into a log line doesn't leak header values or body.
-
-Use `NetworkError.isTransient` (or `classification` for telemetry tags) to decide whether a retry could help.
-Timeouts, lost connectivity, unreachable hosts, `429`, and 5xx statuses count as transient. This is the same rule
-`NetworkRetryPolicy` and `MutationRetryPolicy.default` use.
-
-Cancelling the calling task always surfaces as `CancellationError`, whether it lands while the request is on
-the wire, during a retry wait, or during an auth refresh. It is never wrapped in a `NetworkError`:
-
-```swift
-do {
-    let user = try await client.request(endpoint, responseType: User.self)
-} catch is CancellationError {
-    // The view went away; nothing to show
-}
-```
-
-### Choosing What to Show
-
-`error.category` collapses the cases into what a UI treats differently, the same grouping as
-`MutationFailureReason.category`. `authorizationUnavailable` counts as `unauthorized`; use `error.classification`
-to tell it apart from a `401`.
-
-```swift
-switch error.category {
-case .offline, .serverUnreachable, .timedOut: showOfflineBanner()
-case .unauthorized: promptSignIn()
-case .rateLimited: showTryAgainLater(after: error.retryAfter)
-case .insecureConnection: showInsecureConnectionError()
-case .rejected, .serverError, .other: showGenericError()
-}
-```
-
-`.insecureConnection` covers an untrusted certificate, a failed TLS handshake, and a rejected certificate pin, which
-`URLSession` reports as `URLError.cancelled`.
-
-### Rate Limiting (429) and Retry-After
-
-A `429 Too Many Requests` response is reported as `NetworkError.tooManyRequests(_:)`, never as
-`.clientError`. `HTTPResponse.retryAfter` is the parsed `Retry-After` header as a `Duration` (both the
-delta-seconds and HTTP-date forms; `nil` if absent or malformed), `body` keeps the response body (empty if the
-server sent none) so you can decode a problem+json document, and the headers keep values such as
-`X-RateLimit-Remaining`. A `503 Service Unavailable` carries `retryAfter` on `.serverError` the same way:
-
-```swift
-do {
-    _ = try await client.request(endpoint, responseType: User.self)
-} catch NetworkError.tooManyRequests(let response) {
-    let throttle = try? response.decodeBody(Problem.self)
-    showBanner("Slow down", retryIn: response.retryAfter)
-}
-```
-
-`error.retryAfter` gives the same value without a `switch`.
-
-### Retrying Idempotent Requests
-
-`NetworkClient` never retries transient failures by default. Opt in with a `NetworkRetryPolicy`:
-
-```swift
-let configuration = NetworkClientConfiguration(
-    retryPolicy: NetworkRetryPolicy(
-        maxRetries: 2,
-        backoff: BackoffPolicy(baseDelay: .milliseconds(500), maxDelay: .seconds(8), maxRetryAfter: .seconds(30))
-    )
-)
-let client = NetworkClient(configuration: configuration)
-```
-
-- `GET`, `HEAD`, `PUT`, `DELETE`, and `OPTIONS` are idempotent by default. `POST`, `PATCH`, and custom methods are not.
-  An endpoint may opt an operation such as a server-deduplicated sync `POST` into retries with `isIdempotent`.
-- Retried failures: `429`, 5xx, timeouts, lost connectivity, and unreachable hosts. Other 4xx responses and decoding failures
-  are reported immediately.
-- Waits follow a `BackoffPolicy`: exponential with jitter, capped at `maxDelay`. A `429` or `503` `Retry-After` is
-  honored (the wait is at least that long) and clamped to `maxRetryAfter`, so a huge value can't park a request.
-- Waits are cancellation-aware: cancelling the calling task ends the wait with `CancellationError`.
-- `maxRetries` bounds the retries after the first attempt, independently of `maxAuthRefreshAttempts`.
-  Each retry emits `requestRetried` to your `NetworkInstrumentation`.
-
-If the client sits behind a `MutationQueue`, its `MutationRetryPolicy` also retries; enabling both makes
-the attempts multiply, so prefer one. Both policies have the same shape: `maxRetries` counts retries after the
-first attempt, `backoff` is a `BackoffPolicy`, and `shouldRetry` decides which failures are retried.
-`MutationRetryPolicy.defaultBackoff` honors `Retry-After` up to 300s, so a throttled mutation waits as long as the
-server asked instead of failing.
+See [Handling errors and retries](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/handlingerrorsandretries) for the full case table, rate limiting, and retry rules.
 
 ## Configuration
 
