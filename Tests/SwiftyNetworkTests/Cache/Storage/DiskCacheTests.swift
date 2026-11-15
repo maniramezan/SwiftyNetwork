@@ -169,6 +169,60 @@ struct DiskCacheTests {
         #expect(!slowDecodeTimedOut.get())
     }
 
+    @Test("A limit of one file operation holds a second key's read until the first finishes")
+    func limitsConcurrentFileOperations() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let slow = Data([1])
+        let fast = Data([2])
+        let slowDecodeStarted = AsyncGate()
+        let releaseSlowDecode = DispatchSemaphore(value: 0)
+        let cache = DiskCache<Data>(
+            directory: directory,
+            maxConcurrentOperations: 1,
+            encode: { $0 },
+            decode: { payload in
+                if payload == slow {
+                    slowDecodeStarted.open()
+                    _ = releaseSlowDecode.wait(timeout: .now() + .seconds(5))
+                }
+                return payload
+            }
+        )
+        await cache.setValue(slow, forKey: "slow")
+        await cache.setValue(fast, forKey: "fast")
+
+        let slowRead = Task { await cache.value(forKey: "slow") }
+        try await slowDecodeStarted.wait()
+        let fastFinished = TestValueBox(false)
+        let fastRead = Task {
+            let value = await cache.value(forKey: "fast")
+            fastFinished.set(true)
+            return value
+        }
+        // The second read either waits for the only slot or finishes; only the first is correct.
+        while !fastFinished.get(), await cache.queuedFileOperationCount == 0 { await Task.yield() }
+        let queued = await cache.queuedFileOperationCount
+        releaseSlowDecode.signal()
+
+        #expect(queued == 1)
+        #expect(await slowRead.value == slow)
+        #expect(await fastRead.value == fast)
+        #expect(await cache.queuedFileOperationCount == 0)
+    }
+
+    @Test("A limit below one still runs operations, and the default limit is four")
+    func clampsTheOperationLimit() async {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = DiskCache<Data>(directory: directory, maxConcurrentOperations: 0)
+
+        await cache.setValue(Data([1]), forKey: "a")
+
+        #expect(await cache.value(forKey: "a") == Data([1]))
+        #expect(DiskCache<Data>.defaultMaxConcurrentOperations == 4)
+    }
+
     @Test("A write that exceeds the byte limit evicts while other keys stay readable")
     func evictionKeepsNewestEntries() async {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
