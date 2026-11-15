@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("DiskCache Tests")
+@Suite("DiskCache Tests", .serialized)
 struct DiskCacheTests {
     @Test("A disk cache persists values and their original write timestamps")
     func persistsEntryAndTimestampAcrossInstances() async {
@@ -139,19 +139,21 @@ struct DiskCacheTests {
         let slow = Data([1])
         let fast = Data([2])
         let slowDecodeStarted = AsyncGate()
+        let fastDecodeStarted = AsyncGate()
         let releaseSlowDecode = DispatchSemaphore(value: 0)
         let slowDecodeTimedOut = TestValueBox(false)
+        defer { releaseSlowDecode.signal() }
         let cache = DiskCache<Data>(
             directory: directory,
             encode: { $0 },
             decode: { payload in
                 if payload == slow {
                     slowDecodeStarted.open()
-                    // A decoder can't suspend, so it blocks its thread until the other read is done.
-                    // The deadline turns a serialized cache into a failure instead of a hang.
-                    if releaseSlowDecode.wait(timeout: .now() + .seconds(5)) == .timedOut {
+                    if releaseSlowDecode.wait(timeout: .now() + .seconds(30)) == .timedOut {
                         slowDecodeTimedOut.set(true)
                     }
+                } else {
+                    fastDecodeStarted.open()
                 }
                 return payload
             }
@@ -161,8 +163,10 @@ struct DiskCacheTests {
 
         let slowRead = Task { await cache.value(forKey: "slow") }
         try await slowDecodeStarted.wait()
-        let fastValue = await cache.value(forKey: "fast")
+        let fastRead = Task { await cache.value(forKey: "fast") }
+        try await fastDecodeStarted.wait()
         releaseSlowDecode.signal()
+        let fastValue = await fastRead.value
 
         #expect(fastValue == fast)
         #expect(await slowRead.value == slow)
@@ -177,6 +181,8 @@ struct DiskCacheTests {
         let fast = Data([2])
         let slowDecodeStarted = AsyncGate()
         let releaseSlowDecode = DispatchSemaphore(value: 0)
+        let slowDecodeTimedOut = TestValueBox(false)
+        defer { releaseSlowDecode.signal() }
         let cache = DiskCache<Data>(
             directory: directory,
             maxConcurrentOperations: 1,
@@ -184,7 +190,9 @@ struct DiskCacheTests {
             decode: { payload in
                 if payload == slow {
                     slowDecodeStarted.open()
-                    _ = releaseSlowDecode.wait(timeout: .now() + .seconds(5))
+                    if releaseSlowDecode.wait(timeout: .now() + .seconds(30)) == .timedOut {
+                        slowDecodeTimedOut.set(true)
+                    }
                 }
                 return payload
             }
@@ -206,6 +214,7 @@ struct DiskCacheTests {
         releaseSlowDecode.signal()
 
         #expect(queued == 1)
+        #expect(!slowDecodeTimedOut.get())
         #expect(await slowRead.value == slow)
         #expect(await fastRead.value == fast)
         #expect(await cache.queuedFileOperationCount == 0)
