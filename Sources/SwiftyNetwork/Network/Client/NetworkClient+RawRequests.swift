@@ -118,6 +118,7 @@ extension NetworkClient {
             Logger.debug("Starting raw request (attempt \(trace.attempt))")
 
             var authorizedRequest = request
+            configuration.applyDefaultHeaders(to: &authorizedRequest)
             let providerAuthorization: AuthorizationType?
             do {
                 providerAuthorization = try await applyProviderAuthorization(

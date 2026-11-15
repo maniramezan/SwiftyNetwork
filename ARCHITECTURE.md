@@ -42,7 +42,8 @@ falls back to its provider when endpoint authorization is `.none` and the endpoi
 `usesAuthorizationProvider` is `true` (the default). If the provider
 throws, the request fails with `authorizationUnavailable` and is never sent.
 
-Each client call captures its configuration before suspension. It executes
+Each client call captures its configuration before suspension. `defaultHeaders` fill in headers the request
+does not set, before authorization is applied. It executes
 `URLSession.data(for:)`, validates HTTP status, and decodes a `Decodable & Sendable`
 result into a `DecodedResponse` that also carries the `HTTPResponse`. `APIClient`
 has one decoding requirement, `response(for:responseType:)`; every `request` method is

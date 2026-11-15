@@ -728,6 +728,14 @@ let client = NetworkClient(configuration: configuration)
 
 A client keeps its configuration for its lifetime; create a new client to change it.
 
+Set `defaultHeaders` for headers every request should carry, such as a locale or app version. An endpoint's own
+header wins, and credentials still belong in an `AuthorizationType`:
+
+```swift
+var configuration = NetworkClientConfiguration()
+configuration.defaultHeaders = ["Accept-Language": "en-GB", "X-App-Version": "4.2.0"]
+```
+
 After a successful authorization refresh the request is replayed at once. Set `authRefreshDelay` only if your API
 needs a moment before it accepts a newly issued credential.
 
