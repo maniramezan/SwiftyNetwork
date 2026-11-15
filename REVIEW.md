@@ -63,6 +63,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | SwiftCommons 0.17.0's `AsyncBroadcaster` (behind `MutationQueue.events()` and `NetworkMonitor`) deadlocked when a consumer was cancelled while a value was yielded, which hung the iOS test process in CI | maniramezan/SwiftCommons#56 (released in 0.17.1); SwiftyNetwork now requires `from: "0.17.1"` |
 | `LayeredCache` and `SingleFlightCache` serialized storage operations across keys, and `DiskCache` did all file I/O on its actor, so reads for different keys queued | Per-key gating in both wrappers; `DiskCache` gates per key and runs reads, writes, and coding off the actor, with eviction, pruning, and clearing exclusive. File work blocks cooperative-pool threads, so it is capped by `maxConcurrentOperations` (default 4). Regression tests force the interleavings; not benchmarked |
 | `MutationQueue` sent every pending mutation at once and could not list unsent work | `MutationQueue(maxConcurrentMutations:)` and `pendingKeys()` |
+| `GenericRepository` could not write a known value or report a background revalidation's result | `setCachedValue(_:forKey:)` and `updates(forKey:)` |
 | `authRefreshDelay` defaulted to 1 second, delaying every replay after a refresh | Default is now `.zero` |
 | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 

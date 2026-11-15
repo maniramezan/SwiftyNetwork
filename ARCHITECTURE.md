@@ -17,7 +17,7 @@ package-wide main-actor default isolation or upcoming-feature flags. `Package.sw
 | Observation | `NetworkInstrumentation.swift`, `NetworkMonitor.swift`, `Logger.swift` | Request events, reachability, unified logging |
 | Cache | `Cache.swift`, `InMemoryCache.swift`, `DiskCache.swift`, `LayeredCache.swift` | `Cache<Value>` protocol and `CacheEntry`, bounded memory/disk, persistence composition |
 | Fetch sharing | `SingleFlightCache.swift`, `RemoteDataCache.swift` | Coalesce same-key fetches; convenient remote-data caching |
-| Repository | `Repository.swift`, `RepositoryResult.swift`, `FetchCoalescer.swift` | Coordinate a cache and the network using `CachePolicy`, report freshness, share same-key requests |
+| Repository | `Repository.swift`, `RepositoryResult.swift`, `FetchCoalescer.swift`, `RepositoryObservers.swift` | Coordinate a cache and the network using `CachePolicy`, report freshness, share same-key requests, publish stored values per key |
 | Mutations | `Mutation/`, `Mutation/Store/` | Retry, coalesce, persist, and observe background mutations |
 | Test doubles | `Testing/` (`@_spi(Testing)`, no separate product) | `MockAPIClient`, `RecordedRequest`, `TestAuthorizationProvider`, `NetworkInstrumentationRecorder`, `.immediate()` retry policies |
 
@@ -122,6 +122,8 @@ and stale-while-revalidate policies. `RepositoryResult` carries the source and f
 `fetch` remains a value-only convenience. `GenericRepository` coalesces concurrent network
 fetches for the same key; cached reads remain independent. Cache keys must identify the user,
 resource, and all request inputs that affect the result. Clear sensitive caches on logout.
+`GenericRepository.updates(forKey:)` streams each value a network load or `setCachedValue(_:forKey:)` stores
+for a key, keeping only the newest for a slow consumer; it does not replay the cached value.
 `SingleFlightCache` adds fetch sharing, not an atomic transaction API, and can bound a hit's
 age with `maxAge`.
 

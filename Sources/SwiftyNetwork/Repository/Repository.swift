@@ -83,6 +83,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     private let client: any APIClient
     private let cache: any Cache<Entity>
     private let inFlight = FetchCoalescer<RepositoryResult<Entity>>()
+    let observers = RepositoryObservers<RepositoryResult<Entity>>()
 
     /// Creates a generic repository.
     ///
@@ -172,6 +173,61 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
         await cache.removeValue(forKey: cacheKey)
     }
 
+    /// Stores `value` as the cached entity for `cacheKey` and delivers it to ``updates(forKey:)``.
+    ///
+    /// Call it when the app already knows the new state, for example with the record a mutation
+    /// returned, so screens showing the resource update without another request. The entry is
+    /// stamped with the current time, so it counts as fresh for
+    /// ``CachePolicy/returnCacheIfNotExpired(maxAge:)``.
+    ///
+    /// Example:
+    /// ```swift
+    /// let saved = try await client.request(UpdateProfileEndpoint(), body: draft, responseType: User.self)
+    /// await repository.setCachedValue(saved, forKey: "user:123:profile")
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - value: The entity to store.
+    ///   - cacheKey: The key of the entity to replace.
+    public func setCachedValue(_ value: Entity, forKey cacheKey: CacheKey) async {
+        let entry = CacheEntry(value)
+        await cache.setEntry(entry, forKey: cacheKey)
+        await observers.publish(
+            RepositoryResult(value: value, source: .cache, timestamp: entry.timestamp),
+            for: cacheKey
+        )
+    }
+
+    /// A stream of the entities this repository stores for `cacheKey` from now on.
+    ///
+    /// It emits every value fetched from the network for the key, including the background
+    /// refresh of ``CachePolicy/returnCacheAndRevalidate(maxAge:)``, and every value passed to
+    /// ``setCachedValue(_:forKey:)``. It does not emit the value already cached; read that
+    /// with ``fetchResult(using:cacheKey:policy:)``. A slow consumer sees only the newest value.
+    /// The stream never finishes on its own; cancel the consuming task when you're done.
+    /// Values are shared across copies of a repository value, not across separately created
+    /// repositories.
+    ///
+    /// Example:
+    /// ```swift
+    /// let updates = await repository.updates(forKey: "feed")
+    /// let cached = try await repository.fetchResult(
+    ///     using: FeedEndpoint(),
+    ///     cacheKey: "feed",
+    ///     policy: .returnCacheAndRevalidate(maxAge: .seconds(60))
+    /// )
+    /// show(cached.value)
+    /// for await refreshed in updates {
+    ///     show(refreshed.value)
+    /// }
+    /// ```
+    ///
+    /// - Parameter cacheKey: The key to observe.
+    /// - Returns: A stream of stored entities, with their source and timestamp.
+    public func updates(forKey cacheKey: CacheKey) async -> AsyncStream<RepositoryResult<Entity>> {
+        await observers.stream(for: cacheKey)
+    }
+
     /// Removes every cached entity, for example on sign-out.
     public func removeAllCachedValues() async {
         await cache.removeAll()
@@ -187,11 +243,13 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     /// Fetches from the network and caches the result, sharing the request with concurrent
     /// callers for the same key.
     private func load(_ endpoint: any NetworkEndpoint, cacheKey: CacheKey) async throws -> RepositoryResult<Entity> {
-        let result = try await inFlight.run(for: cacheKey) { [client, cache] in
+        let result = try await inFlight.run(for: cacheKey) { [client, cache, observers] in
             let entity = try await client.request(endpoint, responseType: Entity.self)
             let entry = CacheEntry(entity)
             await cache.setEntry(entry, forKey: cacheKey)
-            return RepositoryResult(value: entity, source: .network, timestamp: entry.timestamp)
+            let result = RepositoryResult(value: entity, source: .network, timestamp: entry.timestamp)
+            await observers.publish(result, for: cacheKey)
+            return result
         }
         // The shared request is not cancelled with one caller, so report cancellation here.
         try Task.checkCancellation()
