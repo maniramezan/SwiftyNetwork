@@ -244,7 +244,8 @@ methods are built on it.
 ### Built-in Disk Cache
 
 `DiskCache` persists Codable values as individual files. It can bound total bytes and remove entries that have not
-been used within a configured interval. Different keys are read and written in parallel. Use a caches directory for evictable data; files are not encrypted.
+been used within a configured interval. Different keys are read and written in parallel, four operations at a time
+by default; pass `maxConcurrentOperations:` to change the limit. Use a caches directory for evictable data; files are not encrypted.
 
 ```swift
 let disk = DiskCache<User>(
