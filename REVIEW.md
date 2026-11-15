@@ -65,6 +65,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | `MutationQueue` sent every pending mutation at once and could not list unsent work | `MutationQueue(maxConcurrentMutations:)` and `pendingKeys()` |
 | `GenericRepository` could not write a known value or report a background revalidation's result | `setCachedValue(_:forKey:)` and `updates(forKey:)` |
 | Repository revalidation always downloaded the full body | `GenericRepository(client:cache:validators:)` sends `If-None-Match` and keeps the cached entity on `304`. Not exercised against a live server or a session with a `URLCache` |
+| No form or multipart body support | `FormURLEncodedBody` and `MultipartFormData` (in memory). Progress reporting and file-backed upload/download are still left to `sendAuthorized` with a caller transport |
 | `authRefreshDelay` defaulted to 1 second, delaying every replay after a refresh | Default is now `.zero` |
 | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 
