@@ -353,6 +353,9 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - `MutationQueue.enqueueAndWait` subscribes before enqueueing, returns the settled key's response, and throws
   `MutationFailureReason` for terminal failures. Finished statuses are bounded; keep terminal cleanup and replacement
   enqueue ordering under the per-key operations gate
+- `MutationQueue(maxConcurrentMutations:)` caps requests on the wire with a FIFO slot the worker takes before
+  loading its request and gives back before backoff; a cancelled waiter still takes its turn and returns the slot.
+  `pendingKeys()` is the active-status key set
 - Coalescing correctness relies on `MutationStore.removeIfCurrent(_:for:)` being a single,
   non-suspending check-and-remove -- composing `load` then `remove` from outside reintroduces
   the race it exists to close

@@ -127,6 +127,25 @@ By default an offline failure uses up a retry like any other, so a mutation is d
 going offline. With a durable store, pass `waitForConnectivity` as above: an offline attempt then reports
 `.waitingForConnectivity`, stays in the store, and is retried once the closure returns, without using up a retry.
 
+## Limiting concurrent requests
+
+Every key's mutation is sent as soon as it is enqueued, and ``MutationQueue/resumePendingMutations()``
+sends everything that was persisted at once. Pass `maxConcurrentMutations` to cap how many requests are on
+the wire, so a launch after a long offline period does not open dozens of connections together. Mutations
+over the limit stay `.pending` and are sent in the order they became ready:
+
+```swift
+let queue = MutationQueue(
+    client: authenticatedClient,
+    store: FileMutationStore(directory: directory),
+    maxConcurrentMutations: 4
+) {
+    await NetworkMonitor.shared.waitUntilReachable()
+}
+```
+
+``MutationQueue/pendingKeys()`` returns the keys that have not finished, for a "3 changes waiting to sync" label.
+
 ## Credentials
 
 A ``MutationRequest`` never captures credentials: its `authorization` is always `.none`, so every attempt,
