@@ -4,7 +4,7 @@ import Testing
 
 @testable @_spi(Testing) import SwiftyNetwork
 
-@Suite("Redirect Policy Tests")
+@Suite("Redirect Policy Tests", .serialized)
 struct RedirectPolicyTests {
 
     // MARK: - Fixtures

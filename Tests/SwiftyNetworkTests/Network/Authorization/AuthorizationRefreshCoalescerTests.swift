@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("AuthorizationRefreshCoalescer", .timeLimit(.minutes(1)))
+@Suite("AuthorizationRefreshCoalescer", .serialized, .timeLimit(.minutes(1)))
 struct AuthorizationRefreshCoalescerTests {
     private struct RefreshFailed: Error, Equatable {}
 
