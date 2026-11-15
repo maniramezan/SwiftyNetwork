@@ -176,6 +176,84 @@ func testRepositoryStaleWhileRevalidate() async throws {
     #expect(await network.requestCount == 1)
 }
 
+@Test("updates delivers the value a background revalidation stores")
+func testRepositoryUpdatesDeliverRevalidatedValue() async throws {
+    let cache = InMemoryCache<TestUser>()
+    let key: CacheKey = "observed"
+    let stale = TestUser(id: "stale", name: "Old", email: "old@example.com")
+    let fresh = TestUser(id: "fresh", name: "New", email: "new@example.com")
+    await cache.setEntry(CacheEntry(stale, timestamp: Date(timeIntervalSince1970: 1_000)), forKey: key)
+    let repository = GenericRepository(client: StubUserClient(result: .success(fresh)), cache: cache)
+
+    let updates = await repository.updates(forKey: key)
+    let cached = try await repository.fetchResult(
+        using: TestEndpoint(),
+        cacheKey: key,
+        policy: .returnCacheAndRevalidate(maxAge: .seconds(60))
+    )
+    let refreshed = await firstEvent(in: updates) { _ in true }
+
+    #expect(cached.value == stale)
+    #expect(refreshed?.value == fresh)
+    #expect(refreshed?.source == .network)
+}
+
+@Test("setCachedValue stores the value, delivers it to observers of that key only, and serves later fetches")
+func testRepositorySetCachedValue() async throws {
+    let network = StubUserClient(result: .failure(TestRepositoryError.networkFailure))
+    let repository = GenericRepository(client: network, cache: InMemoryCache<TestUser>())
+    let user = TestUser(id: "1", name: "Ada", email: "ada@example.com")
+    let other = TestUser(id: "2", name: "Grace", email: "grace@example.com")
+
+    let updates = await repository.updates(forKey: "user:1")
+    await repository.setCachedValue(other, forKey: "user:2")
+    await repository.setCachedValue(user, forKey: "user:1")
+    let delivered = await firstEvent(in: updates) { _ in true }
+    let fetched = try await repository.fetchResult(
+        using: TestEndpoint(), cacheKey: "user:1", policy: .returnCacheElseLoad)
+
+    #expect(delivered?.value == user)
+    #expect(delivered?.source == .cache)
+    #expect(fetched.value == user)
+    #expect(await network.requestCount == 0)
+}
+
+@Test("A slow observer receives only the newest value")
+func testRepositoryUpdatesKeepNewestValue() async {
+    let repository = GenericRepository(
+        client: StubUserClient(result: .failure(TestRepositoryError.networkFailure)),
+        cache: InMemoryCache<TestUser>()
+    )
+    let first = TestUser(id: "1", name: "First", email: "first@example.com")
+    let second = TestUser(id: "1", name: "Second", email: "second@example.com")
+
+    let updates = await repository.updates(forKey: "user:1")
+    await repository.setCachedValue(first, forKey: "user:1")
+    await repository.setCachedValue(second, forKey: "user:1")
+    let delivered = await firstEvent(in: updates) { _ in true }
+
+    #expect(delivered?.value == second)
+}
+
+@Test("A finished updates stream is unregistered")
+func testRepositoryUpdatesUnregisterWhenFinished() async throws {
+    let repository = GenericRepository(
+        client: StubUserClient(result: .failure(TestRepositoryError.networkFailure)),
+        cache: InMemoryCache<TestUser>()
+    )
+    let consumer = Task {
+        for await _ in await repository.updates(forKey: "user:1") {}
+    }
+    _ = try await waitUntil(
+        timeout: testTimeout, operation: { await repository.observers.observerCount }, matching: { $0 == 1 })
+    consumer.cancel()
+    await consumer.value
+
+    let remaining = try await waitUntil(
+        timeout: testTimeout, operation: { await repository.observers.observerCount }, matching: { $0 == 0 })
+    #expect(remaining == 0)
+}
+
 private enum TestRepositoryError: Error {
     case networkFailure
 }

@@ -369,6 +369,21 @@ let result = try await repository.fetchResult(
 show(result.value, isSaved: result.source == .cache, age: result.age())
 ```
 
+To show the refreshed value when a background revalidation finishes, observe the key with `updates(forKey:)`.
+After a mutation, write the record the server returned with `setCachedValue(_:forKey:)`; observers receive it too:
+
+```swift
+let updates = await repository.updates(forKey: cacheKey)
+let cached = try await repository.fetchResult(
+    using: endpoint, cacheKey: cacheKey, policy: .returnCacheAndRevalidate(maxAge: .seconds(60)))
+show(cached.value)
+for await refreshed in updates {
+    show(refreshed.value)
+}
+
+await repository.setCachedValue(savedUser, forKey: cacheKey)
+```
+
 ### OAuth Authentication
 
 ```swift
