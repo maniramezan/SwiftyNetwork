@@ -61,7 +61,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | Credentialed requests followed redirects to any host with their headers | `RedirectPolicy`, default `.stripCredentialsAcrossOrigins` (strips credentials across origins, refuses HTTPS downgrades; per-task delegate so injected and pinned sessions are covered, while a session delegate that handles redirects keeps deciding them) |
 | In Xcode apps with dynamic frameworks, `SwiftyNetworkTesting` embedded a second copy of `SwiftyNetwork`, breaking error casts and retroactive conformances | Removed the product; its doubles moved into `SwiftyNetwork` as `@_spi(Testing)` API. `Tests/XcodeIntegration/verify.sh` passes, and its test bundle defines no SwiftyNetwork symbols |
 | SwiftCommons 0.17.0's `AsyncBroadcaster` (behind `MutationQueue.events()` and `NetworkMonitor`) deadlocked when a consumer was cancelled while a value was yielded, which hung the iOS test process in CI | maniramezan/SwiftCommons#56 (released in 0.17.1); SwiftyNetwork now requires `from: "0.17.1"` |
-| `LayeredCache` and `SingleFlightCache` serialized storage operations across keys, and `DiskCache` did all file I/O on its actor, so reads for different keys queued | Per-key gating in both wrappers; `DiskCache` gates per key and runs reads, writes, and coding off the actor, with eviction, pruning, and clearing exclusive. Regression tests force the interleavings; not benchmarked |
+| `LayeredCache` and `SingleFlightCache` serialized storage operations across keys, and `DiskCache` did all file I/O on its actor, so reads for different keys queued | Per-key gating in both wrappers; `DiskCache` gates per key and runs reads, writes, and coding off the actor, with eviction, pruning, and clearing exclusive. File work blocks cooperative-pool threads, so it is capped by `maxConcurrentOperations` (default 4). Regression tests force the interleavings; not benchmarked |
 | `authRefreshDelay` defaulted to 1 second, delaying every replay after a refresh | Default is now `.zero` |
 | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 
@@ -91,8 +91,8 @@ account isolation, cancellation, and persistence ordering guarantees.
 
 ## Validation
 
-Per-key cache gating batch: `swift build`, `swift test` (417 tests in 37 suites, all passing on
-macOS), and strict swift-format lint passed locally. The new ordering tests fail against the
+Per-key cache gating batch: `swift build`, `swift test` (the full suite, all passing on
+macOS and an iOS simulator), and strict swift-format lint passed locally. The new ordering tests fail against the
 previous sources. No performance improvement has been measured.
 
 ## Cache ordering contract

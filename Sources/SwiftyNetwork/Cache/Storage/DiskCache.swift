@@ -24,7 +24,8 @@ internal import SwiftCommons
 /// Use one `DiskCache` per directory and don't write to the directory yourself.
 ///
 /// Operations for one key run in order. Different keys are read, decoded, and written in
-/// parallel, off the cache's actor, so a screen of images loads its files side by side.
+/// parallel, off the cache's actor, so a screen of images loads its files side by side. At most
+/// ``defaultMaxConcurrentOperations`` run at once unless you pass `maxConcurrentOperations`.
 /// ``removeAll()``, ``prune()``, and eviction wait for running operations and hold back later
 /// ones. It suits values up to a few megabytes, such as API responses and images.
 ///
@@ -88,7 +89,25 @@ public actor DiskCache<Value: Sendable>: Cache {
     private var totalBytes: Int?
     private var isDirectoryReady = false
 
+    /// How many file operations may run at once.
+    private let maxConcurrentOperations: Int
+    private var runningOperations = 0
+    /// Operations waiting for a slot, in arrival order.
+    private var slotWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Internal diagnostic used to observe slot admission in concurrency tests.
+    var queuedFileOperationCount: Int { slotWaiters.count }
+
+    /// How many file operations a disk cache runs at once unless you choose a limit: `4`.
+    ///
+    /// Reading, decoding, and writing block the thread they run on, and Swift's concurrency
+    /// runtime has about one thread per CPU core. The limit keeps a burst of cache reads, such
+    /// as a screen of images, from occupying all of them and stalling other asynchronous work.
+    public static var defaultMaxConcurrentOperations: Int { 4 }
+
     /// Creates a disk cache with a custom byte representation.
+    ///
+    /// Up to ``defaultMaxConcurrentOperations`` file operations run at once.
     ///
     /// - Parameters:
     ///   - directory: Where the files are stored. Created on first write. Use a location under
@@ -105,6 +124,46 @@ public actor DiskCache<Value: Sendable>: Cache {
         encode: @escaping @Sendable (Value) throws -> Data,
         decode: @escaping @Sendable (Data) throws -> Value
     ) {
+        self.init(
+            directory: directory,
+            maxBytes: maxBytes,
+            maxIdleTime: maxIdleTime,
+            maxConcurrentOperations: Self.defaultMaxConcurrentOperations,
+            encode: encode,
+            decode: decode
+        )
+    }
+
+    /// Creates a disk cache with a custom byte representation and a limit on simultaneous file
+    /// operations.
+    ///
+    /// Operations for different keys run in parallel up to `maxConcurrentOperations`; the rest
+    /// wait their turn in arrival order. Raise it for a cache of small values on fast storage;
+    /// lower it to leave more threads to the rest of the app. `1` runs one operation at a time.
+    ///
+    /// Example:
+    /// ```swift
+    /// let thumbnails = DiskCache<Data>(directory: directory, maxBytes: 100_000_000, maxConcurrentOperations: 8)
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - directory: Where the files are stored. Created on first write.
+    ///   - maxBytes: The directory's size limit, or `nil` for none. Negative values are treated as `0`.
+    ///   - maxIdleTime: How long an entry may go unused before it is removed, or `nil` to keep
+    ///     unused entries.
+    ///   - maxConcurrentOperations: The most reads, writes, and removals to run at once. Values
+    ///     below `1` are treated as `1`.
+    ///   - encode: Converts a value to the bytes to store.
+    ///   - decode: Converts stored bytes back to a value. A stored entry it throws for is removed.
+    public init(
+        directory: URL,
+        maxBytes: Int? = nil,
+        maxIdleTime: Duration? = nil,
+        maxConcurrentOperations: Int,
+        encode: @escaping @Sendable (Value) throws -> Data,
+        decode: @escaping @Sendable (Data) throws -> Value
+    ) {
+        self.maxConcurrentOperations = max(1, maxConcurrentOperations)
         self.directory = directory
         self.maxBytes = maxBytes.map { max(0, $0) }
         self.maxIdleTime = maxIdleTime
@@ -179,6 +238,8 @@ public actor DiskCache<Value: Sendable>: Cache {
     // different keys overlap; only the size bookkeeping happens here.
 
     private func readEntry(forKey key: CacheKey) async -> CacheEntry<Value>? {
+        await acquireSlot()
+        defer { releaseSlot() }
         let outcome = await Self.read(
             fileURL(for: key),
             key: key.rawValue,
@@ -199,6 +260,8 @@ public actor DiskCache<Value: Sendable>: Cache {
 
     /// - Returns: `true` when the directory now exceeds `maxBytes`.
     private func writeEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async -> Bool {
+        await acquireSlot()
+        defer { releaseSlot() }
         let outcome = await Self.write(
             entry,
             to: fileURL(for: key),
@@ -227,6 +290,8 @@ public actor DiskCache<Value: Sendable>: Cache {
     }
 
     private func removeEntry(forKey key: CacheKey) async {
+        await acquireSlot()
+        defer { releaseSlot() }
         if let bytes = await Self.remove(fileURL(for: key)) {
             adjustTotalBytes(by: -bytes)
         }
@@ -276,6 +341,24 @@ public actor DiskCache<Value: Sendable>: Cache {
 
     private func fileURL(for key: CacheKey) -> URL {
         directory.appendingPathComponent(HashedFileName.make(for: key.rawValue), isDirectory: false)
+    }
+
+    /// Waits until fewer than `maxConcurrentOperations` file operations are running.
+    private func acquireSlot() async {
+        if runningOperations < maxConcurrentOperations {
+            runningOperations += 1
+            return
+        }
+        // `releaseSlot` hands its slot to the first waiter, so the count stays unchanged.
+        await withCheckedContinuation { slotWaiters.append($0) }
+    }
+
+    private func releaseSlot() {
+        if slotWaiters.isEmpty {
+            runningOperations -= 1
+        } else {
+            slotWaiters.removeFirst().resume()
+        }
     }
 
     private func adjustTotalBytes(by delta: Int) {
@@ -471,6 +554,26 @@ extension DiskCache where Value == Data {
     public init(directory: URL, maxBytes: Int? = nil, maxIdleTime: Duration? = nil) {
         self.init(directory: directory, maxBytes: maxBytes, maxIdleTime: maxIdleTime, encode: { $0 }, decode: { $0 })
     }
+
+    /// Creates a disk cache for raw bytes with a limit on simultaneous file operations.
+    ///
+    /// - Parameters:
+    ///   - directory: Where the files are stored. Created on first write.
+    ///   - maxBytes: The directory's size limit, or `nil` for none.
+    ///   - maxIdleTime: How long an entry may go unused before it is removed, or `nil` to keep
+    ///     unused entries.
+    ///   - maxConcurrentOperations: The most reads, writes, and removals to run at once. Values
+    ///     below `1` are treated as `1`.
+    public init(directory: URL, maxBytes: Int? = nil, maxIdleTime: Duration? = nil, maxConcurrentOperations: Int) {
+        self.init(
+            directory: directory,
+            maxBytes: maxBytes,
+            maxIdleTime: maxIdleTime,
+            maxConcurrentOperations: maxConcurrentOperations,
+            encode: { $0 },
+            decode: { $0 }
+        )
+    }
 }
 
 extension DiskCache where Value: Codable {
@@ -494,6 +597,35 @@ extension DiskCache where Value: Codable {
             directory: directory,
             maxBytes: maxBytes,
             maxIdleTime: maxIdleTime,
+            encode: { try encoder.encode($0) },
+            decode: { try decoder.decode(Value.self, from: $0) }
+        )
+    }
+
+    /// Creates a disk cache that stores values as JSON, with a limit on simultaneous file operations.
+    ///
+    /// - Parameters:
+    ///   - directory: Where the files are stored. Created on first write.
+    ///   - maxBytes: The directory's size limit, or `nil` for none.
+    ///   - maxIdleTime: How long an entry may go unused before it is removed, or `nil` to keep
+    ///     unused entries.
+    ///   - maxConcurrentOperations: The most reads, writes, and removals to run at once. Values
+    ///     below `1` are treated as `1`.
+    ///   - encoder: Encodes values. Defaults to a plain `JSONEncoder`. Don't reconfigure it afterwards.
+    ///   - decoder: Decodes values. Defaults to a plain `JSONDecoder`. Don't reconfigure it afterwards.
+    public init(
+        directory: URL,
+        maxBytes: Int? = nil,
+        maxIdleTime: Duration? = nil,
+        maxConcurrentOperations: Int,
+        encoder: JSONEncoder = JSONEncoder(),
+        decoder: JSONDecoder = JSONDecoder()
+    ) {
+        self.init(
+            directory: directory,
+            maxBytes: maxBytes,
+            maxIdleTime: maxIdleTime,
+            maxConcurrentOperations: maxConcurrentOperations,
             encode: { try encoder.encode($0) },
             decode: { try decoder.decode(Value.self, from: $0) }
         )
