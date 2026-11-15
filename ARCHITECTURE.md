@@ -122,6 +122,10 @@ and stale-while-revalidate policies. `RepositoryResult` carries the source and f
 `fetch` remains a value-only convenience. `GenericRepository` coalesces concurrent network
 fetches for the same key; cached reads remain independent. Cache keys must identify the user,
 resource, and all request inputs that affect the result. Clear sensitive caches on logout.
+With a `validators` cache, `GenericRepository` records each response's `ETag` by cache key and sends
+`If-None-Match` on later loads while the entity is still cached. A `304` (which clients report as
+`unexpectedStatus`) keeps the entity, re-stamps it, and returns it as a network result without notifying
+observers. `reloadIgnoringCache` is never conditional, and repository writes and removals drop the tag.
 `GenericRepository.updates(forKey:)` streams each value a network load or `setCachedValue(_:forKey:)` stores
 for a key, keeping only the newest for a slow consumer; it does not replay the cached value.
 `SingleFlightCache` adds fetch sharing, not an atomic transaction API, and can bound a hit's

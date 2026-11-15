@@ -71,6 +71,7 @@ Sources/SwiftyNetwork/
 │   ├── Repository.swift             # Repository<Entity> protocol, GenericRepository (client + any Cache)
 │   ├── RepositoryResult.swift       # Value + source + fetch timestamp
 │   ├── FetchCoalescer.swift         # Same-key repository network request coalescing
+│   ├── ConditionalEndpoint.swift    # Internal: wrapper adding If-None-Match for repository revalidation
 │   └── RepositoryObservers.swift    # Internal: per-key AsyncStream registry behind GenericRepository.updates(forKey:)
 └── Mutation/
     ├── MutationQueue.swift             # Actor: enqueue, background retry, coalescing, status via AsyncStream
@@ -265,6 +266,7 @@ GenericRepository.fetch(endpoint, cacheKey, policy) →
   [.reloadElseReturnCache]      → fetch + cache, or return cache on failure
   [.returnCacheAndRevalidate]   → return cache; refresh stale data in background
   fetchResult                   → value + source + fetch timestamp; same-key network loads coalesce
+  validators: (opt-in)          → loads send If-None-Match for a still-cached entity; 304 keeps it (not for reloadIgnoringCache)
   updates(forKey:)              → stream of values stored by network loads and setCachedValue (newest only)
 ```
 
