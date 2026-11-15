@@ -64,6 +64,7 @@ not download one), so their only validation is the PR's GitHub Actions run.
 | `LayeredCache` and `SingleFlightCache` serialized storage operations across keys, and `DiskCache` did all file I/O on its actor, so reads for different keys queued | Per-key gating in both wrappers; `DiskCache` gates per key and runs reads, writes, and coding off the actor, with eviction, pruning, and clearing exclusive. File work blocks cooperative-pool threads, so it is capped by `maxConcurrentOperations` (default 4). Regression tests force the interleavings; not benchmarked |
 | `MutationQueue` sent every pending mutation at once and could not list unsent work | `MutationQueue(maxConcurrentMutations:)` and `pendingKeys()` |
 | `GenericRepository` could not write a known value or report a background revalidation's result | `setCachedValue(_:forKey:)` and `updates(forKey:)` |
+| Repository revalidation always downloaded the full body | `GenericRepository(client:cache:validators:)` sends `If-None-Match` and keeps the cached entity on `304`. Not exercised against a live server or a session with a `URLCache` |
 | `authRefreshDelay` defaulted to 1 second, delaying every replay after a refresh | Default is now `.zero` |
 | Mutable JSON coders and sessions are reference-backed despite configuration snapshot wording | Documented coder ownership and prohibited concurrent external coder reconfiguration post-initialization in `NetworkClientConfiguration` |
 
