@@ -9,12 +9,12 @@ import Foundation
 /// caller for that same key awaits the same in-flight `Task` instead of
 /// triggering a duplicate fetch (e.g. a duplicate network request).
 ///
-/// Storage operations are serialized across keys, including the final fetch commit. Explicit
-/// writes and removals invalidate the affected flight, even if its fetch ignores
-/// cancellation. Use this wrapper exclusively to mutate the underlying cache.
-/// Wrapped cache methods must not call back into this wrapper. Different keys fetch concurrently,
-/// but slow storage can delay otherwise unrelated cache operations; ``removeAll()`` waits for
-/// running operations and holds back later ones.
+/// Storage operations for one key run in arrival order, including the final fetch commit.
+/// Operations for different keys, and their fetches, run concurrently, so slow storage for one
+/// key does not delay another. ``removeAll()`` waits for running operations and holds back
+/// later ones. Explicit writes and removals invalidate the affected flight, even if its fetch
+/// ignores cancellation. Use this wrapper exclusively to mutate the underlying cache.
+/// Wrapped cache methods must not call back into this wrapper.
 /// A canceled caller does not cancel work shared with other callers; it observes
 /// cancellation after the shared work finishes.
 ///
@@ -57,12 +57,12 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     /// Reads the stored entry after preceding storage operations finish.
     public func entry(forKey key: CacheKey) async -> CacheEntry<Value>? {
-        await operations.runExclusive { await self.wrapped.entry(forKey: key) }
+        await operations.run(for: key) { await self.wrapped.entry(forKey: key) }
     }
 
     /// Invalidates a pending fetch and stores an explicit entry.
     public func setEntry(_ entry: CacheEntry<Value>, forKey key: CacheKey) async {
-        await operations.runExclusive {
+        await operations.run(for: key) {
             await self.invalidate(key)
             await self.wrapped.setEntry(entry, forKey: key)
         }
@@ -70,7 +70,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
 
     /// Cancels the current fetch and removes the stored value before returning.
     public func removeValue(forKey key: CacheKey) async {
-        await operations.runExclusive {
+        await operations.run(for: key) {
             await self.invalidate(key)
             await self.wrapped.removeValue(forKey: key)
         }
@@ -127,7 +127,7 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
         orFetch fetch: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
         try Task.checkCancellation()
-        let lookup = await operations.runExclusive { await self.lookup(key, maxAge: maxAge, fetch: fetch) }
+        let lookup = await operations.run(for: key) { await self.lookup(key, maxAge: maxAge, fetch: fetch) }
         let value: Value
         switch lookup {
         case .cached(let cached): value = cached
@@ -152,9 +152,9 @@ public actor SingleFlightCache<Wrapped: Cache>: Cache {
             do {
                 let value = try await fetch()
                 try Task.checkCancellation()
-                return try await self.operations.runExclusive { try await self.commit(value, key: key, id: id) }
+                return try await self.operations.run(for: key) { try await self.commit(value, key: key, id: id) }
             } catch {
-                await self.operations.runExclusive { await self.clearFlight(key, id: id) }
+                await self.operations.run(for: key) { await self.clearFlight(key, id: id) }
                 throw error
             }
         }

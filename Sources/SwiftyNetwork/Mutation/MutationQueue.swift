@@ -243,8 +243,8 @@ public actor MutationQueue {
 
     /// Cancels every pending mutation and clears the store.
     ///
-    /// Call this on sign-out. Persisted mutations can carry credentials and
-    /// must not be replayed for the next user.
+    /// Call this on sign-out. Persisted mutations carry no credentials, but they hold the
+    /// previous user's data and would otherwise be replayed under the next user's authorization.
     public func cancelAll() async {
         await operations.runExclusive {
             var keys = Set(await self.store.allKeys())

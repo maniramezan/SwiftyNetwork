@@ -64,7 +64,7 @@ Sources/SwiftyNetwork/
 │   │   ├── DiskCache.swift                 # Codable file cache with byte and idle-time limits
 │   │   └── LayeredCache.swift              # Memory + persistent with promotion
 │   └── Coordination/
-│       ├── CacheOperationGate.swift        # Internal: FIFO gate serializing compound cache ops
+│       ├── CacheOperationGate.swift        # Internal: FIFO gate ordering compound cache ops per key, with an exclusive barrier
 │       ├── SingleFlightCache.swift         # Coalesces concurrent same-key fetches
 │       └── RemoteDataCache.swift           # URL-keyed byte cache on top of SingleFlightCache
 ├── Repository/
@@ -284,7 +284,8 @@ MutationQueue.enqueueAndWait(request, key) → subscribe before enqueue → resp
 ```
 Cache<Value> (protocol: entry/setEntry/removeValue/removeAll)
   → InMemoryCache<T> (actor, O(1) LRU via LRUStorage)
-  → LayeredCache<T> (actor, memory + optional persistent, ops serialized by CacheOperationGate)
+  → LayeredCache<T> (actor, memory + optional persistent, ops ordered per key by CacheOperationGate)
+  → DiskCache<T> (actor, one file per key; file work runs off the actor, ordered per key)
   → SingleFlightCache<Wrapped> (actor, dedupes concurrent misses per key)
   → your disk cache (implement the four requirements)
 RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCache)
@@ -300,7 +301,7 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - `makeURLRequest()` is an extension on `NetworkEndpoint` in `NetworkEndpoint.swift` (standalone URL building)
 - Use `any Cache<T>` for type erasure; there is no `AnyCache`. Never add a separate timestamp read:
   `entry(forKey:)` keeps the value and timestamp consistent
-- `authRefreshDelay` applies `Task.sleep(for:)` before auth retry; use `authRefreshDelay: .zero` in tests
+- `authRefreshDelay` (default `.zero`) applies `Task.sleep(for:)` before the replay that follows an auth refresh
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on
   429/5xx/timeout/offline/server-unreachable (`NetworkClient.retryOrFail`). `GET`/`HEAD`/`PUT`/`DELETE`/`OPTIONS`
   are idempotent by default; endpoints can explicitly opt in or out. Use `NetworkRetryPolicy.immediate()` in tests

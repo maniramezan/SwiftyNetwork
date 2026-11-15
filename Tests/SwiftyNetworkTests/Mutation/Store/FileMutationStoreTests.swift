@@ -42,4 +42,19 @@ struct FileMutationStoreTests {
         #expect(removedReplacement)
         #expect(await store.allKeys().isEmpty)
     }
+
+    @Test("A save after the directory was removed recreates it")
+    func savesAfterDirectoryRemoval() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = FileMutationStore(directory: directory)
+        await store.save(makeRequest(path: "/first"), for: "first")
+        try FileManager.default.removeItem(at: directory)
+        let request = makeRequest(path: "/second")
+
+        await store.save(request, for: "second")
+        let reopened = FileMutationStore(directory: directory)
+
+        #expect(await reopened.load(for: "second") == request)
+    }
 }
