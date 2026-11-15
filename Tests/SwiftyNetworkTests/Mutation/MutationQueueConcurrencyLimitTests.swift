@@ -19,6 +19,11 @@ struct MutationQueueConcurrencyLimitTests {
         _ = try await waitUntil(timeout: testTimeout, operation: { await fake.callCount }, matching: { $0 == count })
     }
 
+    private func waitForQueuedAttempts(_ count: Int, on queue: MutationQueue) async throws {
+        _ = try await waitUntil(
+            timeout: testTimeout, operation: { await queue.queuedAttemptCount }, matching: { $0 == count })
+    }
+
     @Test("Mutations over the limit wait and are sent in the order they became ready")
     func sendsOneAtATimeInOrder() async throws {
         let fake = FakeAPIClient(outcomes: [])
@@ -28,10 +33,11 @@ struct MutationQueueConcurrencyLimitTests {
 
         await queue.enqueue(makeRequest("/a"), key: "a")
         try await waitForCalls(1, on: fake)
+        // Each worker joins the slot queue on its own task, so wait for one before enqueueing the next.
         await queue.enqueue(makeRequest("/b"), key: "b")
+        try await waitForQueuedAttempts(1, on: queue)
         await queue.enqueue(makeRequest("/c"), key: "c")
-        // Give the waiting workers every chance to run; they must not reach the client.
-        for _ in 0..<100 { await Task.yield() }
+        try await waitForQueuedAttempts(2, on: queue)
 
         #expect(await fake.callCount == 1)
         #expect(await queue.pendingKeys() == ["a", "b", "c"])

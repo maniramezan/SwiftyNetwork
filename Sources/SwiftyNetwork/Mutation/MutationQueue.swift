@@ -128,6 +128,9 @@ public actor MutationQueue {
     /// Workers waiting for a request slot, in arrival order.
     private var slotWaiters: [CheckedContinuation<Void, Never>] = []
 
+    /// Internal diagnostic used to observe slot admission in concurrency tests.
+    var queuedAttemptCount: Int { slotWaiters.count }
+
     /// Creates a mutation queue.
     ///
     /// - Parameters:
