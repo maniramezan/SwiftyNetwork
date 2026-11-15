@@ -95,7 +95,8 @@ across awaits with an internal per-key gate (`CacheOperationGate`). Operations f
 arrival order; different keys run concurrently; `removeAll()`, and `DiskCache` eviction and pruning,
 run alone. Single-flight network fetches run outside the gate and commit only while their flight
 identity remains current. `DiskCache` does its file reads, writes, and coding off its actor, so
-different keys use the disk in parallel. Access underlying storage exclusively through the wrapper,
+different keys use the disk in parallel, up to `maxConcurrentOperations` (default 4) because that work
+blocks cooperative-pool threads. Access underlying storage exclusively through the wrapper,
 and never call back into that wrapper from a storage method. `entry(forKey:)` returns a value and its
 timestamp as one snapshot.
 
