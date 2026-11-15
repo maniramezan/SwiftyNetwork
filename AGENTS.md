@@ -34,6 +34,8 @@ Sources/SwiftyNetwork/
 │   │   ├── NetworkEndpoint.swift           # Endpoint protocol, makeURLRequest(), EndpointURLBuilder
 │   │   ├── TypedEndpoint.swift             # Endpoint with its associated response type
 │   │   ├── EncodedBodyEndpoint.swift       # Internal: body-override wrapper + HTTPHeaders helpers
+│   │   ├── FormURLEncodedBody.swift        # application/x-www-form-urlencoded body builder
+│   │   ├── MultipartFormData.swift         # multipart/form-data body builder (in memory)
 │   │   ├── HTTPMethod.swift                # Extensible HTTP method struct (string literals for custom verbs)
 │   │   ├── EmptyResponse.swift             # Decodable for bodiless responses
 │   │   ├── APIClient.swift                 # APIClient protocol (response(for:) requirement) + request conveniences

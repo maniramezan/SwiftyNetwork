@@ -49,7 +49,8 @@ has one decoding requirement, `response(for:responseType:)`; every `request` met
 a protocol-extension convenience over it. Decoding `Data` returns the raw body, and
 `EmptyResponse` ignores the body of any successful response, including in protocol-based test doubles.
 The encoded-body overload uses the configured encoder and preserves an explicitly
-supplied Content-Type header.
+supplied Content-Type header. `FormURLEncodedBody` and `MultipartFormData` build non-JSON bodies in memory;
+an endpoint returns their bytes as `body` and their content type as a header.
 
 `sendAuthorized(_:operationName:errorBody:transport:)` runs this same authorization flow around a
 caller-supplied transport for requests `NetworkClient` cannot decode, such as streams. It reuses the redirect guard and

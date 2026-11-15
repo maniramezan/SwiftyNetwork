@@ -217,6 +217,30 @@ convenience also supports encoded bodies. Set `isIdempotent` to `true` only when
 replaying the request has no additional effect; this opts methods such as an idempotency-keyed `POST` into
 `NetworkRetryPolicy`.
 
+### Form and Multipart Bodies
+
+`request(_:body:responseType:)` encodes JSON. For an HTML-style form or a file upload, build the body with
+`FormURLEncodedBody` or `MultipartFormData` and return its bytes and content type from the endpoint:
+
+```swift
+struct UploadAvatarEndpoint: NetworkEndpoint {
+    let form: MultipartFormData
+
+    let baseURL = "https://api.example.com"
+    let path = "/avatar"
+    let method: HTTPMethod = .post
+    var headers: [String: String]? { ["Content-Type": form.contentType] }
+    var body: Data? { form.encoded() }
+}
+
+var form = MultipartFormData()
+form.append("Profile photo", name: "caption")
+form.append(jpegData, name: "file", fileName: "avatar.jpg", mimeType: "image/jpeg")
+try await client.request(UploadAvatarEndpoint(form: form))
+```
+
+Both hold the whole body in memory. Stream larger files through `sendAuthorized` with your own transport.
+
 ### Response Headers and Raw Bytes
 
 `request(_:responseType:)` returns only the decoded value. When you also need the status code, headers, or raw
