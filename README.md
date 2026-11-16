@@ -25,6 +25,20 @@ A modern, Swift-native networking library built with Swift 6 concurrency, provid
 - **Test Doubles**: `@_spi(Testing) import SwiftyNetwork` gives tests and previews `MockAPIClient` and `TestAuthorizationProvider`
 - **Thread-Safe**: All operations are thread-safe using Swift's actor model
 
+## Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Advanced Usage](#advanced-usage): repositories and caching, authentication, streaming, mutations, SSL pinning,
+  redirects, reachability, instrumentation
+- [Cache Policies](#cache-policies)
+- [Error Handling](#error-handling): categories, rate limiting, retries
+- [Configuration](#configuration): client options, logging, JSON decoding
+- [Versioning](#versioning)
+- [Testing](#testing)
+- [GraphQL](#graphql)
+- [Contributing](#contributing)
+
 ## Requirements
 
 - Swift 6.2+
@@ -36,27 +50,6 @@ SwiftyNetwork depends only on [SwiftCommons](https://github.com/maniramezan/Swif
 string, duration, logging, concurrency, and error helpers. It declares that dependency with `traits: []`, so
 SwiftCommons' SwiftData-backed APIs are not pulled in on its behalf. SwiftCommons is imported internally and is
 not part of SwiftyNetwork's API.
-
-## Code Quality
-
-This project uses [swift-format](https://github.com/swiftlang/swift-format) (Apple's official Swift formatter) for code formatting and linting.
-
-### Local Development
-
-Format code manually:
-
-```bash
-swift format format --in-place --recursive --parallel Sources Tests  # Format in-place
-swift format lint --recursive --parallel Sources Tests                # Check for violations
-```
-
-### CI
-
-swift-format runs in strict mode on all PRs (warnings treated as errors).
-Configuration: `.swift-format`
-
-CI also builds and tests with the minimum (6.2) and latest Swift toolchains, runs the suite on iOS
-simulators, and checks pull requests for API breaking changes against the latest release.
 
 ## Installation
 
@@ -251,7 +244,8 @@ methods are built on it.
 ### Built-in Disk Cache
 
 `DiskCache` persists Codable values as individual files. It can bound total bytes and remove entries that have not
-been used within a configured interval. Use a caches directory for evictable data; files are not encrypted.
+been used within a configured interval. Different keys are read and written in parallel, four operations at a time
+by default; pass `maxConcurrentOperations:` to change the limit. Use a caches directory for evictable data; files are not encrypted.
 
 ```swift
 let disk = DiskCache<User>(
@@ -306,6 +300,9 @@ func createLayeredRepository() -> GenericRepository<User> {
 
 `value(forKey:)` and `setValue(_:forKey:)` come for free from the protocol. Use `any Cache<User>` wherever
 you need to store or pass a cache without naming its concrete type.
+
+For a complete file-backed example, see the `CustomDiskCache` DocC article. For ordinary file-backed storage, use
+the built-in `DiskCache`.
 
 ### Fetching with Different Cache Strategies
 
@@ -789,25 +786,6 @@ Set `operationName` on an endpoint to attach a stable, low-cardinality operation
 completion, and failure event. Events also include full URLs and errors; redact them before exporting and prefer
 the operation name over URL labels.
 
-### Custom Cache Implementation
-
-For a database-backed or otherwise custom cache, see the `CustomDiskCache` DocC article. For ordinary file-backed
-storage, use the built-in `DiskCache`.
-
-```swift
-// Implement custom cache
-public actor MyCustomCache<T: Sendable>: Cache {
-    // Your custom cache implementation here
-    public func entry(forKey key: CacheKey) async -> CacheEntry<T>? { /* ... */ }
-    public func setEntry(_ entry: CacheEntry<T>, forKey key: CacheKey) async { /* ... */ }
-    public func removeValue(forKey key: CacheKey) async { /* ... */ }
-    public func removeAll() async { /* ... */ }
-}
-
-// Use with repository
-let repository = GenericRepository(client: NetworkClient.shared, cache: MyCustomCache<User>())
-```
-
 ## Cache Policies
 
 SwiftyNetwork supports five repository caching strategies:
@@ -980,13 +958,8 @@ let client = NetworkClient(configuration: configuration)
 
 A client keeps its configuration for its lifetime; create a new client to change it.
 
-## Versioning
-
-SwiftyNetwork follows [Semantic Versioning](https://semver.org). The public enums (`NetworkError`,
-`NetworkErrorClassification`, `AuthorizationType`, `CachePolicy`, `MutationStatus`,
-`MutationFailureReason.Category`, `NetworkReachability`, and `LogLevel`) gain new cases only in a major
-release, so an exhaustive `switch` over them keeps compiling across minor and patch releases. Types meant to
-grow, such as `HTTPMethod` and `RedirectPolicy`, are structs, so their new values can arrive in any release.
+After a successful authorization refresh the request is replayed at once. Set `authRefreshDelay` only if your API
+needs a moment before it accepts a newly issued credential.
 
 ### Logging
 
@@ -1006,6 +979,14 @@ decoder.keyDecodingStrategy = .convertFromSnakeCase
 
 let configuration = NetworkClientConfiguration(decoder: decoder)
 ```
+
+## Versioning
+
+SwiftyNetwork follows [Semantic Versioning](https://semver.org). The public enums (`NetworkError`,
+`NetworkErrorClassification`, `AuthorizationType`, `CachePolicy`, `MutationStatus`,
+`MutationFailureReason.Category`, `NetworkReachability`, and `LogLevel`) gain new cases only in a major
+release, so an exhaustive `switch` over them keeps compiling across minor and patch releases. Types meant to
+grow, such as `HTTPMethod` and `RedirectPolicy`, are structs, so their new values can arrive in any release.
 
 ## Architecture
 
@@ -1086,9 +1067,41 @@ Stub `.http(HTTPResponse(statusCode: 200, headers: ["ETag": "v2"], body: data))`
 for code that reads `response(for:responseType:)`. Responses for a route are consumed in order and the last one repeats. Unstubbed routes throw
 `MockAPIClient.UnstubbedRequestError` unless you set a fallback with `setFallback(_:)`.
 
+## GraphQL
+
+See [the GraphQL guide](GRAPHQL.md) for typed variables, response envelopes,
+partial results, and transport limitations. GraphQL uses the existing HTTP
+pipeline; no schema compiler or additional dependency is required.
+
+## Architecture and review
+
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the current implementation and
+[REVIEW.md](REVIEW.md) records remaining correctness and performance work.
+
 ## Contributing
 
 We welcome contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) guidelines and submit pull requests to our GitHub repository.
+
+### Code Quality
+
+This project uses [swift-format](https://github.com/swiftlang/swift-format) (Apple's official Swift formatter) for code formatting and linting.
+
+#### Local Development
+
+Format code manually:
+
+```bash
+swift format format --in-place --recursive --parallel Sources Tests  # Format in-place
+swift format lint --recursive --parallel Sources Tests                # Check for violations
+```
+
+#### CI
+
+swift-format runs in strict mode on all PRs (warnings treated as errors).
+Configuration: `.swift-format`
+
+CI also builds and tests with the minimum (6.2) and latest Swift toolchains, runs the suite on iOS
+simulators, and checks pull requests for API breaking changes against the latest release.
 
 ### Running Tests
 
@@ -1116,14 +1129,3 @@ SwiftyNetwork is available under the MIT license. See the [LICENSE](LICENSE) fil
 - **Live docs**: [https://maniramezan.github.io/SwiftyNetwork](https://maniramezan.github.io/SwiftyNetwork)
 - **Issues**: [GitHub Issues](https://github.com/maniramezan/SwiftyNetwork/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/maniramezan/SwiftyNetwork/discussions)
-
-## GraphQL
-
-See [the GraphQL guide](GRAPHQL.md) for typed variables, response envelopes,
-partial results, and transport limitations. GraphQL uses the existing HTTP
-pipeline; no schema compiler or additional dependency is required.
-
-## Architecture and review
-
-[ARCHITECTURE.md](ARCHITECTURE.md) describes the current implementation and
-[REVIEW.md](REVIEW.md) records remaining correctness and performance work.

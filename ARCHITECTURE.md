@@ -59,7 +59,7 @@ credentials to any URL, so it is for the app's own API only. Endpoints can set a
 the configured timeout or URL request cache policy, and declare request idempotency independently of the method.
 
 A 401 can trigger provider refresh and replay up to `maxAuthRefreshAttempts`,
-with `authRefreshDelay` before replay. The client passes the exact provider authorization
+after an optional `authRefreshDelay` (zero by default). The client passes the exact provider authorization
 it sent to `refreshAuthorization(rejecting:)`, so `OAuthAuthorizationProvider` (and any custom provider that
 routes through `AuthorizationRefreshCoalescer`) skips refreshing a token that a concurrent request already replaced. Before refreshing, the client also asks
 `shouldRefreshAuthorization(after:)` with a `401` response or a provider-authorized `403`; the default refreshes
@@ -90,13 +90,15 @@ protocols also support Sendable value implementations.
 each `updates` continuation synchronously on the actor.
 
 Actor isolation prevents data races, but an `await` allows another operation to
-interleave. `SingleFlightCache` and `LayeredCache` serialize compound storage operations
-across awaits using an internal exclusive gate. Single-flight network fetches run outside
-it and commit only while their flight identity remains current. Access underlying storage
-exclusively through the wrapper, and never call back into that wrapper from a storage method.
-The gate serializes storage operations across keys, so slow storage can cause head-of-line
-blocking; defer changing this until the image-grid workload is measured. `entry(forKey:)`
-returns a value and its timestamp as one snapshot.
+interleave. `SingleFlightCache`, `LayeredCache`, and `DiskCache` order compound storage operations
+across awaits with an internal per-key gate (`CacheOperationGate`). Operations for one key run in
+arrival order; different keys run concurrently; `removeAll()`, and `DiskCache` eviction and pruning,
+run alone. Single-flight network fetches run outside the gate and commit only while their flight
+identity remains current. `DiskCache` does its file reads, writes, and coding off its actor, so
+different keys use the disk in parallel, up to `maxConcurrentOperations` (default 4) because that work
+blocks cooperative-pool threads. Access underlying storage exclusively through the wrapper,
+and never call back into that wrapper from a storage method. `entry(forKey:)` returns a value and its
+timestamp as one snapshot.
 
 Shared authorization refreshes and single-flight fetches use owned unstructured tasks
 because multiple independent callers share their lifetime. Mutation workers must
@@ -139,8 +141,8 @@ Persistence does not provide exactly-once delivery. Servers must enforce
 idempotency for operations that may be replayed; `MutationRequest.addingIdempotencyKey(_:header:)`
 stores a key in the persisted headers so every replay sends the same one. With `waitForConnectivity`,
 an offline failure waits for the closure instead of consuming a retry, so durable mutations survive
-long offline periods. Mutations for different keys are independent and unordered. Durable stores must encrypt
-captured credentials and sensitive bodies. The default store is memory-only.
+long offline periods. Mutations for different keys are independent and unordered. Requests capture no
+credentials, but durable stores should protect sensitive headers and bodies. The default store is memory-only.
 `FileMutationStore` is the built-in durable file-backed store. Neither it nor `DiskCache`
 encrypts its contents; place sensitive data in directories with suitable file protection.
 
