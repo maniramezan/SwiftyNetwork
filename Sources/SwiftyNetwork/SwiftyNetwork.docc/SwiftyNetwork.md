@@ -57,6 +57,11 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 - ``NetworkErrorCategory``
 - ``HTTPResponse``
 
+### Request Bodies
+
+- ``FormURLEncodedBody``
+- ``MultipartFormData``
+
 ### Instrumentation
 
 - ``NetworkInstrumentation``
