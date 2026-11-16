@@ -137,6 +137,10 @@ That comparison and removal must be one atomic operation in custom stores. Termi
 removal, event publication, and worker cleanup coordinate with enqueue on a per-key gate;
 finished statuses are retained in a bounded LRU.
 
+Workers run concurrently by default; `maxConcurrentMutations` limits how many requests are on the wire,
+admitting waiting workers in FIFO order. A worker loads its request only once it holds a slot and
+releases the slot before any backoff or connectivity wait.
+
 Persistence does not provide exactly-once delivery. Servers must enforce
 idempotency for operations that may be replayed; `MutationRequest.addingIdempotencyKey(_:header:)`
 stores a key in the persisted headers so every replay sends the same one. With `waitForConnectivity`,

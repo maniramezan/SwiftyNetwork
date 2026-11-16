@@ -93,6 +93,7 @@ public actor MutationQueue {
     private let store: any MutationStore
     private let retryPolicy: MutationRetryPolicy
     private let waitForConnectivity: (@Sendable () async -> Void)?
+    private let maxConcurrentMutations: Int?
 
     /// A background task processing one key. The `id` lets a worker detect
     /// that it was cancelled and replaced, so it never touches the store or
@@ -122,6 +123,13 @@ public actor MutationQueue {
     /// Internal visibility lets regression tests observe gate admission.
     let operations = CacheOperationGate<MutationKey>()
     private let eventBroadcaster = AsyncBroadcaster<MutationEvent>()
+    /// How many requests are on the wire, when ``maxConcurrentMutations`` limits them.
+    private var runningAttempts = 0
+    /// Workers waiting for a request slot, in arrival order.
+    private var slotWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// Internal diagnostic used to observe slot admission in concurrency tests.
+    var queuedAttemptCount: Int { slotWaiters.count }
 
     /// Creates a mutation queue.
     ///
@@ -147,6 +155,47 @@ public actor MutationQueue {
         self.store = store
         self.retryPolicy = retryPolicy
         self.waitForConnectivity = waitForConnectivity
+        self.maxConcurrentMutations = nil
+    }
+
+    /// Creates a mutation queue that sends a limited number of mutations at once.
+    ///
+    /// Without a limit, every key's mutation is sent as soon as it is enqueued, and
+    /// ``resumePendingMutations()`` sends everything that was persisted at once. A limit keeps a
+    /// launch after a long offline period from opening dozens of connections together. Mutations
+    /// over the limit stay ``MutationStatus/pending`` and are sent in the order they became ready.
+    /// Backoff and connectivity waits don't hold a slot.
+    ///
+    /// Example:
+    /// ```swift
+    /// let queue = MutationQueue(
+    ///     client: client,
+    ///     store: FileMutationStore(directory: directory),
+    ///     maxConcurrentMutations: 4
+    /// ) {
+    ///     await NetworkMonitor.shared.waitUntilReachable()
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - client: The client used to execute mutations.
+    ///   - store: Where pending mutations are persisted. Defaults to a fresh ``InMemoryMutationStore``.
+    ///   - retryPolicy: Governs retry attempts and backoff. Defaults to ``MutationRetryPolicy/default``.
+    ///   - maxConcurrentMutations: The most requests on the wire at once. Values below `1` are treated as `1`.
+    ///   - waitForConnectivity: Returns once the network is reachable again; see
+    ///     ``init(client:store:retryPolicy:waitForConnectivity:)``. Defaults to `nil`.
+    public init(
+        client: any APIClient,
+        store: any MutationStore = InMemoryMutationStore(),
+        retryPolicy: MutationRetryPolicy = .default,
+        maxConcurrentMutations: Int,
+        waitForConnectivity: (@Sendable () async -> Void)? = nil
+    ) {
+        self.client = client
+        self.store = store
+        self.retryPolicy = retryPolicy
+        self.waitForConnectivity = waitForConnectivity
+        self.maxConcurrentMutations = max(1, maxConcurrentMutations)
     }
 
     /// Enqueues a mutation and returns immediately; the network call and any
@@ -281,6 +330,22 @@ public actor MutationQueue {
         activeStatusByKey[key] ?? finishedStatusByKey.peekValue(forKey: key)
     }
 
+    /// The keys whose mutation has not finished: pending, retrying, or waiting for connectivity.
+    ///
+    /// Use it to show how much work is still unsent. After a relaunch it is empty until
+    /// ``resumePendingMutations()`` runs.
+    ///
+    /// Example:
+    /// ```swift
+    /// let unsent = await queue.pendingKeys().count
+    /// banner.text = unsent == 0 ? nil : "\(unsent) changes waiting to sync"
+    /// ```
+    ///
+    /// - Returns: The keys of every unfinished mutation.
+    public func pendingKeys() -> Set<MutationKey> {
+        Set(activeStatusByKey.keys)
+    }
+
     /// Resumes processing for every mutation currently persisted in the
     /// configured ``MutationStore``.
     ///
@@ -341,15 +406,28 @@ public actor MutationQueue {
         var attempt = 0
         var attemptedRequest: MutationRequest?
         while isCurrentWorker(workerID, for: key) {
-            guard let request = await store.load(for: key), isCurrentWorker(workerID, for: key) else { return }
+            // Load after the slot is free, so a mutation replaced while it waited is never sent.
+            await acquireSlot()
+            guard let request = await store.load(for: key), isCurrentWorker(workerID, for: key) else {
+                releaseSlot()
+                return
+            }
             if request != attemptedRequest {
                 attempt = 0
                 attemptedRequest = request
             }
 
             Logger.debug("Executing mutation for key \(key) (attempt \(attempt + 1))", category: .mutation)
+            let outcome: Result<DecodedResponse<EmptyResponse>, any Error>
             do {
-                let result = try await client.response(for: request, responseType: EmptyResponse.self)
+                outcome = .success(try await client.response(for: request, responseType: EmptyResponse.self))
+            } catch {
+                outcome = .failure(error)
+            }
+            releaseSlot()
+
+            switch outcome {
+            case .success(let result):
                 // Cancelled while on the wire: the queue already reported the
                 // cancellation, so ignore this outcome entirely.
                 guard isCurrentWorker(workerID, for: key) else { return }
@@ -369,7 +447,7 @@ public actor MutationQueue {
                 case .noLongerCurrent:
                     return
                 }
-            } catch {
+            case .failure(let error):
                 guard isCurrentWorker(workerID, for: key) else { return }
                 if let waitForConnectivity, (error as? NetworkError)?.category == .offline {
                     Logger.info("Mutation for key \(key) is waiting for connectivity", category: .mutation)
@@ -441,6 +519,29 @@ public actor MutationQueue {
             await self.setStatus(status, for: key, response: response)
             await self.clearWorker(workerID, for: key)
             return .completed
+        }
+    }
+
+    // MARK: - Concurrency Limit
+
+    /// Waits for a request slot when ``maxConcurrentMutations`` is set. A cancelled worker still
+    /// takes its turn and gives the slot straight back, so the queue stays in order.
+    private func acquireSlot() async {
+        guard let maxConcurrentMutations else { return }
+        if runningAttempts < maxConcurrentMutations {
+            runningAttempts += 1
+            return
+        }
+        // `releaseSlot` hands its slot to the first waiter, so the count stays unchanged.
+        await withCheckedContinuation { slotWaiters.append($0) }
+    }
+
+    private func releaseSlot() {
+        guard maxConcurrentMutations != nil else { return }
+        if slotWaiters.isEmpty {
+            runningAttempts -= 1
+        } else {
+            slotWaiters.removeFirst().resume()
         }
     }
 
