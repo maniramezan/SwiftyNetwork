@@ -308,6 +308,8 @@ RemoteDataCache<Wrapped: Cache<Data>> (actor, URL → Data, wraps SingleFlightCa
 - Use `any Cache<T>` for type erasure; there is no `AnyCache`. Never add a separate timestamp read:
   `entry(forKey:)` keeps the value and timestamp consistent
 - `authRefreshDelay` (default `.zero`) applies `Task.sleep(for:)` before the replay that follows an auth refresh
+- `NetworkClientConfiguration.defaultHeaders` are added to endpoint and `sendAuthorized` requests when the request
+  does not set them (`applyDefaultHeaders`), before authorization. They are not stripped on redirects
 - `NetworkClientConfiguration.retryPolicy` is off by default; with it, idempotent requests retry on
   429/5xx/timeout/offline/server-unreachable (`NetworkClient.retryOrFail`). `GET`/`HEAD`/`PUT`/`DELETE`/`OPTIONS`
   are idempotent by default; endpoints can explicitly opt in or out. Use `NetworkRetryPolicy.immediate()` in tests

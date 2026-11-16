@@ -107,6 +107,30 @@ public struct NetworkClientConfiguration: Sendable {
     /// default -- instrumentation is entirely opt-in.
     public var instrumentation: (any NetworkInstrumentation)?
 
+    /// Headers added to every request the client sends, such as `Accept-Language` or an app
+    /// version. Empty by default.
+    ///
+    /// A header the endpoint (or a raw `URLRequest` passed to
+    /// ``NetworkClient/sendAuthorized(_:operationName:errorBody:transport:)``) already sets wins,
+    /// compared case-insensitively, and authorization is applied afterwards. Don't put
+    /// credentials here: only an ``AuthorizationType`` is refreshed on a `401` and stripped from
+    /// cross-origin redirects.
+    ///
+    /// Example:
+    /// ```swift
+    /// var configuration = NetworkClientConfiguration()
+    /// configuration.defaultHeaders = ["Accept-Language": "en-GB", "X-App-Version": "4.2.0"]
+    /// let client = NetworkClient(configuration: configuration)
+    /// ```
+    public var defaultHeaders: [String: String] = [:]
+
+    /// Adds each default header `request` does not already carry.
+    func applyDefaultHeaders(to request: inout URLRequest) {
+        for (name, value) in defaultHeaders where request.value(forHTTPHeaderField: name) == nil {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+    }
+
     /// Creates a new network client configuration.
     ///
     /// - Parameters:
