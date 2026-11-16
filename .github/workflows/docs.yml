@@ -31,15 +31,19 @@ jobs:
         with:
           swift-version: "6.2"
 
+      - name: Get Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2 }')" >> "$GITHUB_OUTPUT"
+
       - name: Cache SwiftPM
         uses: actions/cache@v6
         with:
           path: |
             .build
             .swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          key: ${{ runner.os }}-docc-spm-swift-6.2-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-docc-spm-swift-6.2-xcode-${{ steps.xcode.outputs.version }}-
 
       - name: Generate DocC documentation
         run: |
