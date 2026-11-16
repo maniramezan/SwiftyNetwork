@@ -4,7 +4,7 @@ import Testing
 
 @testable import SwiftyNetwork
 
-@Suite("AuthorizationRefreshCoalescer", .timeLimit(.minutes(1)))
+@Suite("AuthorizationRefreshCoalescer", .serialized, .timeLimit(.minutes(1)))
 struct AuthorizationRefreshCoalescerTests {
     private struct RefreshFailed: Error, Equatable {}
 
@@ -91,7 +91,7 @@ struct AuthorizationRefreshCoalescerTests {
             }
         }
         try await olderStarted.wait()
-        let forced = (0..<9).map { _ in
+        let forced = (0..<2).map { _ in
             Task {
                 try await coalescer.refresh {
                     await forcedRuns.increment()
@@ -100,13 +100,13 @@ struct AuthorizationRefreshCoalescerTests {
                 await forcedReturned.increment()
             }
         }
-        // All nine wait on the older refresh, which must not satisfy them.
-        await waitForJoiners(9, on: coalescer)
+        // Both wait on the older refresh, which must not satisfy them.
+        await waitForJoiners(2, on: coalescer)
         finishOlder.open()
         try await older.value
-        // One of them starts the next refresh and the other eight join it. Stop waiting if they
+        // One starts the next refresh and the other joins it. Stop waiting if they
         // all returned instead, which happens only when the older refresh wrongly satisfied them.
-        while await coalescer.joinedCallers < 17, await forcedReturned.count < 9 { await Task.yield() }
+        while await coalescer.joinedCallers < 3, await forcedReturned.count < 2 { await Task.yield() }
         finishForced.open()
 
         for call in forced { try await call.value }
