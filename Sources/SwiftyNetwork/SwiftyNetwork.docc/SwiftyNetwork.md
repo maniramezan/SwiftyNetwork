@@ -109,6 +109,10 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 
 ### Guides
 
+- <doc:HandlingErrorsAndRetries>
+- <doc:OfflineMutations>
+- <doc:SecuringConnections>
+- <doc:StreamingResponses>
 - <doc:CustomDiskCache>
 - <doc:TestingWithSwiftyNetwork>
 
