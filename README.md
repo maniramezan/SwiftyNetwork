@@ -535,6 +535,9 @@ await queue.enqueue(MutationRequest(endpoint: LikeVideoEndpoint(videoID: "42")),
 let response = try await queue.enqueueAndWait(request, key: "like:video:42")
 ```
 
+Pass `maxConcurrentMutations:` to cap how many requests are sent at once, and read `pendingKeys()` to show how
+much work is unsent.
+
 A `MutationRequest` never captures credentials; the queue's client authorizes every attempt. Headers and bodies are
 persisted as given, so keep secrets out of them. See [Queueing mutations offline](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/offlinemutations) for
 status events, failure categories, idempotency keys, and persistence.
