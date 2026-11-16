@@ -174,6 +174,7 @@ public actor NetworkClient: APIClient {
 
         var request = endpoint.makeUnauthenticatedURLRequest(url: url)
         request.timeoutInterval = (endpoint.timeout ?? configuration.timeout).timeInterval
+        configuration.applyDefaultHeaders(to: &request)
         let providerAuthorization: AuthorizationType?
         do {
             providerAuthorization = try await applyAuthorization(
