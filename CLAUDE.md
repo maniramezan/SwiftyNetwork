@@ -17,7 +17,7 @@ Repo skills live in [.claude/skills/](.claude/skills); Claude Code discovers the
 | Skill | When to Load |
 |---|---|
 | `add-component` | Adding a new public type, file, or library product |
-| `write-tests` | Writing or reviewing tests; choosing between TestURLProtocol, MockAPIClient, FakeAPIClient |
+| `write-tests` | Writing or reviewing tests; choosing between TestHTTPStub, MockAPIClient, FakeAPIClient |
 | `concurrency-review` | Modifying actors, `Task {}`, `AsyncStream`, cache/mutation ordering |
 | `pre-push-check` | Before every commit/push (includes the no-toolchain fallback) |
 

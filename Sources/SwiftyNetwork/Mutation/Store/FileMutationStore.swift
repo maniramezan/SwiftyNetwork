@@ -32,6 +32,8 @@ public actor FileMutationStore: MutationStore {
 
     private let directory: URL
     private let fileManager = FileManager()
+    private let encoder = JSONEncoder()
+    private var isDirectoryReady = false
 
     /// Pending requests by key, read from disk on first use and kept in step with it.
     private var requests: [MutationKey: MutationRequest]?
@@ -154,17 +156,31 @@ public actor FileMutationStore: MutationStore {
 
     private func write(_ record: Record) {
         do {
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            var directory = directory
-            try? directory.setResourceValues(values)
-
-            let data = try JSONEncoder().encode(record)
-            try data.write(to: fileURL(for: record.key), options: Self.writingOptions)
+            try prepareDirectory()
+            let data = try encoder.encode(record)
+            let url = fileURL(for: record.key)
+            do {
+                try data.write(to: url, options: Self.writingOptions)
+            } catch {
+                // The directory may have been removed since it was prepared: recreate it and retry.
+                isDirectoryReady = false
+                try prepareDirectory()
+                try data.write(to: url, options: Self.writingOptions)
+            }
         } catch {
             Logger.error("Could not persist a mutation; it is kept in memory only", error: error, category: .mutation)
         }
+    }
+
+    /// Creates the directory and excludes it from backups, once.
+    private func prepareDirectory() throws {
+        if isDirectoryReady { return }
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var directory = directory
+        try? directory.setResourceValues(values)
+        isDirectoryReady = true
     }
 
     private static var writingOptions: Data.WritingOptions {
