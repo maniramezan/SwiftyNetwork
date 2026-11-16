@@ -84,6 +84,8 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     private let cache: any Cache<Entity>
     private let inFlight = FetchCoalescer<RepositoryResult<Entity>>()
     let observers = RepositoryObservers<RepositoryResult<Entity>>()
+    /// Entity tags by cache key, or `nil` when requests are never conditional.
+    private let validators: (any Cache<String>)?
 
     /// Creates a generic repository.
     ///
@@ -94,6 +96,42 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     public init(client: some APIClient, cache: some Cache<Entity>) {
         self.client = client
         self.cache = cache
+        self.validators = nil
+    }
+
+    /// Creates a generic repository that revalidates cached entities with conditional requests.
+    ///
+    /// When a response carries an `ETag`, the repository remembers it in `validators`. The next
+    /// network load for that key, while the entity is still cached, sends `If-None-Match`. If
+    /// the server answers `304 Not Modified`, the repository keeps the cached entity, marks it
+    /// as fetched now, and returns it with ``RepositoryResult/Source/network`` without
+    /// downloading or decoding the body again.
+    ///
+    /// ``CachePolicy/reloadIgnoringCache`` never sends the condition. Write and remove entities
+    /// through the repository, which keeps the tags in step; a cache changed directly could be
+    /// kept by a `304` meant for the previous value.
+    ///
+    /// The client must report `304` as ``NetworkError/unexpectedStatus(_:)``, as
+    /// ``NetworkClient`` does.
+    ///
+    /// Example:
+    /// ```swift
+    /// let repository = GenericRepository(
+    ///     client: client,
+    ///     cache: InMemoryCache<Feed>(),
+    ///     validators: InMemoryCache<String>()
+    /// )
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - client: The client that performs network requests.
+    ///   - cache: Where fetched entities are stored.
+    ///   - validators: Where entity tags are stored, by cache key. Give it at least the
+    ///     lifetime and capacity of `cache`; a tag without its entity is ignored.
+    public init(client: some APIClient, cache: some Cache<Entity>, validators: some Cache<String>) {
+        self.client = client
+        self.cache = cache
+        self.validators = validators
     }
 
     /// Fetches an entity using the specified endpoint and caching strategy, reporting where
@@ -133,7 +171,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
             return try await load(endpoint, cacheKey: cacheKey)
 
         case .reloadIgnoringCache:
-            return try await load(endpoint, cacheKey: cacheKey)
+            return try await load(endpoint, cacheKey: cacheKey, isConditional: false)
 
         case .returnCacheIfNotExpired(let maxAge):
             // One entry read, so the value and its timestamp come from the same write.
@@ -170,6 +208,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     ///
     /// - Parameter cacheKey: The key of the entity to remove.
     public func removeCachedValue(forKey cacheKey: CacheKey) async {
+        await validators?.removeValue(forKey: cacheKey)
         await cache.removeValue(forKey: cacheKey)
     }
 
@@ -191,6 +230,8 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
     ///   - cacheKey: The key of the entity to replace.
     public func setCachedValue(_ value: Entity, forKey cacheKey: CacheKey) async {
         let entry = CacheEntry(value)
+        // The tag describes the server's representation, not this value.
+        await validators?.removeValue(forKey: cacheKey)
         await cache.setEntry(entry, forKey: cacheKey)
         await observers.publish(
             RepositoryResult(value: value, source: .cache, timestamp: entry.timestamp),
@@ -230,6 +271,7 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
 
     /// Removes every cached entity, for example on sign-out.
     public func removeAllCachedValues() async {
+        await validators?.removeAll()
         await cache.removeAll()
     }
 
@@ -242,17 +284,72 @@ public struct GenericRepository<Entity: Decodable & Sendable>: Repository {
 
     /// Fetches from the network and caches the result, sharing the request with concurrent
     /// callers for the same key.
-    private func load(_ endpoint: any NetworkEndpoint, cacheKey: CacheKey) async throws -> RepositoryResult<Entity> {
-        let result = try await inFlight.run(for: cacheKey) { [client, cache, observers] in
-            let entity = try await client.request(endpoint, responseType: Entity.self)
-            let entry = CacheEntry(entity)
-            await cache.setEntry(entry, forKey: cacheKey)
-            let result = RepositoryResult(value: entity, source: .network, timestamp: entry.timestamp)
-            await observers.publish(result, for: cacheKey)
-            return result
+    private func load(
+        _ endpoint: any NetworkEndpoint,
+        cacheKey: CacheKey,
+        isConditional: Bool = true
+    ) async throws -> RepositoryResult<Entity> {
+        let result = try await inFlight.run(for: cacheKey) { [client, cache, observers, validators] in
+            try await Self.fetch(
+                endpoint,
+                cacheKey: cacheKey,
+                client: client,
+                cache: cache,
+                validators: isConditional ? validators : nil,
+                allValidators: validators,
+                observers: observers
+            )
         }
         // The shared request is not cancelled with one caller, so report cancellation here.
         try Task.checkCancellation()
+        return result
+    }
+
+    /// - Parameters:
+    ///   - validators: The entity tags to make the request conditional with, or `nil` for a plain request.
+    ///   - allValidators: Where the response's entity tag is recorded.
+    private static func fetch(
+        _ endpoint: any NetworkEndpoint,
+        cacheKey: CacheKey,
+        client: any APIClient,
+        cache: any Cache<Entity>,
+        validators: (any Cache<String>)?,
+        allValidators: (any Cache<String>)?,
+        observers: RepositoryObservers<RepositoryResult<Entity>>
+    ) async throws -> RepositoryResult<Entity> {
+        // A tag is only usable while the entity it describes is still cached.
+        var cached: CacheEntry<Entity>?
+        var request = endpoint
+        if let entityTag = await validators?.value(forKey: cacheKey), let entry = await cache.entry(forKey: cacheKey) {
+            cached = entry
+            request = ConditionalEndpoint(wrapped: endpoint, entityTag: entityTag)
+        }
+
+        let decoded: DecodedResponse<Entity>
+        do {
+            decoded = try await client.response(for: request, responseType: Entity.self)
+        } catch NetworkError.unexpectedStatus(let response) where response.statusCode == 304 {
+            guard let cached else { throw NetworkError.unexpectedStatus(response) }
+            Logger.debug("Cached entity is still current (304)", category: .repository)
+            let entry = CacheEntry(cached.value)
+            await cache.setEntry(entry, forKey: cacheKey)
+            if let entityTag = response.header(ConditionalEndpoint.entityTag) {
+                await allValidators?.setValue(entityTag, forKey: cacheKey)
+            }
+            return RepositoryResult(value: entry.value, source: .network, timestamp: entry.timestamp)
+        }
+
+        let entry = CacheEntry(decoded.value)
+        await cache.setEntry(entry, forKey: cacheKey)
+        if let allValidators {
+            if let entityTag = decoded.response.header(ConditionalEndpoint.entityTag) {
+                await allValidators.setValue(entityTag, forKey: cacheKey)
+            } else {
+                await allValidators.removeValue(forKey: cacheKey)
+            }
+        }
+        let result = RepositoryResult(value: decoded.value, source: .network, timestamp: entry.timestamp)
+        await observers.publish(result, for: cacheKey)
         return result
     }
 

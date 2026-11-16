@@ -369,6 +369,18 @@ let result = try await repository.fetchResult(
 show(result.value, isSaved: result.source == .cache, age: result.age())
 ```
 
+If your API sends `ETag` headers, give the repository a cache for them. Network loads for an entity that is still
+cached then send `If-None-Match`, and a `304 Not Modified` keeps the cached entity without downloading or decoding it
+again. `.reloadIgnoringCache` always fetches in full:
+
+```swift
+let repository = GenericRepository(
+    client: client,
+    cache: InMemoryCache<Feed>(),
+    validators: InMemoryCache<String>()
+)
+```
+
 To show the refreshed value when a background revalidation finishes, observe the key with `updates(forKey:)`.
 After a mutation, write the record the server returned with `setCachedValue(_:forKey:)`; observers receive it too:
 
