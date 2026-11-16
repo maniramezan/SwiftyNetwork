@@ -25,16 +25,6 @@ jobs:
         with:
           swift-version: "6.2"
 
-      - name: Cache SwiftPM
-        uses: actions/cache@v6
-        with:
-          path: |
-            .build
-            .swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-
-
       - name: Swift Format Lint
         run: |
           if command -v swift-format >/dev/null 2>&1; then
@@ -152,6 +142,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Get Xcode version
+        id: xcode
+        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Xcode SwiftPM packages
+        uses: actions/cache@v6
+        with:
+          path: .build/ios-derived-data/SourcePackages
+          key: ${{ runner.os }}-xcode-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
 
       - name: Pick an iOS simulator
         id: simulator
