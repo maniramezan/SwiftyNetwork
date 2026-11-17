@@ -32,9 +32,12 @@ bridges from synchronous platform callbacks. For each `Task {}` check:
 
 ## AsyncStream
 
-- Create with `AsyncStream.makeStream(...)` and register the continuation
-  synchronously on the actor before returning the stream. Deferring
-  registration to a `Task` lets `onTermination` run first and leak it.
+- A stream several consumers share uses SwiftCommons `AsyncBroadcaster`, as
+  `MutationQueue.events()` and `NetworkMonitor` do.
+- A stream built directly (such as `RepositoryObservers`) is created with
+  `AsyncStream.makeStream(...)`, and its continuation is registered synchronously on the
+  actor before the stream is returned. Deferring registration to a `Task` lets
+  `onTermination` run first and leak it.
 - Pick a buffering policy deliberately: state streams (reachability) use
   `.bufferingNewest(1)`; event logs (mutation events) stay unbounded.
 - `onTermination` is `@Sendable` and nonisolated: hop back with
@@ -42,9 +45,9 @@ bridges from synchronous platform callbacks. For each `Task {}` check:
 
 ## Locks and GCD
 
-Not in new code. The existing exceptions are `Logger` (`OSAllocatedUnfairLock`,
-synchronous API), `NWPathMonitor`'s dispatch queue, and TestCommons-backed `TestHTTPStub`
-(`TestValueBox`, synchronous response handlers). Any new `@unchecked Sendable` needs a
+Not in new code. The existing exceptions are `NWPathMonitor`'s dispatch queue and
+TestCommons-backed `TestHTTPStub` (`TestValueBox`, synchronous response handlers). `Logger`
+delegates to SwiftCommons `LibraryLogger`. Any new `@unchecked Sendable` needs a
 written safety invariant next to it.
 
 ## Cancellation

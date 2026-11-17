@@ -11,13 +11,14 @@ commitment for every app that depends on it. Follow these steps in order.
 ## 1. Decide whether it belongs here
 
 - It must be reusable across apps and have no app-specific assumptions.
-- No new package dependencies (`Package.swift` stays dependency-free). Public test doubles
+- No new package dependencies: the library depends only on SwiftCommons (imported `internal`),
+  and SwiftTestCommons is linked into the test target only. Public test doubles
   go in `Sources/SwiftyNetwork/Testing/` and are marked `@_spi(Testing) public`. Never add a
   separate testing product: it would link a second copy of the core into Xcode test bundles.
 - Check REVIEW.md "Evolution constraints" and PLAN.md's checklist first.
 - Prefer composing existing primitives (`Cache`, `SingleFlightCache`,
   `CacheOperationGate`, `LRUStorage`, `RequestTrace`, `HTTPStatusValidator`,
-  `NetworkError.mapURLError`) over re-implementing them.
+  `NetworkError.transportError`) over re-implementing them.
 
 ## 2. Place it
 
@@ -46,7 +47,8 @@ their own files (see `HTTPStatusValidator.swift`, `RequestTrace.swift`, `LRUStor
 - Additive changes only. Adding a case to a public enum or a requirement to a
   public protocol is **source-breaking** -- give new protocol requirements a
   default implementation in an extension (see `refreshAuthorization(rejecting:)`).
-- Map transport errors with `NetworkError.mapURLError`; map statuses with
+- Map anything `URLSession` throws with `NetworkError.transportError` (it handles
+  cancellation and passes `NetworkError` through); map statuses with
   `HTTPStatusValidator`; classify retryability with `NetworkError.isTransient`.
 - Log through `Logger` with the right `Category`; never log tokens, bodies, or
   unredacted URLs (use `Logger.debugURL`).

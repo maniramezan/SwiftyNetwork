@@ -228,7 +228,7 @@ let endpoint = makeEndpointWithTestId("test-id")
 
 Some cloud agent sandboxes cannot download a Swift toolchain. If `swift` is missing, say so, keep
 changes conservative (no API you can't verify from existing code), and rely on the PR's GitHub
-Actions run (`format` → `build` → `test`, plus `Docs`) as the compiler. Never claim tests passed
+Actions run (`format` → `test`, plus `Docs`) as the compiler. Never claim tests passed
 when they were not run.
 
 ## Git Workflow
