@@ -34,6 +34,6 @@ Cloud sandboxes may block toolchain downloads. Then:
 1. Still run `git diff --check` and the 120-column check above.
 2. Re-read every changed Swift file for: Sendable violations, missing `await`/`try`,
    mutating calls inside `#expect`, unresolved names from moved types.
-3. Push to the PR branch and treat the GitHub Actions `Build` (format → build → test)
+3. Push to the PR branch and treat the GitHub Actions `Build` (format → release build + test)
    and `Docs` workflows as the compiler. Read failing job logs and fix before
    reporting success. Say explicitly that local verification was not possible.

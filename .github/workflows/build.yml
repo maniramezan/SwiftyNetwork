@@ -11,8 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Linting needs no Apple SDK, so it runs on Linux: hosted macOS runners are capacity-constrained
+  # and a job that is never acquired fails the whole run. Every other job needs CryptoKit, Network,
+  # or Security, so it stays on macOS.
   format:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    container: swift:6.2
     permissions:
       contents: read
 
@@ -20,31 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v3
-        with:
-          swift-version: "6.2"
-
       - name: Swift Format Lint
-        run: |
-          if command -v swift-format >/dev/null 2>&1; then
-            SWIFT_FORMAT="$(command -v swift-format)"
-          else
-            SWIFT_FORMAT="$(xcrun --find swift-format)"
-          fi
+        run: swift format lint --configuration .swift-format --strict --recursive Sources Tests
 
-          "$SWIFT_FORMAT" lint \
-            --configuration .swift-format \
-            --strict \
-            --recursive \
-            Sources \
-            Tests
-
-  build:
+  # Builds in release and runs the tests in one job per toolchain, so each toolchain waits for a
+  # macOS runner once instead of twice.
+  test:
     needs: format
     runs-on: macos-latest
     permissions:
       contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -70,38 +60,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-spm-${{ matrix.swift-version }}-
 
-      - name: Build package
+      - name: Build package (release)
         run: swift build -c release
-
-  test:
-    needs: build
-    runs-on: macos-latest
-    permissions:
-      contents: read
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        swift-version: ["6.2", "6.4"]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v3
-        with:
-          swift-version: ${{ matrix.swift-version }}
-
-      - name: Cache SwiftPM
-        uses: actions/cache@v6
-        with:
-          path: |
-            .build
-            .swiftpm
-          key: ${{ runner.os }}-spm-${{ matrix.swift-version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-${{ matrix.swift-version }}-
 
       - name: Run tests with code coverage
         run: swift test --enable-code-coverage -v
