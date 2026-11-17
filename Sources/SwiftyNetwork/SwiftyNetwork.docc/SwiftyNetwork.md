@@ -114,6 +114,8 @@ Types meant to grow, such as ``HTTPMethod`` and ``RedirectPolicy``, are structs.
 
 ### Guides
 
+- <doc:BuildingRequests>
+- <doc:KeepingRepositoryDataCurrent>
 - <doc:HandlingErrorsAndRetries>
 - <doc:OfflineMutations>
 - <doc:SecuringConnections>
