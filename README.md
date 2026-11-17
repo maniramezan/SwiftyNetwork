@@ -31,7 +31,7 @@ Add SwiftyNetwork to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/maniramezan/SwiftyNetwork.git", from: "2.0.0")
+    .package(url: "https://github.com/maniramezan/SwiftyNetwork.git", from: "2.1.0")
 ]
 ```
 
@@ -77,6 +77,8 @@ symbol reference, tutorials, and focused guides:
 - [Getting started](https://maniramezan.github.io/SwiftyNetwork/tutorials/swiftynetwork/gettingstarted)
 - [Authentication](https://maniramezan.github.io/SwiftyNetwork/tutorials/swiftynetwork/authentication)
 - [Caching and repositories](https://maniramezan.github.io/SwiftyNetwork/tutorials/swiftynetwork/caching)
+- [Building requests](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/buildingrequests)
+- [Keeping repository data current](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/keepingrepositorydatacurrent)
 - [Errors and retries](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/handlingerrorsandretries)
 - [Offline mutations](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/offlinemutations)
 - [Securing connections](https://maniramezan.github.io/SwiftyNetwork/documentation/swiftynetwork/securingconnections)
