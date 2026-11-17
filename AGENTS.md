@@ -184,7 +184,7 @@ swift package generate-documentation \
 - Prefer test isolation over serialization -- each test should create its own instances
 - Cover cache expiration, auth refresh, retry, and error mapping paths
 
-### Test Utilities (from `Tests/Helpers/TestHelpers.swift`)
+### Test Utilities (from `Tests/SwiftyNetworkTests/Helpers/`)
 
 ```swift
 // Mock responses
