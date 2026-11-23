@@ -102,6 +102,10 @@ public enum NetworkError: Error, LocalizedError, Sendable {
     /// The configured ``AuthorizationProvider`` could not supply authorization, so the
     /// request was not sent.
     ///
+    /// Classified as ``NetworkErrorClassification/authorizationUnavailable`` (sign in again), unless
+    /// `underlying` is a lost connection, unreachable host or timeout, directly or through its
+    /// `NSUnderlyingErrorKey` chain; then it is classified as that transient failure.
+    ///
     /// - Parameter underlying: The error thrown by
     ///   ``AuthorizationProvider/currentAuthorization()``.
     case authorizationUnavailable(underlying: any Error & Sendable)
@@ -428,6 +432,9 @@ public enum NetworkErrorCategory: Sendable, Equatable {
     ///
     /// ``NetworkError/authorizationUnavailable(underlying:)`` counts as unauthorized because both mean
     /// the same to the user: sign in again. Switch on ``NetworkError/classification`` to tell them apart.
+    /// When the provider failed only because the device lost connectivity (its error, or an error in
+    /// its `NSUnderlyingErrorKey` chain, is a transient `URLError` or ``NetworkError``), the error is
+    /// classified by that failure instead, so it reads as offline and is retried.
     case unauthorized
 
     /// The server answered `429 Too Many Requests` (``NetworkError/tooManyRequests(_:)``).
@@ -520,7 +527,13 @@ extension NetworkError {
             return .decodingFailed
         case .encodingFailed:
             return .encodingFailed
-        case .authorizationUnavailable:
+        case .authorizationUnavailable(let underlying):
+            // A provider that could not mint a token because the device lost connectivity is an
+            // offline problem, not a signed-out user: classify it by that transport failure so it
+            // is transient and the user is not asked to sign in again.
+            if let transport = Self.transportFailure(causing: underlying) {
+                return transport.classification
+            }
             return .authorizationUnavailable
         case .authorizationRefreshFailed:
             return .authorizationRefreshFailed
@@ -533,6 +546,32 @@ extension NetworkError {
             return .underlying
         }
     }
+
+    /// The transient transport failure behind `error`, if there is one.
+    ///
+    /// Looks at `error` itself and then its `NSUnderlyingErrorKey` chain, which is where SDKs such
+    /// as Firebase Auth keep the `URLError` behind their own network error. Only failures that
+    /// ``mapURLError(_:)`` classifies as transient count (lost connectivity, an unreachable host, a
+    /// timeout); any other cause returns `nil`.
+    static func transportFailure(causing error: any Error) -> NetworkError? {
+        var current: (any Error)? = error
+        var depth = 0
+        while let candidate = current, depth < maxUnderlyingErrorDepth {
+            if let networkError = candidate as? NetworkError {
+                return networkError.isTransient ? networkError : nil
+            }
+            if let urlError = candidate as? URLError {
+                let mapped = mapURLError(urlError)
+                return mapped.isTransient ? mapped : nil
+            }
+            current = (candidate as NSError).userInfo[NSUnderlyingErrorKey] as? any Error
+            depth += 1
+        }
+        return nil
+    }
+
+    /// Bounds the `NSUnderlyingErrorKey` walk so a cyclic chain cannot loop forever.
+    private static let maxUnderlyingErrorDepth = 8
 
     /// This error's coarse ``NetworkErrorCategory``, for choosing what to show the user.
     ///
