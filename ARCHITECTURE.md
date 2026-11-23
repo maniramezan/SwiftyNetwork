@@ -40,7 +40,9 @@ HTTP(S) scheme and host and assembles paths/query items. Standalone
 The standalone builder applies endpoint authorization; the client additionally
 falls back to its provider when endpoint authorization is `.none` and the endpoint's
 `usesAuthorizationProvider` is `true` (the default). If the provider
-throws, the request fails with `authorizationUnavailable` and is never sent.
+throws, the request fails with `authorizationUnavailable` and is never sent. That error is classified as
+`unauthorized` unless the provider's error (or its `NSUnderlyingErrorKey` chain) is a transient transport failure,
+in which case it takes that failure's classification.
 
 Each client call captures its configuration before suspension. `defaultHeaders` fill in headers the request
 does not set, before authorization is applied. It executes

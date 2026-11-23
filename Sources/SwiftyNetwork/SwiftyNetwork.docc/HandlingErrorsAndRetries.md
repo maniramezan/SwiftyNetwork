@@ -79,7 +79,9 @@ do {
 
 `error.category` collapses the cases into what a UI treats differently, the same grouping as
 `MutationFailureReason.category`. `authorizationUnavailable` counts as `unauthorized`; use `error.classification`
-to tell it apart from a `401`.
+to tell it apart from a `401`. The exception is a provider that failed only because the device lost connectivity:
+when its error, or an error in its `NSUnderlyingErrorKey` chain, is a lost connection, unreachable host or timeout,
+the error is classified as that failure, so the UI shows it as offline instead of asking the user to sign in again.
 
 ```swift
 switch error.category {
